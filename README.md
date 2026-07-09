@@ -3,14 +3,13 @@
 باكند FastAPI جاهز للعمل محلياً وعلى RunPod بقالب:
 `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` (PyTorch 2.8.0 + CUDA 12.8.1 + Ubuntu 24.04)
 
-أربع ميزات، كل وحدة براوترها ونصوصها الخاصة تحت `app/features/`:
+ثلاث ميزات، كل وحدة براوترها ونصوصها الخاصة تحت `app/features/`:
 
 | الميزة | الفولدر | الوصف |
 |---|---|---|
-| مساعد عام | `app/features/assistant/` | محادثة عامة باللهجة العراقية |
 | وكيل مبيعات | `app/features/sales/` | يقنع العميل بالشراء، يقترح منتجاً إضافياً، ويثبّت الطلب تلقائياً كـ JSON عند الجهوزية |
 | دعم عملاء | `app/features/support/` | تتبع حالة الطلب برقم الطلب أو الهاتف (+ بحث ويب عام) |
-| إنشاء طلب متعدد الوسائط | `app/features/order_intake/` | نص أو صوت → JSON طلب مباشرة (الصورة قيد التفعيل) |
+| إنشاء طلب متعدد الوسائط | `app/features/order_intake/` | نص أو صوت أو صورة → JSON طلب مباشرة |
 
 الموديل، RAG، الجلسات، كتالوج المنتجات، وصيغة الطلب مشتركة بجذر `app/` (تفصيل الملفات أدناه).
 
@@ -24,7 +23,7 @@ uvicorn app.main:app --reload --port 8000
 ثم افتح: http://localhost:8000/docs
 
 > ملاحظة: torch/vllm غير مثبتين بالبيئة المحلية (حجمهم كبير وموجودين مسبقاً بصورة RunPod).
-> `/gpu` سترجع `cuda: false`، وكل نقاط `/chat*` و`/sales/*` و`/support/*` ترجع "[وضع محلي بدون GPU]" بدل توليد حقيقي — يكفي لاختبار الـ API نفسها.
+> `/gpu` سترجع `cuda: false`، وكل نقاط `/sales/*` و`/support/*` ترجع "[وضع محلي بدون GPU]" بدل توليد حقيقي — يكفي لاختبار الـ API نفسها.
 
 ## الرفع على RunPod — طريقتان
 
@@ -56,19 +55,19 @@ docker push <username>/back-end-iraqi:latest
 
 ## نقاط الـ API
 
+> توثيق كامل لكل نقطة (أمثلة طلبات/استجابات، شكل بث SSE، أخطاء) في [API.md](API.md).
+
 | النقطة | الوصف |
 |---|---|
 | `GET /health` | فحص الصحة |
 | `GET /gpu` | معلومات GPU/CUDA وحالة محرك vLLM |
-| `POST /chat` | مساعد عام — رد كامل |
-| `POST /chat/stream` | مساعد عام — بث SSE |
 | `POST /sales/chat` | وكيل مبيعات — رد كامل، يرجع `order` مملوءاً تلقائياً عند تثبيت الطلب |
 | `POST /sales/chat/stream` | وكيل مبيعات — بث SSE، حدث `done` النهائي يحمل `order` |
 | `POST /support/chat` | دعم عملاء — تتبع طلب برقم الطلب/الهاتف، أو سؤال عام (أداة بحث ويب) |
 | `POST /orders/create` | إنشاء طلب من `text` أو `audio` (multipart) — يرجع JSON طلب مباشرة بدون محادثة |
 | `GET /docs` | واجهة Swagger التفاعلية |
 
-جسم الطلب لـ `/chat`, `/chat/stream`, `/sales/chat`, `/sales/chat/stream`, `/support/chat`:
+جسم الطلب لـ `/sales/chat`, `/sales/chat/stream`, `/support/chat`:
 
 ```json
 {"message": "شنو معنى شلونك؟", "session_id": "اختياري لاستمرار نفس المحادثة"}
@@ -95,13 +94,20 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 | `app/rag/` | بحث BM25 محلي لمصطلحات اللهجة العراقية (منسوخ من `iraqi_words_finetuning/rag`) |
 | `app/products.py` | كتالوج المنتجات: `ProductRepository` (واجهة) + `StaticProductRepository` (JSON محلي حالياً — استبدلها بقاعدتك) |
 | `app/order_schema.py` | `OrderExtraction` (خام من الموديل) / `OrderConfirmation` (بعد حساب الأسعار من الكتالوج) / `parse_order_extraction()` |
+| `app/order_gateway.py` | بوابة نظام إدارة الطلبات الخارجي: **إخراج** (`OrderStatusProvider` — تتبع حالة، تستخدمه `support`) و**إدخال** (`OrderSubmitter` — تثبيت طلب جديد، تستخدمه `sales`/`order_intake` بعد حساب الأسعار) |
+| `app/hf_utils.py` | `resolve_lora_path()` — تنزيل محوّل LoRA من Hugging Face Hub إن كان معرّف مستودع؛ مشتركة بين `engine.py` (vLLM) و`order_intake/vision.py` (transformers خام) |
 | `app/tools/web_search.py` | أداة بحث ويب عامة عبر DuckDuckGo (`ddgs`) — بدون أي API key |
 
 ## نقاط توصيل مؤجَّلة (Mock الآن، استبدلها لاحقاً)
 
-- **كتالوج المنتجات** (`app/products.py`): حالياً `StaticProductRepository` فوق `app/data/products.json` (بيانات تجريبية). لربط قاعدة بياناتك الحقيقية، أنشئ صنفاً يطبّق `ProductRepository` (نفس التوقيع: `search()`/`get_by_id()`) وبدّل السطر الأخير `product_repository = ...` — بدون تغيير أي راوتر.
-- **تتبع الطلبات** (`app/features/support/client.py`): حالياً `MockOrderStatusProvider` ببيانات تجريبية ثابتة. نفس الفكرة: طبّق `OrderStatusProvider` واستبدل `order_status_provider`.
-- **وصف الصورة** (`app/features/order_intake/vision.py`): غير مفعّل بعد عمداً (طلب `POST /orders/create` بصورة يرجع `501`) — القرار (Gemma4 عبر transformers خام، أو OCR أخف مثل Tesseract) يحتاج معرفة حجم VRAM المتوفر فعلياً على RunPod أولاً.
+كل مصدر بيانات خارجي مفصول لواجهة **إخراج** (نستعلم منها) وواجهة **إدخال** (نرسل لها) — بدون مصادقة حسب توضيحك:
+
+- **كتالوج المنتجات** (`app/products.py`) — إخراج فقط حالياً: `StaticProductRepository` فوق `app/data/products.json` (بيانات تجريبية). لربط قاعدة بياناتك الحقيقية، أنشئ صنفاً يطبّق `ProductRepository` (`search()`/`get_by_id()`) وبدّل السطر الأخير `product_repository = ...` — بدون تغيير أي راوتر.
+- **نظام إدارة الطلبات** (`app/order_gateway.py`):
+  - **إخراج** — `OrderStatusProvider.get_by_order_id()`/`.search_by_phone()`: حالياً `MockOrderStatusProvider` ببيانات تجريبية ثابتة. تستخدمه ميزة `support` لتتبع الطلبات.
+  - **إدخال** — `OrderSubmitter.submit()`: حالياً `MockOrderSubmitter` يحتفظ بالطلبات بالذاكرة فقط. تستدعيه `sales/service.py` تلقائياً بعد كل طلب مؤكَّد لإرساله للنظام الخارجي.
+  - لربط API حقيقي: أعطني رابط كل عملية (استعلام بمعرّف الطلب، بحث برقم الهاتف، تثبيت طلب جديد) وشكل الاستجابة، وأطبّق صنفين (`HttpOrderStatusProvider`, `HttpOrderSubmitter`) وأبدّل السطرين الأخيرين — بدون تغيير أي راوتر.
+- **وصف الصورة** (`app/features/order_intake/vision.py`): مفعّلة عبر **نفس محرك vLLM** المستخدَم بباقي الميزات (Gemma 4 يدعم صور أصلاً عبر `multi_modal_data` — انظر `app/engine.py: render_multimodal_prompt`/`generate_full`) — **ماكو نسخة ثانية من الموديل ولا استهلاك VRAM إضافي**. محلياً بدون GPU ترجع `501` واضحة.
 
 ## محرك الاستدلال — vLLM
 

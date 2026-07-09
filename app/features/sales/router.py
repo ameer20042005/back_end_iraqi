@@ -77,7 +77,7 @@ async def _maybe_build_order(session_key: str, rag_words: List[dict]) -> Optiona
     else:
         last_user = next((m["content"] for m in reversed(history) if m["role"] == "user"), "")
         extraction = _fallback_extraction(last_user)
-    return resolve_order(extraction)
+    return await resolve_order(extraction)
 
 
 @router.post("/chat", response_model=SalesChatResponse)

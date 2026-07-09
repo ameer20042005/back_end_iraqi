@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """إنشاء طلب من مدخل وحيد: نص، أو صوت، أو صورة (multipart) → OrderConfirmation JSON.
 
-النص والصوت يعملان بالكامل. الصورة ترجع 501 واضحة حتى تُفعَّل app/features/order_intake/vision.py.
+النص والصوت والصورة تعمل بالكامل. الصورة تحتاج GPU مع transformers/torch/Pillow
+مثبَّتة (requirements-gpu.txt) — محلياً بدون GPU ترجع 501 واضحة (انظر
+app/features/order_intake/vision.py).
 """
 
 from typing import Optional
@@ -58,4 +60,4 @@ async def create_order(
     else:
         extraction = OrderExtraction(items=[{"product_name": raw_text, "quantity": 1}])
 
-    return resolve_order(extraction)
+    return await resolve_order(extraction)

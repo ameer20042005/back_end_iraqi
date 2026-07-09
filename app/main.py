@@ -9,7 +9,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.engine import llm_engine
-from app.features.assistant.router import router as assistant_router
 from app.features.order_intake.router import router as order_intake_router
 from app.features.sales.router import router as sales_router
 from app.features.support.router import router as support_router
@@ -47,7 +46,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(assistant_router)
 app.include_router(sales_router)
 app.include_router(support_router)
 app.include_router(order_intake_router)

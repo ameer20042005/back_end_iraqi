@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """صياغة نتائج RAG (لهجة/منتجات) كمقاطع نصية تُضاف لأي system prompt.
 
-مشتركة بين الميزات (assistant، sales، support، order_intake) بدل تكرارها بكل
-ميزة على حدة.
+مشتركة بين الميزات (sales، support، order_intake) بدل تكرارها بكل ميزة على حدة.
 """
 
 from typing import List

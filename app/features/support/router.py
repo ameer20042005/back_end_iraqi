@@ -11,8 +11,8 @@ from pydantic import BaseModel
 from app import sessions
 from app.config import settings
 from app.engine import llm_engine
-from app.features.support.client import order_status_provider
 from app.features.support.prompts import build_support_prompt
+from app.order_gateway import order_status_provider
 from app.rag import search as search_words
 from app.tool_loop import run_with_tools
 from app.tools.web_search import web_search_tool

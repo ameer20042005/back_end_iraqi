@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+from app.order_gateway import order_submitter
 from app.order_schema import OrderConfirmation, OrderExtraction, ResolvedOrderItem
 from app.products import ProductRepository, product_repository
 
@@ -15,7 +16,7 @@ def _resolve_product(repo: ProductRepository, name: str) -> Optional[dict]:
     return matches[0] if matches else None
 
 
-def resolve_order(
+async def resolve_order(
     extraction: OrderExtraction,
     repo: ProductRepository = product_repository,
 ) -> OrderConfirmation:
@@ -62,7 +63,7 @@ def resolve_order(
     if not all_matched:
         note += " (تنبيه: بعض المنتجات المطلوبة ما انطبقت على الكتالوج الحالي وتحتاج مراجعة يدوية.)"
 
-    return OrderConfirmation(
+    confirmation = OrderConfirmation(
         order_id=str(uuid.uuid4()),
         created_at=datetime.now(timezone.utc).isoformat(),
         customer_name=extraction.customer_name,
@@ -76,3 +77,13 @@ def resolve_order(
         notes=extraction.notes,
         confirmation_message=note,
     )
+
+    # يرسل الطلب المؤكَّد لنظام إدارة الطلبات الخارجي (Mock حالياً — انظر
+    # app/order_gateway.py). لا نفشل تسليم الرد للعميل لو تعذّر الإرسال؛ الطلب
+    # يبقى موجوداً بالرد على أي حال ويمكن إعادة محاولة إرساله لاحقاً.
+    try:
+        await order_submitter.submit(confirmation)
+    except Exception:
+        pass
+
+    return confirmation

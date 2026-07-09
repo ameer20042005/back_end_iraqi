@@ -10,3 +10,7 @@ python-dotenv>=1.0
 
 # أداة البحث بالإنترنت (app/tools/web_search.py) — DuckDuckGo بدون API key
 ddgs>=9.0
+
+# تنزيل محوّل LoRA من Hugging Face Hub (app/hf_utils.py) — مكتبة خفيفة بدون
+# GPU/torch، تشتغل محلياً بدون مشاكل (خلاف vllm/transformers أدناه بـ requirements-gpu.txt)
+huggingface_hub>=0.24
