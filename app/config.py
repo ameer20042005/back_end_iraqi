@@ -7,10 +7,15 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # الموديل
-    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct"
-    lora_path: Optional[str] = None  # مسار محوّل LoRA، مثال: fine_tuning/output
-    lora_rank: int = 16
+    # الموديل — يُنزَّل تلقائياً من Hugging Face Hub عند أول إقلاع (بدون أي أمر يدوي)
+    model_name: str = "google/gemma-4-E4B-it"
+    # مسار محوّل LoRA: مسار محلي، أو معرّف مستودع HF (مثال أدناه) فيُنزَّل تلقائياً أيضاً
+    lora_path: Optional[str] = "ameer4wisam/gemma-iraqi-finetune"
+    lora_rank: int = 16  # تأكد من مطابقتها لقيمة "r" الفعلية بـ adapter_config.json على المستودع
+
+    # توكن Hugging Face (HF_TOKEN) — مطلوب لأن Gemma موديل بوابة (gated) وربما
+    # مستودع المحوّل خاص. يُقرأ تلقائياً من متغير البيئة HF_TOKEN.
+    hf_token: Optional[str] = None
 
     # دقّة الحساب — "auto" يترك vLLM يقرر حسب العتاد، أو "float16"/"bfloat16"
     dtype: str = "auto"

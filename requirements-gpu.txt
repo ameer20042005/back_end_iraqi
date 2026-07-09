@@ -3,5 +3,8 @@
 # تأكد أن إصدار vllm متوافق مع torch 2.8.0 / CUDA 12.8.1 قبل التثبيت على RunPod.
 vllm>=0.6.0
 
+# لتنزيل محوّل LoRA تلقائياً من Hugging Face Hub عند الإقلاع (app/engine.py)
+huggingface_hub>=0.24
+
 # اختياري: تحميل الموديل بـ INT8 (quantization="bitsandbytes" في app/config.py)
 bitsandbytes>=0.43
