@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""إعدادات المحرك (vLLM) والـ RAG — كلها قابلة للضبط عبر متغيرات بيئة."""
+"""إعدادات مشتركة (المحرك/RAG/الأدوات) — كلها قابلة للضبط عبر متغيرات بيئة.
+
+تحذير أمني: لا تكتب أي قيمة سرّية (توكن/مفتاح) كافتراضي هنا مباشرة — هذا
+الملف متتبَّع بـ git. كل الأسرار تُمرَّر فقط عبر متغيرات بيئة (`.env` محلياً
+المستثنى بـ .gitignore، أو Environment Variables بإعدادات RunPod Pod).
+"""
 
 from typing import Optional
 
@@ -13,8 +18,8 @@ class Settings(BaseSettings):
     lora_path: Optional[str] = "ameer4wisam/gemma-iraqi-finetune"
     lora_rank: int = 16  # تأكد من مطابقتها لقيمة "r" الفعلية بـ adapter_config.json على المستودع
 
-    # توكن Hugging Face (HF_TOKEN) — مطلوب لأن Gemma موديل بوابة (gated) وربما
-    # مستودع المحوّل خاص. يُقرأ تلقائياً من متغير البيئة HF_TOKEN.
+    # توكن Hugging Face — مطلوب لأن Gemma موديل بوابة (gated) وربما مستودع
+    # المحوّل خاص. لا قيمة افتراضية أبداً؛ يُقرأ فقط من متغير البيئة HF_TOKEN.
     hf_token: Optional[str] = None
 
     # دقّة الحساب — "auto" يترك vLLM يقرر حسب العتاد، أو "float16"/"bfloat16"
@@ -33,13 +38,16 @@ class Settings(BaseSettings):
     # توليد
     max_new_tokens: int = 512
     temperature: float = 0.7
-    system_prompt: str = (
-        "أنت مساعد ذكي يتحدث ويفهم اللهجة العراقية. "
-        "أجب بإيجاز ووضوح، واستخدم المعلومات المرجعية إن كانت مفيدة."
-    )
 
-    # RAG
+    # RAG (لهجة عراقية + منتجات)
     rag_top_k: int = 5
+
+    # ملاحظة: أداة البحث بالإنترنت (app/tools/web_search.py) تستخدم DuckDuckGo
+    # عبر مكتبة ddgs — بدون أي مفتاح/إعداد مطلوب هنا.
+
+    # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
+    # مفرَّغ عليه اللهجة العربية (نموذج transformers عادي، وليس CTranslate2)
+    whisper_model: str = "ayoubkirouane/whisper-small-ar"
 
     class Config:
         env_file = ".env"

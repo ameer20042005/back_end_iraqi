@@ -1,20 +1,18 @@
-"""FastAPI backend — يعمل محلياً وعلى RunPod (قالب PyTorch) مع vLLM + RAG."""
+"""FastAPI backend — يعمل محلياً وعلى RunPod (قالب PyTorch) مع vLLM + RAG.
 
-import json
-import uuid
+كل ميزة براوترها الخاص تحت app/features/*/router.py — هذا الملف فقط ينشئ
+التطبيق، يشغّل دورة حياة المحرك (lifespan)، ويجمع كل الراوترات."""
+
 from contextlib import asynccontextmanager
-from typing import List, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
-from app import sessions
-from app.config import settings
-from app.engine import VLLM_AVAILABLE, llm_engine
-from app.prompts import build_prompt
-from app.rag import search
+from app.engine import llm_engine
+from app.features.assistant.router import router as assistant_router
+from app.features.order_intake.router import router as order_intake_router
+from app.features.sales.router import router as sales_router
+from app.features.support.router import router as support_router
 
 try:
     import torch
@@ -29,8 +27,8 @@ except ImportError:
 async def lifespan(app: FastAPI):
     # يشغّل vLLM AsyncLLMEngine مرة واحدة عند الإقلاع (Continuous Batching +
     # PagedAttention + Prefix Caching مفعّلة عبر app/config.py).
-    # محلياً بدون GPU/vLLM يبقى llm_engine.ready == False والباك اند يرجع
-    # لوضع RAG-only بدل توليد النموذج.
+    # محلياً بدون GPU/vLLM يبقى llm_engine.ready == False وكل الميزات ترجع
+    # لوضع fallback (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod.
     await llm_engine.start()
     yield
 
@@ -49,29 +47,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-class ChatRequest(BaseModel):
-    message: str
-    session_id: Optional[str] = None
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
-
-
-class ChatResponse(BaseModel):
-    session_id: str
-    answer: str
-    sources: List[dict]
-    engine: str
-
-
-def _fallback_answer(message: str, rag_results: List[dict]) -> str:
-    """يُستخدم فقط إذا لم يكن vLLM متوفراً (محلياً بدون GPU)."""
-    if rag_results:
-        top = rag_results[0]
-        if top.get("word"):
-            return f"[وضع محلي بدون GPU] أقرب مطابقة RAG: {top['word']} — {top['meaning']}"
-        return f"[وضع محلي بدون GPU] أقرب مطابقة RAG: {top['text']}"
-    return f"[وضع محلي بدون GPU] echo: {message}"
+app.include_router(assistant_router)
+app.include_router(sales_router)
+app.include_router(support_router)
+app.include_router(order_intake_router)
 
 
 @app.get("/")
@@ -102,61 +81,3 @@ def gpu_info():
         info["vram_total_gb"] = round(total / 1024**3, 2)
         info["vram_free_gb"] = round(free / 1024**3, 2)
     return info
-
-
-@app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
-    """رد كامل (بدون بث) — يدمج نتائج RAG في البرومبت قبل التوليد."""
-    session_id = req.session_id or str(uuid.uuid4())
-    history = sessions.get(session_id)
-    rag_results = search(req.message, top_k=settings.rag_top_k)
-    prompt = build_prompt(history, req.message, rag_results)
-
-    if llm_engine.ready:
-        answer = await llm_engine.generate_full(
-            prompt, max_tokens=req.max_tokens, temperature=req.temperature
-        )
-        engine_name = "vllm"
-    else:
-        answer = _fallback_answer(req.message, rag_results)
-        engine_name = "fallback"
-
-    sessions.append(session_id, "user", req.message)
-    sessions.append(session_id, "assistant", answer)
-
-    return ChatResponse(
-        session_id=session_id, answer=answer, sources=rag_results, engine=engine_name
-    )
-
-
-@app.post("/chat/stream")
-async def chat_stream(req: ChatRequest):
-    """بث Server-Sent Events — يظهر أول جزء من الرد بسرعة بدل انتظار النص كاملاً."""
-    session_id = req.session_id or str(uuid.uuid4())
-    history = sessions.get(session_id)
-    rag_results = search(req.message, top_k=settings.rag_top_k)
-    prompt = build_prompt(history, req.message, rag_results)
-
-    async def event_source():
-        collected = []
-        if llm_engine.ready:
-            async for delta in llm_engine.generate_stream(
-                prompt, max_tokens=req.max_tokens, temperature=req.temperature
-            ):
-                collected.append(delta)
-                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
-        else:
-            answer = _fallback_answer(req.message, rag_results)
-            collected.append(answer)
-            yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
-
-        answer = "".join(collected)
-        sessions.append(session_id, "user", req.message)
-        sessions.append(session_id, "assistant", answer)
-
-        yield "data: " + json.dumps(
-            {"done": True, "session_id": session_id, "sources": rag_results},
-            ensure_ascii=False,
-        ) + "\n\n"
-
-    return StreamingResponse(event_source(), media_type="text/event-stream")

@@ -7,3 +7,6 @@ pydantic>=2.7
 pydantic-settings>=2.3
 httpx>=0.27
 python-dotenv>=1.0
+
+# أداة البحث بالإنترنت (app/tools/web_search.py) — DuckDuckGo بدون API key
+ddgs>=9.0

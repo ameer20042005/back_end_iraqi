@@ -8,6 +8,9 @@ set -e
 
 cd "$(dirname "$0")"
 
+echo "==> تثبيت ffmpeg (لازم لميزة تحويل الصوت لنص)..."
+apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg
+
 echo "==> تثبيت المتطلبات..."
 pip install --no-cache-dir -r requirements.txt -r requirements-gpu.txt
 

@@ -8,3 +8,9 @@ huggingface_hub>=0.24
 
 # اختياري: تحميل الموديل بـ INT8 (quantization="bitsandbytes" في app/config.py)
 bitsandbytes>=0.43
+
+# تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موجودة أصلاً
+# كتبعية لـ vllm عادةً، مثبَّتة هنا صراحةً للوضوح. تحتاج أيضاً ffmpeg (ثبَّتناه
+# بالـ Dockerfile عبر apt-get — لو تشغّل عبر start.sh مباشرة على Pod تأكد إنه
+# مثبَّت: `apt-get install -y ffmpeg`).
+transformers>=4.44

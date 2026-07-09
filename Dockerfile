@@ -3,6 +3,10 @@ FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 
 WORKDIR /workspace/app
 
+# ffmpeg لازم لتحويل الصوت لنص (app/features/order_intake/transcribe.py)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt requirements-gpu.txt .
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-gpu.txt
 
