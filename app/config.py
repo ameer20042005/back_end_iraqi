@@ -35,10 +35,12 @@ class Settings(BaseSettings):
     # Prefix Caching للبرومبت الثابت (system prompt + سياق RAG المتكرر)
     enable_prefix_caching: bool = True
 
-    # توليد — القيم مستخلصة من تجارب llm_iraqi_best.ipynb (بدون repetition_penalty
-    # لأنه كان يخرب مفردات اللهجة العراقية بالتجربة الفعلية)
-    max_new_tokens: int = 512
-    temperature: float = 0.7
+    # توليد — القيم مطابقة لخلية "كود الاستدلال الصحيح" (GEN_BALANCED) في
+    # llm_iraqi_best.ipynb: أجوبة بيانات التدريب قصيرة (10-30 توكن غالباً)،
+    # وtemperature أعلى من 0.3 أنتج انحرافاً ملحوظاً بالتجربة الفعلية. بدون
+    # repetition_penalty نهائياً لأنه كان يخرب مفردات اللهجة العراقية.
+    max_new_tokens: int = 64
+    temperature: float = 0.3
     top_p: float = 0.8
     top_k: int = 20
 

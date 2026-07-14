@@ -85,15 +85,20 @@ class LLMEngine:
         except Exception:
             self.tokenizer = None
 
-        # نمرر <end_of_turn> صراحة كـ stop token id إضافي بدل الاعتماد فقط على
-        # eos_token_id الافتراضي — بتجارب llm_iraqi_best.ipynb تبيّن إن هذا
-        # التوكن هو علامة نهاية الدور الحقيقية بقالب Gemma وقد لا يطابق eos
-        # الافتراضي بكل الحالات.
+        # نمرر <end_of_turn> و eos_token_id الأساسي معاً كـ stop token ids —
+        # بتجارب llm_iraqi_best.ipynb (خلية "كود الاستدلال الصحيح") الموديل
+        # يتوقف أحياناً بـ eos الأساسي بدل <end_of_turn>، والاعتماد على واحد
+        # منهم فقط يخلي التوليد يكمل بعد نهاية الرد الفعلي وينتج نصاً مشوّشاً
+        # (stop_ids = [106, 1] بالضبط بتوثيق النموذج على Hugging Face).
         if self.tokenizer is not None:
             try:
                 eot_id = self.tokenizer.convert_tokens_to_ids("<end_of_turn>")
+                stop_ids = set()
                 if isinstance(eot_id, int) and eot_id >= 0:
-                    self.extra_stop_token_ids = [eot_id]
+                    stop_ids.add(eot_id)
+                if self.tokenizer.eos_token_id is not None:
+                    stop_ids.add(self.tokenizer.eos_token_id)
+                self.extra_stop_token_ids = list(stop_ids)
             except Exception:
                 self.extra_stop_token_ids = []
 
