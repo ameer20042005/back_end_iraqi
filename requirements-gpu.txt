@@ -1,7 +1,11 @@
 # متطلبات RunPod فقط (GPU/Linux) — لا تُثبَّت محلياً على Windows بدون CUDA.
 # torch موجود مسبقاً في صورة runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
-# تأكد أن إصدار vllm متوافق مع torch 2.8.0 / CUDA 12.8.1 قبل التثبيت على RunPod.
-vllm>=0.6.0
+# (torch 2.8.0 / CUDA 12.8.1). إصدار محدد (لا >=) عمداً: قيد مفتوح سحب مرة
+# torch 2.11.0 المبني لـ CUDA 13 على Pod عنده درايفر NVIDIA أقدم (12.8 فقط)،
+# فرجع "The NVIDIA driver on your system is too old" عند تهيئة vLLM. ثبّت هنا
+# آخر إصدار vLLM معروف أنه متوافق مع torch 2.8.0/CUDA 12.8.1.
+vllm==0.10.1.1
+torch==2.8.0
 
 # اختياري: تحميل الموديل بـ INT8 (quantization="bitsandbytes" في app/config.py)
 bitsandbytes>=0.43
