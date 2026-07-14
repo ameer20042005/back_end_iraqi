@@ -1,0 +1,1425 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>back_end_iraqi — لوحة اختبار API</title>
+<style>
+  :root {
+    --bg: #f4f6f2;
+    --panel: #ffffff;
+    --panel-2: #eceee8;
+    --border: #d7ddd2;
+    --text: #16201a;
+    --text-dim: #5b6b60;
+    --accent: #1f7a53;
+    --accent-strong: #14603f;
+    --accent-soft: #dcefe4;
+    --warn: #a35a1f;
+    --warn-soft: #f6e6d3;
+    --err: #b3311d;
+    --err-soft: #f8dcd6;
+    --mono-bg: #101a15;
+    --mono-text: #d9e6dd;
+    --shadow: 0 1px 2px rgba(20, 30, 24, 0.06), 0 4px 16px rgba(20, 30, 24, 0.05);
+    --radius: 10px;
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0b1210;
+    --panel: #121c17;
+    --panel-2: #17231d;
+    --border: #263229;
+    --text: #e7efe9;
+    --text-dim: #8a978f;
+    --accent: #34b57e;
+    --accent-strong: #4fd398;
+    --accent-soft: #16302477;
+    --warn: #e0a355;
+    --warn-soft: #3a2c1877;
+    --err: #ea6a56;
+    --err-soft: #3a1c1877;
+    --mono-bg: #0a1310;
+    --mono-text: #cfe3d7;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b1210;
+      --panel: #121c17;
+      --panel-2: #17231d;
+      --border: #263229;
+      --text: #e7efe9;
+      --text-dim: #8a978f;
+      --accent: #34b57e;
+      --accent-strong: #4fd398;
+      --accent-soft: #16302477;
+      --warn: #e0a355;
+      --warn-soft: #3a2c1877;
+      --err: #ea6a56;
+      --err-soft: #3a1c1877;
+      --mono-bg: #0a1310;
+      --mono-text: #cfe3d7;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", Tahoma, "Noto Sans Arabic", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  code, pre, .mono, .tag, input, textarea, .status-code, .latency {
+    font-family: "Cascadia Code", "Consolas", "SF Mono", ui-monospace, monospace;
+  }
+
+  body {
+    display: grid;
+    grid-template-columns: 264px 1fr;
+    min-height: 100vh;
+  }
+
+  @media (max-width: 880px) {
+    body { grid-template-columns: 1fr; }
+    .sidebar { position: static; }
+  }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  .brand {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+  }
+
+  .brand-sub {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .base-url-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .base-url-box label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+
+  .base-url-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  #baseUrl {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 12.5px;
+    direction: ltr;
+    text-align: left;
+  }
+
+  #baseUrl:focus, .base-url-row button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .base-url-row button {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text-dim);
+    border-radius: 8px;
+    padding: 0 10px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .base-url-row button:hover { color: var(--text); border-color: var(--accent); }
+
+  .server-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 8px 10px;
+    background: var(--panel-2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .dot.ok { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .dot.bad { background: var(--err); box-shadow: 0 0 0 3px var(--err-soft); }
+  .dot.pulse { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .dot.pulse { animation: none; } }
+
+  nav.groups {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-y: auto;
+  }
+
+  .group-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 14px 8px 6px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .nav-item:hover { background: var(--panel-2); }
+  .nav-item.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-strong);
+    font-weight: 600;
+  }
+
+  .method-chip {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 5px;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+  }
+  .method-chip.get { background: var(--accent-soft); color: var(--accent-strong); }
+  .method-chip.post { background: var(--warn-soft); color: var(--warn); }
+
+  .nav-item .path {
+    direction: ltr;
+    text-align: left;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .theme-toggle {
+    margin-top: auto;
+    display: flex;
+    gap: 6px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .theme-toggle button {
+    flex: 1;
+    padding: 7px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .theme-toggle button.active { color: var(--accent-strong); border-color: var(--accent); background: var(--accent-soft); }
+
+  /* ---------- Main ---------- */
+  main {
+    padding: 28px 32px 60px;
+    max-width: 980px;
+    width: 100%;
+  }
+
+  .page-header {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 22px;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+
+  h1 {
+    font-size: 22px;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .endpoint-desc {
+    color: var(--text-dim);
+    font-size: 13.5px;
+    max-width: 62ch;
+    line-height: 1.6;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+    margin-bottom: 18px;
+  }
+
+  .panel h2 {
+    font-size: 13px;
+    margin: 0 0 14px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 600;
+  }
+
+  .field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .field-grid.single { grid-template-columns: 1fr; }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .field label {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .field label .opt {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    opacity: 0.7;
+  }
+
+  input[type=text], input[type=number], textarea, select {
+    padding: 9px 11px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 13.5px;
+    width: 100%;
+    resize: vertical;
+  }
+
+  textarea { min-height: 68px; font-family: inherit; direction: rtl; }
+  input[type=text]:focus, input[type=number]:focus, textarea:focus, select:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: var(--accent);
+  }
+
+  .radio-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .radio-row label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    font-size: 12.5px;
+    cursor: pointer;
+    color: var(--text-dim);
+  }
+  .radio-row input { accent-color: var(--accent); }
+  .radio-row label:has(input:checked) { color: var(--accent-strong); border-color: var(--accent); background: var(--accent-soft); }
+
+  .file-drop {
+    border: 1.5px dashed var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    background: var(--panel-2);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .file-drop input[type=file] { font-size: 12px; color: var(--text-dim); }
+
+  .actions-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  button.primary {
+    background: var(--accent);
+    color: #f4fbf7;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  button.primary:hover { background: var(--accent-strong); }
+  button.primary:disabled { opacity: 0.55; cursor: progress; }
+  button.primary:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  button.ghost {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    padding: 9px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.ghost:hover { color: var(--text); border-color: var(--accent); }
+
+  .spinner {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: #fff;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  .spinner.show { display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+  .session-pill {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 12px;
+    display: none;
+    align-items: center;
+    gap: 6px;
+  }
+  .session-pill.show { display: inline-flex; }
+  .session-pill .val { direction: ltr; color: var(--text); }
+
+  /* ---------- Response ---------- */
+  .response-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .status-code {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 6px;
+    background: var(--panel-2);
+    color: var(--text-dim);
+  }
+  .status-code.s2 { background: var(--accent-soft); color: var(--accent-strong); }
+  .status-code.s4, .status-code.s5 { background: var(--err-soft); color: var(--err); }
+
+  .engine-pill {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 6px;
+    letter-spacing: 0.2px;
+  }
+  .engine-pill.vllm { background: var(--accent-soft); color: var(--accent-strong); }
+  .engine-pill.fallback { background: var(--warn-soft); color: var(--warn); }
+
+  .latency {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .chat-log {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .bubble {
+    max-width: 82%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+  }
+  .bubble.user {
+    align-self: flex-start;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+  }
+  .bubble.assistant {
+    align-self: flex-end;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    color: var(--text);
+  }
+  .bubble .who {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  pre.json-view {
+    background: var(--mono-bg);
+    color: var(--mono-text);
+    padding: 14px 16px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    overflow-x: auto;
+    direction: ltr;
+    text-align: left;
+    margin: 0;
+  }
+  .jk { color: #7fc7e0; }
+  .js { color: #b9d98a; }
+  .jn { color: #e0b45f; }
+  .jb { color: #e08fa0; }
+
+  .order-card {
+    border: 1px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    font-size: 13px;
+  }
+  .order-card h3 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--accent-strong);
+  }
+  .order-card table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .order-card td { padding: 3px 0; }
+  .order-card .num { font-variant-numeric: tabular-nums; direction: ltr; text-align: left; }
+
+  .empty-state {
+    color: var(--text-dim);
+    font-size: 13px;
+    text-align: center;
+    padding: 32px 0;
+  }
+
+  .curl-box {
+    margin-top: 14px;
+  }
+  .curl-box summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-dim);
+    user-select: none;
+  }
+  .curl-box summary:hover { color: var(--accent); }
+  .curl-box pre {
+    margin-top: 8px;
+  }
+
+  footer.hint {
+    color: var(--text-dim);
+    font-size: 12px;
+    text-align: center;
+    padding-top: 8px;
+  }
+
+  ::selection { background: var(--accent-soft); }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-title">back_end_iraqi</div>
+    <div class="brand-sub">لوحة اختبار API</div>
+  </div>
+
+  <div class="base-url-box">
+    <label for="baseUrl">رابط السيرفر (Base URL)</label>
+    <div class="base-url-row">
+      <input id="baseUrl" type="text" value="http://localhost:8000" spellcheck="false" />
+      <button id="pingBtn" title="فحص الاتصال">فحص</button>
+    </div>
+  </div>
+
+  <div class="server-status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">لم يُفحص بعد</span>
+  </div>
+
+  <nav class="groups" id="navGroups"></nav>
+
+  <div class="theme-toggle">
+    <button id="themeAuto" class="active">تلقائي</button>
+    <button id="themeLight">فاتح</button>
+    <button id="themeDark">داكن</button>
+  </div>
+</aside>
+
+<main id="mainView"></main>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------------- Theme ---------------- */
+  var root = document.documentElement;
+  function setTheme(mode) {
+    if (mode === "auto") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", mode);
+    ["themeAuto", "themeLight", "themeDark"].forEach(function (id) {
+      document.getElementById(id).classList.remove("active");
+    });
+    document.getElementById("theme" + mode[0].toUpperCase() + mode.slice(1)).classList.add("active");
+    try { localStorage.setItem("iraqi_theme", mode); } catch (e) {}
+  }
+  document.getElementById("themeAuto").onclick = function () { setTheme("auto"); };
+  document.getElementById("themeLight").onclick = function () { setTheme("light"); };
+  document.getElementById("themeDark").onclick = function () { setTheme("dark"); };
+  try {
+    var savedTheme = localStorage.getItem("iraqi_theme");
+    if (savedTheme) setTheme(savedTheme);
+  } catch (e) {}
+
+  /* ---------------- Base URL persistence ---------------- */
+  var baseUrlInput = document.getElementById("baseUrl");
+  try {
+    var savedUrl = localStorage.getItem("iraqi_base_url");
+    if (savedUrl) baseUrlInput.value = savedUrl;
+    else baseUrlInput.value = window.location.origin.startsWith("http") && window.location.protocol !== "file:"
+      ? window.location.origin
+      : "http://localhost:8000";
+  } catch (e) {}
+  baseUrlInput.addEventListener("change", function () {
+    try { localStorage.setItem("iraqi_base_url", baseUrlInput.value.trim()); } catch (e) {}
+  });
+  function baseUrl() {
+    return baseUrlInput.value.trim().replace(/\/+$/, "");
+  }
+
+  /* ---------------- Server status ping ---------------- */
+  var statusDot = document.getElementById("statusDot");
+  var statusText = document.getElementById("statusText");
+
+  async function pingServer() {
+    statusDot.className = "dot pulse";
+    statusText.textContent = "جاري الفحص...";
+    try {
+      var t0 = performance.now();
+      var res = await fetch(baseUrl() + "/health", { method: "GET" });
+      var ms = Math.round(performance.now() - t0);
+      if (res.ok) {
+        var gpuRes = await fetch(baseUrl() + "/gpu").then(function (r) { return r.json(); }).catch(function () { return null; });
+        var vllm = gpuRes && gpuRes.vllm_ready;
+        statusDot.className = "dot ok";
+        statusText.textContent = vllm
+          ? "متصل — vLLM جاهز (" + ms + "ms)"
+          : "متصل — وضع fallback بدون GPU (" + ms + "ms)";
+      } else {
+        statusDot.className = "dot bad";
+        statusText.textContent = "خطأ HTTP " + res.status;
+      }
+    } catch (e) {
+      statusDot.className = "dot bad";
+      statusText.textContent = "تعذّر الاتصال بالسيرفر";
+    }
+  }
+  document.getElementById("pingBtn").onclick = pingServer;
+
+  /* ---------------- JSON pretty-print with light syntax highlight ---------------- */
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; });
+  }
+
+  function highlightJson(obj) {
+    var str = JSON.stringify(obj, null, 2);
+    var escaped = escapeHtml(str);
+    return escaped.replace(
+      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
+      function (match) {
+        var cls = "jn";
+        if (/^"/.test(match)) cls = /:$/.test(match) ? "jk" : "js";
+        else if (/true|false/.test(match)) cls = "jb";
+        else if (/null/.test(match)) cls = "jb";
+        return '<span class="' + cls + '">' + match + "</span>";
+      }
+    );
+  }
+
+  function statusClass(code) {
+    if (code >= 200 && code < 300) return "s2";
+    if (code >= 400 && code < 500) return "s4";
+    if (code >= 500) return "s5";
+    return "";
+  }
+
+  /* ---------------- Endpoint registry ---------------- */
+  var endpoints = [
+    {
+      group: "الحالة",
+      id: "health",
+      method: "GET",
+      path: "/health",
+      title: "GET /health",
+      desc: "فحص صحة بسيط — يتأكد إن السيرفر شغال ويرد.",
+      render: renderSimpleGet
+    },
+    {
+      group: "الحالة",
+      id: "gpu",
+      method: "GET",
+      path: "/gpu",
+      title: "GET /gpu",
+      desc: "معلومات GPU/CUDA وحالة محرك vLLM — للتأكد إن الموديل شغال فعلاً على RunPod (بدل وضع fallback).",
+      render: renderSimpleGet
+    },
+    {
+      group: "الحالة",
+      id: "root",
+      method: "GET",
+      path: "/",
+      title: "GET /",
+      desc: "معلومات عامة عن الخدمة.",
+      render: renderSimpleGet
+    },
+    {
+      group: "وكيل المبيعات",
+      id: "salesChat",
+      method: "POST",
+      path: "/sales/chat",
+      title: "POST /sales/chat",
+      desc: "رد كامل (بدون بث). يحاول يقنع العميل بالشراء، يقترح منتج إضافي، ويثبّت الطلب تلقائياً عند الموافقة الصريحة.",
+      render: renderChatForm
+    },
+    {
+      group: "وكيل المبيعات",
+      id: "salesChatStream",
+      method: "POST",
+      path: "/sales/chat/stream",
+      title: "POST /sales/chat/stream",
+      desc: "نفس مدخل /sales/chat، لكن بث Server-Sent Events — يظهر أول جزء من الرد بسرعة قبل اكتماله.",
+      render: renderChatStreamForm
+    },
+    {
+      group: "دعم العملاء",
+      id: "supportChat",
+      method: "POST",
+      path: "/support/chat",
+      title: "POST /support/chat",
+      desc: "تتبع حالة طلب برقم الطلب (مثل ORD-1001) أو رقم الهاتف، أو أي سؤال عام (بحث ويب تلقائي).",
+      render: renderSupportForm
+    },
+    {
+      group: "إنشاء طلب",
+      id: "ordersCreate",
+      method: "POST",
+      path: "/orders/create",
+      title: "POST /orders/create",
+      desc: "إنشاء طلب مباشر من مدخل واحد فقط: نص، أو ملف صوتي، أو صورة.",
+      render: renderOrdersCreateForm
+    }
+  ];
+
+  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب"];
+  var navGroups = document.getElementById("navGroups");
+  var mainView = document.getElementById("mainView");
+
+  groupOrder.forEach(function (g) {
+    var label = document.createElement("div");
+    label.className = "group-label";
+    label.textContent = g;
+    navGroups.appendChild(label);
+    endpoints.filter(function (e) { return e.group === g; }).forEach(function (ep) {
+      var item = document.createElement("div");
+      item.className = "nav-item";
+      item.dataset.id = ep.id;
+      item.innerHTML =
+        '<span class="method-chip ' + ep.method.toLowerCase() + '">' + ep.method + "</span>" +
+        '<span class="path">' + ep.path + "</span>";
+      item.onclick = function () { selectEndpoint(ep.id); };
+      navGroups.appendChild(item);
+    });
+  });
+
+  function selectEndpoint(id) {
+    document.querySelectorAll(".nav-item").forEach(function (el) {
+      el.classList.toggle("active", el.dataset.id === id);
+    });
+    var ep = endpoints.find(function (e) { return e.id === id; });
+    mainView.innerHTML = "";
+    var header = document.createElement("div");
+    header.className = "page-header";
+    header.innerHTML =
+      '<div class="eyebrow">' + ep.group + "</div>" +
+      "<h1>" + ep.title + "</h1>" +
+      '<div class="endpoint-desc">' + ep.desc + "</div>";
+    mainView.appendChild(header);
+    ep.render(mainView, ep);
+    try { localStorage.setItem("iraqi_last_endpoint", id); } catch (e) {}
+  }
+
+  /* ---------------- Shared helpers ---------------- */
+  function makePanel(titleText) {
+    var panel = document.createElement("div");
+    panel.className = "panel";
+    if (titleText) {
+      var h2 = document.createElement("h2");
+      h2.textContent = titleText;
+      panel.appendChild(h2);
+    }
+    return panel;
+  }
+
+  function makeActionsRow(button, extraNode) {
+    var row = document.createElement("div");
+    row.className = "actions-row";
+    row.appendChild(button);
+    if (extraNode) row.appendChild(extraNode);
+    return row;
+  }
+
+  function makeButton(text) {
+    var btn = document.createElement("button");
+    btn.className = "primary";
+    btn.type = "button";
+    var spinner = document.createElement("span");
+    spinner.className = "spinner";
+    var label = document.createElement("span");
+    label.textContent = text;
+    btn.appendChild(spinner);
+    btn.appendChild(label);
+    btn.setBusy = function (busy) {
+      btn.disabled = busy;
+      spinner.classList.toggle("show", busy);
+    };
+    return btn;
+  }
+
+  function curlBlock(method, path, bodyObj, isMultipart, fields) {
+    var details = document.createElement("details");
+    details.className = "curl-box";
+    var summary = document.createElement("summary");
+    summary.textContent = "عرض أمر curl المكافئ";
+    details.appendChild(summary);
+    var pre = document.createElement("pre");
+    pre.className = "json-view";
+    var cmd;
+    if (isMultipart) {
+      cmd = "curl -X POST " + baseUrl() + path + " \\\n" +
+        fields.map(function (f) { return '  -F "' + f.name + "=" + (f.isFile ? "@" + f.value : f.value) + '"'; }).join(" \\\n");
+    } else {
+      cmd = "curl -X " + method + " " + baseUrl() + path +
+        (bodyObj ? " \\\n  -H \"Content-Type: application/json\" \\\n  -d '" + JSON.stringify(bodyObj) + "'" : "");
+    }
+    pre.textContent = cmd;
+    details.appendChild(pre);
+    return details;
+  }
+
+  function updateCurl(container, node) {
+    var old = container.querySelector(".curl-box");
+    if (old) old.remove();
+    container.appendChild(node);
+  }
+
+  /* ---------------- GET (health / gpu / root) ---------------- */
+  function renderSimpleGet(container, ep) {
+    var panel = makePanel(null);
+    var btn = makeButton("أرسل الطلب");
+    panel.appendChild(makeActionsRow(btn));
+    container.appendChild(panel);
+
+    var resultPanel = makePanel("الاستجابة");
+    var meta = document.createElement("div");
+    meta.className = "response-meta";
+    var body = document.createElement("div");
+    body.innerHTML = '<div class="empty-state">اضغط "أرسل الطلب" لتجربة هذه النقطة.</div>';
+    resultPanel.appendChild(meta);
+    resultPanel.appendChild(body);
+    container.appendChild(resultPanel);
+
+    btn.onclick = async function () {
+      btn.setBusy(true);
+      meta.innerHTML = "";
+      body.innerHTML = '<div class="empty-state">جاري الإرسال...</div>';
+      var t0 = performance.now();
+      try {
+        var res = await fetch(baseUrl() + ep.path);
+        var ms = Math.round(performance.now() - t0);
+        var json = await res.json().catch(function () { return null; });
+        meta.innerHTML =
+          '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
+          '<span class="latency">' + ms + " ms</span>";
+        body.innerHTML = "";
+        var pre = document.createElement("pre");
+        pre.className = "json-view";
+        pre.innerHTML = highlightJson(json);
+        body.appendChild(pre);
+      } catch (e) {
+        meta.innerHTML = '<span class="status-code s5">خطأ</span>';
+        body.innerHTML = '<div class="empty-state">تعذّر الوصول للسيرفر: ' + escapeHtml(e.message) + "</div>";
+      }
+      btn.setBusy(false);
+    };
+  }
+
+  /* ---------------- Sales chat (full) ---------------- */
+  function renderChatForm(container, ep) {
+    var sessionKey = "session_" + ep.id;
+    var sessionId = null;
+
+    var panel = makePanel("الطلب");
+    var grid = document.createElement("div");
+    grid.className = "field-grid single";
+
+    var msgField = document.createElement("div");
+    msgField.className = "field";
+    msgField.innerHTML = '<label>رسالة العميل</label>';
+    var msgInput = document.createElement("textarea");
+    msgInput.placeholder = "مثال: شنو عندكم لابتوبات؟";
+    msgInput.value = "هلو، شلونكم؟ عندكم مكيفات سبلت؟";
+    msgField.appendChild(msgInput);
+    grid.appendChild(msgField);
+
+    var advGrid = document.createElement("div");
+    advGrid.className = "field-grid";
+    advGrid.style.marginTop = "12px";
+
+    var maxTokField = document.createElement("div");
+    maxTokField.className = "field";
+    maxTokField.innerHTML = '<label>max_tokens <span class="opt">اختياري</span></label>';
+    var maxTokInput = document.createElement("input");
+    maxTokInput.type = "number";
+    maxTokInput.placeholder = "افتراضي من السيرفر";
+    maxTokField.appendChild(maxTokInput);
+
+    var tempField = document.createElement("div");
+    tempField.className = "field";
+    tempField.innerHTML = '<label>temperature <span class="opt">اختياري</span></label>';
+    var tempInput = document.createElement("input");
+    tempInput.type = "number";
+    tempInput.step = "0.1";
+    tempInput.placeholder = "افتراضي من السيرفر";
+    tempField.appendChild(tempInput);
+
+    advGrid.appendChild(maxTokField);
+    advGrid.appendChild(tempField);
+
+    panel.appendChild(grid);
+    panel.appendChild(advGrid);
+
+    var btn = makeButton("أرسل الرسالة");
+    var sessionPill = document.createElement("span");
+    sessionPill.className = "session-pill";
+    sessionPill.innerHTML = 'الجلسة: <span class="val"></span>';
+    var resetBtn = document.createElement("button");
+    resetBtn.className = "ghost";
+    resetBtn.textContent = "محادثة جديدة";
+    resetBtn.style.marginRight = "auto";
+    resetBtn.onclick = function () {
+      sessionId = null;
+      sessionPill.classList.remove("show");
+      chatLog.innerHTML = "";
+      orderBox.innerHTML = "";
+    };
+
+    var actionsRow = document.createElement("div");
+    actionsRow.className = "actions-row";
+    actionsRow.appendChild(btn);
+    actionsRow.appendChild(sessionPill);
+    actionsRow.appendChild(resetBtn);
+    panel.appendChild(actionsRow);
+    container.appendChild(panel);
+
+    var resultPanel = makePanel("المحادثة");
+    var meta = document.createElement("div");
+    meta.className = "response-meta";
+    var chatLog = document.createElement("div");
+    chatLog.className = "chat-log";
+    var orderBox = document.createElement("div");
+    resultPanel.appendChild(meta);
+    resultPanel.appendChild(chatLog);
+    resultPanel.appendChild(orderBox);
+    container.appendChild(resultPanel);
+
+    btn.onclick = async function () {
+      var message = msgInput.value.trim();
+      if (!message) return;
+      btn.setBusy(true);
+      var userBubble = document.createElement("div");
+      userBubble.className = "bubble user";
+      userBubble.innerHTML = '<div class="who">العميل</div>' + escapeHtml(message);
+      chatLog.appendChild(userBubble);
+
+      var payload = { message: message, session_id: sessionId };
+      if (maxTokInput.value) payload.max_tokens = parseInt(maxTokInput.value, 10);
+      if (tempInput.value) payload.temperature = parseFloat(tempInput.value);
+
+      var t0 = performance.now();
+      try {
+        var res = await fetch(baseUrl() + ep.path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        var ms = Math.round(performance.now() - t0);
+        var json = await res.json();
+        meta.innerHTML =
+          '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
+          '<span class="latency">' + ms + " ms</span>" +
+          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "vllm" ? "vLLM" : "fallback") + "</span>" : "");
+
+        if (json.session_id) {
+          sessionId = json.session_id;
+          sessionPill.querySelector(".val").textContent = sessionId;
+          sessionPill.classList.add("show");
+        }
+
+        var assistantBubble = document.createElement("div");
+        assistantBubble.className = "bubble assistant";
+        assistantBubble.innerHTML = '<div class="who">الوكيل</div>' + escapeHtml(json.answer || "");
+        chatLog.appendChild(assistantBubble);
+        chatLog.scrollTop = chatLog.scrollHeight;
+
+        orderBox.innerHTML = "";
+        if (json.order) orderBox.appendChild(renderOrderCard(json.order));
+
+        updateCurl(resultPanel, curlBlock("POST", ep.path, payload));
+      } catch (e) {
+        meta.innerHTML = '<span class="status-code s5">خطأ</span>';
+        var errBubble = document.createElement("div");
+        errBubble.className = "bubble assistant";
+        errBubble.textContent = "تعذّر الوصول للسيرفر: " + e.message;
+        chatLog.appendChild(errBubble);
+      }
+      btn.setBusy(false);
+      msgInput.value = "";
+      msgInput.focus();
+    };
+  }
+
+  /* ---------------- Sales chat (stream) ---------------- */
+  function renderChatStreamForm(container, ep) {
+    var sessionId = null;
+
+    var panel = makePanel("الطلب");
+    var grid = document.createElement("div");
+    grid.className = "field-grid single";
+    var msgField = document.createElement("div");
+    msgField.className = "field";
+    msgField.innerHTML = '<label>رسالة العميل</label>';
+    var msgInput = document.createElement("textarea");
+    msgInput.value = "عندكم غسالات اتوماتيك؟";
+    msgField.appendChild(msgInput);
+    grid.appendChild(msgField);
+    panel.appendChild(grid);
+
+    var btn = makeButton("أرسل (بث مباشر)");
+    var sessionPill = document.createElement("span");
+    sessionPill.className = "session-pill";
+    sessionPill.innerHTML = 'الجلسة: <span class="val"></span>';
+    var resetBtn = document.createElement("button");
+    resetBtn.className = "ghost";
+    resetBtn.textContent = "محادثة جديدة";
+    resetBtn.style.marginRight = "auto";
+    resetBtn.onclick = function () {
+      sessionId = null;
+      sessionPill.classList.remove("show");
+      chatLog.innerHTML = "";
+      orderBox.innerHTML = "";
+    };
+    var actionsRow = document.createElement("div");
+    actionsRow.className = "actions-row";
+    actionsRow.appendChild(btn);
+    actionsRow.appendChild(sessionPill);
+    actionsRow.appendChild(resetBtn);
+    panel.appendChild(actionsRow);
+    container.appendChild(panel);
+
+    var resultPanel = makePanel("المحادثة (بث SSE)");
+    var meta = document.createElement("div");
+    meta.className = "response-meta";
+    var chatLog = document.createElement("div");
+    chatLog.className = "chat-log";
+    var orderBox = document.createElement("div");
+    resultPanel.appendChild(meta);
+    resultPanel.appendChild(chatLog);
+    resultPanel.appendChild(orderBox);
+    container.appendChild(resultPanel);
+
+    btn.onclick = async function () {
+      var message = msgInput.value.trim();
+      if (!message) return;
+      btn.setBusy(true);
+      meta.innerHTML = '<span class="latency">جاري البث...</span>';
+
+      var userBubble = document.createElement("div");
+      userBubble.className = "bubble user";
+      userBubble.innerHTML = '<div class="who">العميل</div>' + escapeHtml(message);
+      chatLog.appendChild(userBubble);
+
+      var assistantBubble = document.createElement("div");
+      assistantBubble.className = "bubble assistant";
+      assistantBubble.innerHTML = '<div class="who">الوكيل</div><span class="stream-text"></span>';
+      chatLog.appendChild(assistantBubble);
+      var streamText = assistantBubble.querySelector(".stream-text");
+      chatLog.scrollTop = chatLog.scrollHeight;
+
+      var payload = { message: message, session_id: sessionId };
+      var t0 = performance.now();
+      orderBox.innerHTML = "";
+
+      try {
+        var res = await fetch(baseUrl() + ep.path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = "";
+        var full = "";
+        var firstTokenMs = null;
+
+        while (true) {
+          var chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value, { stream: true });
+          var parts = buffer.split("\n\n");
+          buffer = parts.pop();
+          for (var i = 0; i < parts.length; i++) {
+            var line = parts[i];
+            if (!line.startsWith("data: ")) continue;
+            var evt = JSON.parse(line.slice(6));
+            if (evt.delta !== undefined) {
+              if (firstTokenMs === null) firstTokenMs = Math.round(performance.now() - t0);
+              full += evt.delta;
+              streamText.textContent = full;
+              chatLog.scrollTop = chatLog.scrollHeight;
+            }
+            if (evt.done) {
+              var totalMs = Math.round(performance.now() - t0);
+              sessionId = evt.session_id;
+              sessionPill.querySelector(".val").textContent = sessionId;
+              sessionPill.classList.add("show");
+              meta.innerHTML =
+                '<span class="status-code s2">' + res.status + "</span>" +
+                '<span class="latency">أول توكن: ' + (firstTokenMs === null ? "—" : firstTokenMs + "ms") + " · إجمالي: " + totalMs + "ms</span>";
+              if (evt.order) orderBox.appendChild(renderOrderCard(evt.order));
+            }
+          }
+        }
+        updateCurl(resultPanel, curlBlock("POST", ep.path, payload));
+      } catch (e) {
+        meta.innerHTML = '<span class="status-code s5">خطأ</span>';
+        streamText.textContent = "تعذّر الوصول للسيرفر: " + e.message;
+      }
+      btn.setBusy(false);
+      msgInput.value = "";
+    };
+  }
+
+  /* ---------------- Support chat ---------------- */
+  function renderSupportForm(container, ep) {
+    var sessionId = null;
+    var panel = makePanel("الطلب");
+    var grid = document.createElement("div");
+    grid.className = "field-grid single";
+    var msgField = document.createElement("div");
+    msgField.className = "field";
+    msgField.innerHTML = '<label>رسالة العميل</label>';
+    var msgInput = document.createElement("textarea");
+    msgInput.value = "وين طلبي ORD-1001؟";
+    msgField.appendChild(msgInput);
+    grid.appendChild(msgField);
+    panel.appendChild(grid);
+
+    var btn = makeButton("أرسل الرسالة");
+    var sessionPill = document.createElement("span");
+    sessionPill.className = "session-pill";
+    sessionPill.innerHTML = 'الجلسة: <span class="val"></span>';
+    var resetBtn = document.createElement("button");
+    resetBtn.className = "ghost";
+    resetBtn.textContent = "محادثة جديدة";
+    resetBtn.style.marginRight = "auto";
+    resetBtn.onclick = function () {
+      sessionId = null;
+      sessionPill.classList.remove("show");
+      chatLog.innerHTML = "";
+    };
+    var actionsRow = document.createElement("div");
+    actionsRow.className = "actions-row";
+    actionsRow.appendChild(btn);
+    actionsRow.appendChild(sessionPill);
+    actionsRow.appendChild(resetBtn);
+    panel.appendChild(actionsRow);
+    container.appendChild(panel);
+
+    var resultPanel = makePanel("المحادثة");
+    var meta = document.createElement("div");
+    meta.className = "response-meta";
+    var chatLog = document.createElement("div");
+    chatLog.className = "chat-log";
+    resultPanel.appendChild(meta);
+    resultPanel.appendChild(chatLog);
+    container.appendChild(resultPanel);
+
+    btn.onclick = async function () {
+      var message = msgInput.value.trim();
+      if (!message) return;
+      btn.setBusy(true);
+      var userBubble = document.createElement("div");
+      userBubble.className = "bubble user";
+      userBubble.innerHTML = '<div class="who">العميل</div>' + escapeHtml(message);
+      chatLog.appendChild(userBubble);
+
+      var payload = { message: message, session_id: sessionId };
+      var t0 = performance.now();
+      try {
+        var res = await fetch(baseUrl() + ep.path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        var ms = Math.round(performance.now() - t0);
+        var json = await res.json();
+        meta.innerHTML =
+          '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
+          '<span class="latency">' + ms + " ms</span>" +
+          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "vllm" ? "vLLM" : "fallback") + "</span>" : "");
+        if (json.session_id) {
+          sessionId = json.session_id;
+          sessionPill.querySelector(".val").textContent = sessionId;
+          sessionPill.classList.add("show");
+        }
+        var assistantBubble = document.createElement("div");
+        assistantBubble.className = "bubble assistant";
+        assistantBubble.innerHTML = '<div class="who">الدعم</div>' + escapeHtml(json.answer || "");
+        chatLog.appendChild(assistantBubble);
+        chatLog.scrollTop = chatLog.scrollHeight;
+        updateCurl(resultPanel, curlBlock("POST", ep.path, payload));
+      } catch (e) {
+        meta.innerHTML = '<span class="status-code s5">خطأ</span>';
+      }
+      btn.setBusy(false);
+      msgInput.value = "";
+    };
+  }
+
+  /* ---------------- Orders create (multipart) ---------------- */
+  function renderOrdersCreateForm(container, ep) {
+    var panel = makePanel("المدخل (اختر نوعاً واحداً)");
+    var radioRow = document.createElement("div");
+    radioRow.className = "radio-row";
+    ["text", "audio", "image"].forEach(function (kind, i) {
+      var label = document.createElement("label");
+      var input = document.createElement("input");
+      input.type = "radio";
+      input.name = "inputKind";
+      input.value = kind;
+      if (i === 0) input.checked = true;
+      label.appendChild(input);
+      var span = document.createElement("span");
+      span.textContent = kind === "text" ? "نص" : kind === "audio" ? "ملف صوتي" : "صورة";
+      label.appendChild(span);
+      radioRow.appendChild(label);
+    });
+    panel.appendChild(radioRow);
+
+    var textArea = document.createElement("div");
+    textArea.className = "field";
+    textArea.style.marginTop = "14px";
+    textArea.innerHTML = "<label>نص الطلب</label>";
+    var textInput = document.createElement("textarea");
+    textInput.value = "اريد لابتوب لينوفو وحبة ماوس لوجيتك";
+    textArea.appendChild(textInput);
+
+    var fileArea = document.createElement("div");
+    fileArea.className = "field";
+    fileArea.style.marginTop = "14px";
+    fileArea.style.display = "none";
+    fileArea.innerHTML = '<label id="fileLabel">ملف صوتي</label>';
+    var fileDrop = document.createElement("div");
+    fileDrop.className = "file-drop";
+    var fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "audio/*";
+    fileDrop.appendChild(fileInput);
+    fileArea.appendChild(fileDrop);
+
+    panel.appendChild(textArea);
+    panel.appendChild(fileArea);
+
+    radioRow.querySelectorAll("input").forEach(function (r) {
+      r.onchange = function () {
+        var kind = r.value;
+        textArea.style.display = kind === "text" ? "flex" : "none";
+        fileArea.style.display = kind !== "text" ? "flex" : "none";
+        if (kind === "audio") {
+          fileArea.querySelector("#fileLabel").textContent = "ملف صوتي (wav/mp3/m4a)";
+          fileInput.accept = "audio/*";
+        } else if (kind === "image") {
+          fileArea.querySelector("#fileLabel").textContent = "صورة (طلب مكتوب بخط اليد، لقطة شاشة، صورة منتج)";
+          fileInput.accept = "image/*";
+        }
+      };
+    });
+
+    var btn = makeButton("أنشئ الطلب");
+    panel.appendChild(makeActionsRow(btn));
+    container.appendChild(panel);
+
+    var resultPanel = makePanel("الاستجابة");
+    var meta = document.createElement("div");
+    meta.className = "response-meta";
+    var body = document.createElement("div");
+    body.innerHTML = '<div class="empty-state">اختر مدخلاً واضغط "أنشئ الطلب".</div>';
+    resultPanel.appendChild(meta);
+    resultPanel.appendChild(body);
+    container.appendChild(resultPanel);
+
+    btn.onclick = async function () {
+      var kind = radioRow.querySelector("input:checked").value;
+      var form = new FormData();
+      var curlFields = [];
+
+      if (kind === "text") {
+        if (!textInput.value.trim()) return;
+        form.append("text", textInput.value.trim());
+        curlFields.push({ name: "text", value: textInput.value.trim(), isFile: false });
+      } else {
+        var file = fileInput.files[0];
+        if (!file) { alert("اختر ملفاً أولاً."); return; }
+        form.append(kind, file);
+        curlFields.push({ name: kind, value: file.name, isFile: true });
+      }
+
+      btn.setBusy(true);
+      meta.innerHTML = "";
+      body.innerHTML = '<div class="empty-state">جاري المعالجة (قد تأخذ وقتاً أطول للصوت/الصورة)...</div>';
+      var t0 = performance.now();
+      try {
+        var res = await fetch(baseUrl() + ep.path, { method: "POST", body: form });
+        var ms = Math.round(performance.now() - t0);
+        var json = await res.json().catch(function () { return null; });
+        meta.innerHTML =
+          '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
+          '<span class="latency">' + ms + " ms</span>";
+        body.innerHTML = "";
+        if (res.ok && json) {
+          body.appendChild(renderOrderCard(json));
+        }
+        var pre = document.createElement("pre");
+        pre.className = "json-view";
+        pre.innerHTML = highlightJson(json);
+        body.appendChild(pre);
+        updateCurl(resultPanel, curlBlock("POST", ep.path, null, true, curlFields));
+      } catch (e) {
+        meta.innerHTML = '<span class="status-code s5">خطأ</span>';
+        body.innerHTML = '<div class="empty-state">تعذّر الوصول للسيرفر: ' + escapeHtml(e.message) + "</div>";
+      }
+      btn.setBusy(false);
+    };
+  }
+
+  /* ---------------- Order card renderer ---------------- */
+  function renderOrderCard(order) {
+    var card = document.createElement("div");
+    card.className = "order-card";
+    var rowsHtml = (order.items || []).map(function (it) {
+      return "<tr><td>" + escapeHtml(it.product_name) +
+        (it.matched ? "" : " ⚠") +
+        "</td><td class=\"num\">×" + it.quantity + "</td><td class=\"num\">" +
+        (it.line_total != null ? it.line_total.toLocaleString() + " " + (it.currency || "") : "—") +
+        "</td></tr>";
+    }).join("");
+    card.innerHTML =
+      "<h3>✓ طلب مؤكَّد — " + escapeHtml(order.order_id || "") + "</h3>" +
+      "<table>" + rowsHtml + "</table>" +
+      (order.total != null
+        ? '<div style="margin-top:8px;font-weight:600;">المجموع: <span class="num">' +
+          order.total.toLocaleString() + " " + (order.currency || "") + "</span></div>"
+        : "") +
+      '<div style="margin-top:6px;color:var(--text-dim);">' + escapeHtml(order.confirmation_message || "") + "</div>";
+    return card;
+  }
+
+  /* ---------------- Init ---------------- */
+  var lastId = null;
+  try { lastId = localStorage.getItem("iraqi_last_endpoint"); } catch (e) {}
+  selectEndpoint(endpoints.some(function (e) { return e.id === lastId; }) ? lastId : "health");
+  pingServer();
+})();
+</script>
+</body>
+</html>

@@ -42,6 +42,7 @@ class LLMEngine:
         self.lora_request = None
         self.tokenizer = None
         self.processor = None  # للبرومبتات متعددة الوسائط (صورة/صوت) — انظر render_multimodal_prompt
+        self.extra_stop_token_ids: List[int] = []  # مثلاً <end_of_turn> لـ Gemma — انظر start()
 
     @property
     def ready(self) -> bool:
@@ -83,6 +84,18 @@ class LLMEngine:
             self.tokenizer = await self.engine.get_tokenizer()
         except Exception:
             self.tokenizer = None
+
+        # نمرر <end_of_turn> صراحة كـ stop token id إضافي بدل الاعتماد فقط على
+        # eos_token_id الافتراضي — بتجارب llm_iraqi_best.ipynb تبيّن إن هذا
+        # التوكن هو علامة نهاية الدور الحقيقية بقالب Gemma وقد لا يطابق eos
+        # الافتراضي بكل الحالات.
+        if self.tokenizer is not None:
+            try:
+                eot_id = self.tokenizer.convert_tokens_to_ids("<end_of_turn>")
+                if isinstance(eot_id, int) and eot_id >= 0:
+                    self.extra_stop_token_ids = [eot_id]
+            except Exception:
+                self.extra_stop_token_ids = []
 
         # AutoProcessor (مو الـ tokenizer وحده) لازم لبناء برومبت يحتوي صورة —
         # تحميله خفيف (إعدادات + معالج صور، بدون أوزان الموديل)، عكس تحميل
@@ -132,6 +145,8 @@ class LLMEngine:
         guided_json: Optional[dict] = None,
         result_holder: Optional[dict] = None,
         multi_modal_data: Optional[dict] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
     ) -> AsyncGenerator[str, None]:
         """يبث الفروقات (delta) نصياً أولاً بأول — لإظهار بداية الرد بسرعة.
 
@@ -146,9 +161,13 @@ class LLMEngine:
         sampling_kwargs = dict(
             max_tokens=max_tokens or settings.max_new_tokens,
             temperature=temperature if temperature is not None else settings.temperature,
+            top_p=top_p if top_p is not None else settings.top_p,
+            top_k=top_k if top_k is not None else settings.top_k,
         )
         if stop:
             sampling_kwargs["stop"] = stop
+        if self.extra_stop_token_ids:
+            sampling_kwargs["stop_token_ids"] = list(self.extra_stop_token_ids)
         if guided_json is not None:
             try:
                 from vllm.sampling_params import GuidedDecodingParams
@@ -190,10 +209,13 @@ class LLMEngine:
         guided_json: Optional[dict] = None,
         result_holder: Optional[dict] = None,
         multi_modal_data: Optional[dict] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
     ) -> str:
         chunks = []
         async for delta in self.generate_stream(
-            prompt, max_tokens, temperature, stop, guided_json, result_holder, multi_modal_data
+            prompt, max_tokens, temperature, stop, guided_json, result_holder,
+            multi_modal_data, top_p, top_k,
         ):
             chunks.append(delta)
         return "".join(chunks)

@@ -35,9 +35,12 @@ class Settings(BaseSettings):
     # Prefix Caching للبرومبت الثابت (system prompt + سياق RAG المتكرر)
     enable_prefix_caching: bool = True
 
-    # توليد
+    # توليد — القيم مستخلصة من تجارب llm_iraqi_best.ipynb (بدون repetition_penalty
+    # لأنه كان يخرب مفردات اللهجة العراقية بالتجربة الفعلية)
     max_new_tokens: int = 512
     temperature: float = 0.7
+    top_p: float = 0.8
+    top_k: int = 20
 
     # RAG (لهجة عراقية + منتجات)
     rag_top_k: int = 5

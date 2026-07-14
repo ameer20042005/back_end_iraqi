@@ -5,8 +5,11 @@
 
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from app.engine import llm_engine
 from app.features.order_intake.router import router as order_intake_router
@@ -59,6 +62,15 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+@app.get("/test", include_in_schema=False)
+def test_console():
+    """لوحة اختبار API تفاعلية (HTML/CSS/JS ثابتة، بدون تبعيات) — انظر static/index.html."""
+    return FileResponse(_STATIC_DIR / "index.html")
 
 
 @app.get("/gpu")

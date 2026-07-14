@@ -27,6 +27,8 @@ uvicorn app.main:app --reload --port 8000
 
 ## الرفع على RunPod — طريقتان
 
+> دليل تفصيلي كامل خطوة بخطوة (مع حل المشاكل الشائعة) في [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md).
+
 ### الطريقة 1: Pod مباشر بالقالب الجاهز (الأسرع)
 
 1. أنشئ Pod من قالب **RunPod PyTorch 2.8.0** (الصورة أعلاه).
@@ -66,6 +68,7 @@ docker push <username>/back-end-iraqi:latest
 | `POST /support/chat` | دعم عملاء — تتبع طلب برقم الطلب/الهاتف، أو سؤال عام (أداة بحث ويب) |
 | `POST /orders/create` | إنشاء طلب من `text` أو `audio` (multipart) — يرجع JSON طلب مباشرة بدون محادثة |
 | `GET /docs` | واجهة Swagger التفاعلية |
+| `GET /test` | لوحة اختبار API تفاعلية (HTML/CSS/JS ثابتة، بدون تبعيات) — انظر [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md#لوحة-اختبار-api-test-console) |
 
 جسم الطلب لـ `/sales/chat`, `/sales/chat/stream`, `/support/chat`:
 
