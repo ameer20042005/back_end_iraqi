@@ -13,13 +13,10 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # الموديل — يُنزَّل تلقائياً من Hugging Face Hub عند أول إقلاع (بدون أي أمر يدوي)
-    # v2: نسخة مدموجة (merged) — الوزن النهائي لـ LoRA مدمج داخل الموديل نفسه،
-    # لا حاجة لتحميل محوّل منفصل عبر vLLM (enable_lora). النسخة السابقة القائمة
-    # على LoRA منفصل (gemma-iraqi-finetune + enable_lora) أنتجت نصاً عربياً
-    # مشوّشاً بالتجربة الفعلية على RunPod — تم استبدالها بالكامل بـ v2.
-    model_name: str = "ameer4wisam/gemma-iraqi-finetune-v2"
-    lora_path: Optional[str] = None
-    lora_rank: int = 16  # تأكد من مطابقتها لقيمة "r" الفعلية بـ adapter_config.json على المستودع (غير مستخدَمة إذا lora_path=None)
+    model_name: str = "google/gemma-4-E4B-it"
+    # مسار محوّل LoRA: مسار محلي، أو معرّف مستودع HF (مثال أدناه) فيُنزَّل تلقائياً أيضاً
+    lora_path: Optional[str] = "ameer4wisam/gemma-iraqi-finetune"
+    lora_rank: int = 16  # تأكد من مطابقتها لقيمة "r" الفعلية بـ adapter_config.json على المستودع
 
     # توكن Hugging Face — مطلوب لأن Gemma موديل بوابة (gated) وربما مستودع
     # المحوّل خاص. لا قيمة افتراضية أبداً؛ يُقرأ فقط من متغير البيئة HF_TOKEN.
@@ -38,14 +35,12 @@ class Settings(BaseSettings):
     # Prefix Caching للبرومبت الثابت (system prompt + سياق RAG المتكرر)
     enable_prefix_caching: bool = True
 
-    # توليد — النسخة النهائية المعتمدة (gemma-iraqi-finetune-v2) تستخدم فقط
-    # الوضع الحتمي (do_sample=False): الوضع الاحتمالي (temperature>0/sampling)
-    # انهار مرتين من 3 جولات اختبار (اخترع منتجات وهمية + نص مشوّش)، فانحذف
-    # نهائياً من الاستخدام المعتمد. temperature=0.0 هنا يكافئ do_sample=False
-    # بمسار vLLM (greedy decoding). بدون repetition_penalty نهائياً لأنه كان
-    # يخرب مفردات اللهجة العراقية بالتجربة الفعلية.
+    # توليد — القيم مطابقة لخلية "كود الاستدلال الصحيح" (GEN_BALANCED) في
+    # llm_iraqi_best.ipynb: أجوبة بيانات التدريب قصيرة (10-30 توكن غالباً)،
+    # وtemperature أعلى من 0.3 أنتج انحرافاً ملحوظاً بالتجربة الفعلية. بدون
+    # repetition_penalty نهائياً لأنه كان يخرب مفردات اللهجة العراقية.
     max_new_tokens: int = 64
-    temperature: float = 0.0
+    temperature: float = 0.3
     top_p: float = 0.8
     top_k: int = 20
 

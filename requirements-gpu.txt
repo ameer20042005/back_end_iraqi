@@ -1,16 +1,6 @@
 # متطلبات RunPod فقط (GPU/Linux) — لا تُثبَّت محلياً على Windows بدون CUDA.
-#
-# ⚠️ يتطلب Pod بدرايفر NVIDIA يدعم CUDA 13 (وليس فقط 12.8). ثلاث محاولات
-# لتثبيت إصدار vllm/torch أقدم متوافق مع CUDA 12.8 فشلت كلها:
-#   - vllm>=0.6.0 (قيد مفتوح): يسحب torch==2.11.0 (يحتاج CUDA 13) — يفهم
-#     Gemma 4 صح، لكن يفشل على درايفر 12.8 بـ "NVIDIA driver ... too old".
-#   - vllm==0.10.1.1 (torch==2.7.1, CUDA 12.8): لا يدعم معمارية Gemma 4
-#     أصلاً — "rope_scaling should have a 'rope_type' key".
-#   - vllm==0.19.0 (torch==2.10.0, CUDA 12.8): عنده ملف gemma4_mm.py لكن
-#     transformers المرافقة (4.57.6) لا تعرف model_type "gemma4" بعد.
-# الخلاصة: Gemma 4 يحتاج فعلياً vllm>=0.25 (وبالتبعية torch>=2.11، CUDA 13).
-# لا تراجع لإصدار أقدم بدون فحص التوافق مع Gemma4ForConditionalGeneration من
-# جديد — اختر Pod عنده درايفر NVIDIA يدعم CUDA 13 بدل تثبيت إصدار أقدم هنا.
+# torch موجود مسبقاً في صورة runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
+# تأكد أن إصدار vllm متوافق مع torch 2.8.0 / CUDA 12.8.1 قبل التثبيت على RunPod.
 vllm>=0.6.0
 
 # اختياري: تحميل الموديل بـ INT8 (quantization="bitsandbytes" في app/config.py)
