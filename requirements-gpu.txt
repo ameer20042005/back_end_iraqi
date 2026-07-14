@@ -1,13 +1,17 @@
 # متطلبات RunPod فقط (GPU/Linux) — لا تُثبَّت محلياً على Windows بدون CUDA.
 # torch موجود مسبقاً في صورة runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
-# (torch 2.8.0 / CUDA 12.8.1). إصدار محدد (لا >=) عمداً: قيد مفتوح سحب مرة
-# torch 2.11.0 المبني لـ CUDA 13 على Pod عنده درايفر NVIDIA أقدم (12.8 فقط)،
-# فرجع "The NVIDIA driver on your system is too old" عند تهيئة vLLM. vllm
-# 0.10.1.1 يتطلب torch==2.7.1 بالضبط (تبعية صارمة من حزمة vllm نفسها،
-# تحقق منها pip)، وهو متوافق مع درايفر CUDA 12.8 — لا تحاول رفع torch هنا
-# بدون رفع vllm لإصدار أحدث يطابقه.
-vllm==0.10.1.1
-torch==2.7.1
+# (torch 2.8.0 / CUDA 12.8.1). إصدار vllm محدد (لا >=) عمداً — اثنان جُرِّبا
+# وفشلا:
+#   - vllm>=0.6.0 (قيد مفتوح) سحب torch==2.11.0 المبني لـ CUDA 13، فرجع
+#     "The NVIDIA driver on your system is too old" على Pod بدرايفر 12.8 فقط.
+#   - vllm==0.10.1.1 (torch==2.7.1, متوافق CUDA 12.8) لا يدعم معمارية Gemma 4
+#     أصلاً: "rope_scaling should have a 'rope_type' key" عند تحميل الموديل.
+# vllm==0.19.0 هو أول إصدار يحوي Gemma4ForConditionalGeneration (ملف
+# vllm/model_executor/models/gemma4_mm.py)، وهو مثبَّت على torch==2.10.0 —
+# آخر خط إصدارات torch قبل تحوّل PyPI لعجلات CUDA 13 كافتراضي (بدأ من torch
+# 2.11.0 فما فوق حسب إعلان PyTorch الرسمي)، فيبقى متوافقاً مع درايفر CUDA 12.8.
+vllm==0.19.0
+torch==2.10.0
 
 # اختياري: تحميل الموديل بـ INT8 (quantization="bitsandbytes" في app/config.py)
 bitsandbytes>=0.43
