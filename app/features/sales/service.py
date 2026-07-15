@@ -2,6 +2,7 @@
 """يحوّل OrderExtraction (خام من الموديل) إلى OrderConfirmation موثوق —
 الأسعار والمجموع تُحسب هنا من app/products.py دائماً، لا نثق بأرقام الموديل."""
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -59,7 +60,13 @@ async def resolve_order(
                 "currency": match.get("currency"),
             }
 
-    note = extraction.confirmation_note or "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
+    # مخطط الاستخراج يمنع الأرقام برسالة التأكيد (الأسعار تُحسب هنا من
+    # الكتالوج فقط) — لو الموديل خالف وذكر رقماً، نتجاهل رسالته كلها ونستخدم
+    # الرسالة الافتراضية بدل تمرير رقم مختلَق للعميل.
+    note = extraction.confirmation_note
+    if note and re.search(r"\d", note):
+        note = None
+    note = note or "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
     if not all_matched:
         note += " (تنبيه: بعض المنتجات المطلوبة ما انطبقت على الكتالوج الحالي وتحتاج مراجعة يدوية.)"
 

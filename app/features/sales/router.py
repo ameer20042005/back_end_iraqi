@@ -61,6 +61,18 @@ def _fallback_sales_answer(message: str, rag_products: List[dict]) -> str:
     return f"[وضع محلي بدون GPU] ما لكيت منتج مطابق لـ: {message}"
 
 
+def _safe_price_answer(rag_products: List[dict]) -> str:
+    """رد بديل حتمي يُستخدم عندما يكتشف حارس الأرقام سعراً مختلَقاً برد
+    الموديل — مبني حصراً من أسعار الكتالوج الحقيقية، فلا يصل أي رقم مختلَق
+    للعميل أبداً."""
+    if rag_products:
+        lines = "، ".join(
+            f"{p['name']} بـ{p['price']:,} {p.get('currency', 'IQD')}" for p in rag_products[:3]
+        )
+        return f"خليني أدقّقلك السعر حتى ما أغلطلك — اللي أگدر أأكده هسه: {lines}."
+    return "والله خليني أتأكدلك من السعر بالضبط وأرد عليك، ما أحب أگلك رقم مو دقيق."
+
+
 def _fallback_order_ready(message: str) -> bool:
     return any(kw in message for kw in _PURCHASE_KEYWORDS)
 
@@ -111,13 +123,20 @@ async def sales_chat(req: SalesChatRequest):
         order_ready = _fallback_order_ready(req.message)
         engine_name = "fallback"
 
-    sessions.append(key, "user", req.message)
-    sessions.append(key, "assistant", answer)
-
+    # حارس الأرقام — إلغاء فعلي مو تسجيل فقط: أي رقم مالي مو موجود حرفياً
+    # بكتالوج RAG يعني الموديل اختلقه من أوزانه، فنستبدل الرد كاملاً برد
+    # آمن مبني من أسعار الكتالوج الحقيقية قبل ما يوصل شي للعميل.
     if engine_name == "transformers":
         bad_numbers = check_numbers(answer, products_context_block(rag_products))
         if bad_numbers:
-            logger.warning("رد المبيعات فيه أرقام غير موجودة بالكتالوج: %s (session=%s)", bad_numbers, session_id)
+            logger.warning(
+                "أرقام مختلَقة برد المبيعات أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
+                bad_numbers, session_id, answer[:300],
+            )
+            answer = _safe_price_answer(rag_products)
+
+    sessions.append(key, "user", req.message)
+    sessions.append(key, "assistant", answer)
 
     order = await _maybe_build_order(key, rag_words) if order_ready else None
 
@@ -140,6 +159,9 @@ async def sales_chat_stream(req: SalesChatRequest):
     messages = build_sales_prompt(history, req.message, rag_words, rag_products)
 
     async def event_source():
+        # نجمّع الرد كاملاً قبل بثّه (مو delta بـ delta) عمداً: حارس الأرقام
+        # لازم يفحص الرد كاملاً قبل ما يوصل أي جزء منه للعميل — رقم مختلَق
+        # مبثوث حياً ما ينسحب. الردود قصيرة أصلاً (64 توكن) فالتأخير مقبول.
         collected = []
         order_ready = False
         if llm_engine.ready:
@@ -153,24 +175,25 @@ async def sales_chat_stream(req: SalesChatRequest):
                 result_holder=result_holder,
             ):
                 collected.append(delta)
-                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             order_ready = result_holder.get("stop_reason") == ORDER_READY_MARKER
             engine_name = "transformers"
-        else:
-            answer = _fallback_sales_answer(req.message, rag_products)
-            collected.append(answer)
-            order_ready = _fallback_order_ready(req.message)
-            engine_name = "fallback"
-            yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
-
-        answer = "".join(collected)
-        sessions.append(key, "user", req.message)
-        sessions.append(key, "assistant", answer)
-
-        if engine_name == "transformers":
+            answer = "".join(collected)
             bad_numbers = check_numbers(answer, products_context_block(rag_products))
             if bad_numbers:
-                logger.warning("رد المبيعات (stream) فيه أرقام غير موجودة بالكتالوج: %s (session=%s)", bad_numbers, session_id)
+                logger.warning(
+                    "أرقام مختلَقة برد المبيعات (stream) أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
+                    bad_numbers, session_id, answer[:300],
+                )
+                answer = _safe_price_answer(rag_products)
+        else:
+            answer = _fallback_sales_answer(req.message, rag_products)
+            order_ready = _fallback_order_ready(req.message)
+            engine_name = "fallback"
+
+        yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
+
+        sessions.append(key, "user", req.message)
+        sessions.append(key, "assistant", answer)
 
         order = await _maybe_build_order(key, rag_words) if order_ready else None
 
