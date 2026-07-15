@@ -787,10 +787,19 @@
       title: "POST /orders/create",
       desc: "إنشاء طلب مباشر من مدخل واحد فقط: نص، أو ملف صوتي، أو صورة.",
       render: renderOrdersCreateForm
+    },
+    {
+      group: "اختبار الحمل",
+      id: "loadTest",
+      method: "POST",
+      path: "/sales/chat",
+      title: "اختبار الحمل — طلبات متزامنة",
+      desc: "يرسل عدة طلبات /sales/chat بنفس اللحظة ويقيس زمن كل طلب — لفحص سلوك السيرفر تحت التزامن (المحرك الحالي يعالج الطلبات بالتتابع عبر قفل، فالأزمنة تتراكم تدريجياً).",
+      render: renderLoadTest
     }
   ];
 
-  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب"];
+  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب", "اختبار الحمل"];
   var navGroups = document.getElementById("navGroups");
   var mainView = document.getElementById("mainView");
 
@@ -929,6 +938,104 @@
         meta.innerHTML = '<span class="status-code s5">خطأ</span>';
         body.innerHTML = '<div class="empty-state">تعذّر الوصول للسيرفر: ' + escapeHtml(e.message) + "</div>";
       }
+      btn.setBusy(false);
+    };
+  }
+
+  /* ---------------- Load test (concurrent requests) ---------------- */
+  function renderLoadTest(container, ep) {
+    var panel = makePanel("إعداد الاختبار");
+    var grid = document.createElement("div");
+    grid.className = "field-grid";
+
+    var msgField = document.createElement("div");
+    msgField.className = "field";
+    msgField.innerHTML = '<label>رسالة الاختبار</label>';
+    var msgInput = document.createElement("input");
+    msgInput.type = "text";
+    msgInput.value = "هلو، شنو عندكم لابتوبات؟";
+    msgField.appendChild(msgInput);
+    grid.appendChild(msgField);
+
+    var countField = document.createElement("div");
+    countField.className = "field";
+    countField.innerHTML = '<label>عدد الطلبات المتزامنة</label>';
+    var countInput = document.createElement("input");
+    countInput.type = "number";
+    countInput.min = "1";
+    countInput.max = "32";
+    countInput.value = "5";
+    countField.appendChild(countInput);
+    grid.appendChild(countField);
+
+    panel.appendChild(grid);
+    var btn = makeButton("أطلق الطلبات");
+    panel.appendChild(makeActionsRow(btn));
+    container.appendChild(panel);
+
+    var resultPanel = makePanel("النتائج");
+    var meta = document.createElement("div");
+    meta.className = "response-meta";
+    var body = document.createElement("div");
+    body.innerHTML = '<div class="empty-state">حدد العدد واضغط "أطلق الطلبات" — كل الطلبات تنطلق بنفس اللحظة.</div>';
+    resultPanel.appendChild(meta);
+    resultPanel.appendChild(body);
+    container.appendChild(resultPanel);
+
+    btn.onclick = async function () {
+      var n = Math.max(1, Math.min(32, parseInt(countInput.value, 10) || 1));
+      btn.setBusy(true);
+      meta.innerHTML = "";
+      body.innerHTML = '<div class="empty-state">جاري إرسال ' + n + " طلب متزامن... (المحرك يعالجها بالتتابع، الأخير ينتظر الجميع)</div>";
+
+      var t0 = performance.now();
+      var tasks = [];
+      for (var i = 0; i < n; i++) {
+        (function (idx) {
+          var reqStart = performance.now();
+          tasks.push(
+            fetch(baseUrl() + "/sales/chat", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              // بدون session_id — كل طلب جلسة مستقلة حتى ما تتداخل الذاكرة
+              body: JSON.stringify({ message: msgInput.value + " (#" + (idx + 1) + ")" })
+            })
+              .then(function (res) {
+                return res.json().then(function (json) {
+                  return { idx: idx, status: res.status, ms: Math.round(performance.now() - reqStart), answer: (json && json.answer) || "" };
+                });
+              })
+              .catch(function (e) {
+                return { idx: idx, status: 0, ms: Math.round(performance.now() - reqStart), answer: "خطأ: " + e.message };
+              })
+          );
+        })(i);
+      }
+
+      var results = await Promise.all(tasks);
+      var totalMs = Math.round(performance.now() - t0);
+      var ok = results.filter(function (r) { return r.status >= 200 && r.status < 300; }).length;
+      var times = results.map(function (r) { return r.ms; }).sort(function (a, b) { return a - b; });
+      var avg = Math.round(times.reduce(function (s, v) { return s + v; }, 0) / times.length);
+      var p95 = times[Math.min(times.length - 1, Math.floor(times.length * 0.95))];
+
+      meta.innerHTML =
+        '<span class="status-code ' + (ok === n ? "s2" : "s5") + '">' + ok + "/" + n + " نجح</span>" +
+        '<span class="latency">إجمالي: ' + totalMs + " ms</span>" +
+        '<span class="latency">متوسط: ' + avg + " ms</span>" +
+        '<span class="latency">p95: ' + p95 + " ms</span>";
+
+      body.innerHTML = "";
+      var table = document.createElement("pre");
+      table.className = "json-view";
+      table.textContent = results
+        .sort(function (a, b) { return a.idx - b.idx; })
+        .map(function (r) {
+          return "#" + (r.idx + 1) + "  [" + (r.status || "فشل") + "]  " + r.ms + "ms  " +
+            (r.answer ? r.answer.slice(0, 80) : "");
+        })
+        .join("\n");
+      body.appendChild(table);
       btn.setBusy(false);
     };
   }

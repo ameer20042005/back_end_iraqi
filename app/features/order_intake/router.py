@@ -59,8 +59,11 @@ async def create_order(
     if llm_engine.ready:
         prompt = llm_engine.render_prompt(messages)
         schema = OrderExtraction.model_json_schema()
+        # 256 بدل 512: مخطط OrderExtraction المكتمل ~150-200 توكن فعلياً،
+        # وكل توكن زائد يكلّف وقتاً حقيقياً (فك تشفير eager تسلسلي) — كانت
+        # 512 تخلي الطلب ياخذ 17+ ثانية.
         raw_json = await llm_engine.generate_full(
-            prompt, max_tokens=512, temperature=0.0, guided_json=schema
+            prompt, max_tokens=256, temperature=0.0, guided_json=schema
         )
         extraction = parse_order_extraction(raw_json)
         if not extraction.items:

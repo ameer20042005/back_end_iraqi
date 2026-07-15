@@ -88,7 +88,7 @@ async def _maybe_build_order(session_key: str, rag_words: List[dict]) -> Optiona
         extraction_prompt = llm_engine.render_prompt(extraction_messages)
         schema = OrderExtraction.model_json_schema()
         raw = await llm_engine.generate_full(
-            extraction_prompt, max_tokens=512, temperature=0.0, guided_json=schema
+            extraction_prompt, max_tokens=256, temperature=0.0, guided_json=schema
         )
         extraction = parse_order_extraction(raw)
     else:
