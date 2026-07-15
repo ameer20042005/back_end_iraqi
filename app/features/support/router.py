@@ -80,7 +80,7 @@ async def support_chat(req: SupportChatRequest):
             "get_order_status": _get_order_status_tool,
             "web_search": web_search_tool,
         })
-        engine_name = "vllm"
+        engine_name = "transformers"
     else:
         answer = await _fallback_support_answer(req.message)
         engine_name = "fallback"

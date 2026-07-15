@@ -22,7 +22,7 @@ uvicorn app.main:app --reload --port 8000
 
 ثم افتح: http://localhost:8000/docs
 
-> ملاحظة: torch/vllm غير مثبتين بالبيئة المحلية (حجمهم كبير وموجودين مسبقاً بصورة RunPod).
+> ملاحظة: torch/transformers غير مثبتين بالبيئة المحلية (حجمهم كبير وموجودين مسبقاً بصورة RunPod).
 > `/gpu` سترجع `cuda: false`، وكل نقاط `/sales/*` و`/support/*` ترجع "[وضع محلي بدون GPU]" بدل توليد حقيقي — يكفي لاختبار الـ API نفسها.
 
 ## الرفع على RunPod — طريقتان
@@ -62,7 +62,7 @@ docker push <username>/back-end-iraqi:latest
 | النقطة | الوصف |
 |---|---|
 | `GET /health` | فحص الصحة |
-| `GET /gpu` | معلومات GPU/CUDA وحالة محرك vLLM |
+| `GET /gpu` | معلومات GPU/CUDA وحالة محرك الموديل |
 | `POST /sales/chat` | وكيل مبيعات — رد كامل، يرجع `order` مملوءاً تلقائياً عند تثبيت الطلب |
 | `POST /sales/chat/stream` | وكيل مبيعات — بث SSE، حدث `done` النهائي يحمل `order` |
 | `POST /support/chat` | دعم عملاء — تتبع طلب برقم الطلب/الهاتف، أو سؤال عام (أداة بحث ويب) |
@@ -90,7 +90,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 | الملف | الدور |
 |---|---|
 | `app/config.py` | إعدادات مشتركة عبر متغيرات بيئة (موديل، RAG، أدوات) — **بدون أي سر مكتوب بالكود** |
-| `app/engine.py` | غلاف vLLM: `render_prompt()` يبني نص البرومبت من chat template الموديل الفعلي، `generate_stream/full()` مع دعم `stop`/`guided_json`/`result_holder` |
+| `app/engine.py` | غلاف transformers (`AutoModelForImageTextToText.generate`): `render_prompt()` يبني نص البرومبت من chat template الموديل الفعلي، `generate_stream/full()` مع دعم `stop`/`result_holder` (قفل طلب واحد بنفس اللحظة على GPU) |
 | `app/tool_loop.py` | حلقة استدعاء أدوات عامة (`[TOOL_CALL]{...}[/TOOL_CALL]`) — مستخدمة حالياً من `support`، قابلة للربط بأي ميزة أخرى |
 | `app/context_blocks.py` | صياغة نتائج RAG (لهجة/منتجات) كمقاطع نصية تُدمَج بأي system prompt |
 | `app/sessions.py` | ذاكرة محادثة بالذاكرة (in-memory)، مفاتيحها مسبوقة باسم الميزة (`sales:...`, `support:...`) |
@@ -98,7 +98,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 | `app/products.py` | كتالوج المنتجات: `ProductRepository` (واجهة) + `StaticProductRepository` (JSON محلي حالياً — استبدلها بقاعدتك) |
 | `app/order_schema.py` | `OrderExtraction` (خام من الموديل) / `OrderConfirmation` (بعد حساب الأسعار من الكتالوج) / `parse_order_extraction()` |
 | `app/order_gateway.py` | بوابة نظام إدارة الطلبات الخارجي: **إخراج** (`OrderStatusProvider` — تتبع حالة، تستخدمه `support`) و**إدخال** (`OrderSubmitter` — تثبيت طلب جديد، تستخدمه `sales`/`order_intake` بعد حساب الأسعار) |
-| `app/hf_utils.py` | `resolve_lora_path()` — تنزيل محوّل LoRA من Hugging Face Hub إن كان معرّف مستودع؛ مشتركة بين `engine.py` (vLLM) و`order_intake/vision.py` (transformers خام) |
+| `app/hf_utils.py` | `resolve_lora_path()` — تنزيل محوّل LoRA من Hugging Face Hub إن كان معرّف مستودع؛ مستخدَمة من `engine.py` عند دمج LoRA يدوياً (`LORA_PATH` معبّأ) |
 | `app/tools/web_search.py` | أداة بحث ويب عامة عبر DuckDuckGo (`ddgs`) — بدون أي API key |
 
 ## نقاط توصيل مؤجَّلة (Mock الآن، استبدلها لاحقاً)
@@ -110,27 +110,28 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
   - **إخراج** — `OrderStatusProvider.get_by_order_id()`/`.search_by_phone()`: حالياً `MockOrderStatusProvider` ببيانات تجريبية ثابتة. تستخدمه ميزة `support` لتتبع الطلبات.
   - **إدخال** — `OrderSubmitter.submit()`: حالياً `MockOrderSubmitter` يحتفظ بالطلبات بالذاكرة فقط. تستدعيه `sales/service.py` تلقائياً بعد كل طلب مؤكَّد لإرساله للنظام الخارجي.
   - لربط API حقيقي: أعطني رابط كل عملية (استعلام بمعرّف الطلب، بحث برقم الهاتف، تثبيت طلب جديد) وشكل الاستجابة، وأطبّق صنفين (`HttpOrderStatusProvider`, `HttpOrderSubmitter`) وأبدّل السطرين الأخيرين — بدون تغيير أي راوتر.
-- **وصف الصورة** (`app/features/order_intake/vision.py`): مفعّلة عبر **نفس محرك vLLM** المستخدَم بباقي الميزات (Gemma 4 يدعم صور أصلاً عبر `multi_modal_data` — انظر `app/engine.py: render_multimodal_prompt`/`generate_full`) — **ماكو نسخة ثانية من الموديل ولا استهلاك VRAM إضافي**. محلياً بدون GPU ترجع `501` واضحة.
+- **وصف الصورة** (`app/features/order_intake/vision.py`): مفعّلة عبر **نفس محرك الموديل** المستخدَم بباقي الميزات (Gemma 4 يدعم صور أصلاً عبر `multi_modal_data` — انظر `app/engine.py: render_multimodal_prompt`/`generate_full`) — **ماكو نسخة ثانية من الموديل ولا استهلاك VRAM إضافي**. محلياً بدون GPU ترجع `501` واضحة.
 
-## محرك الاستدلال — vLLM
+## محرك الاستدلال — transformers مباشرة (مو vLLM)
 
-مبني حول **vLLM** (`app/engine.py`) لتحقيق زمن استجابة قريب من 1–1.5 ثانية:
+مبني حول **transformers** (`AutoModelForImageTextToText.generate`، `app/engine.py`) وليس vLLM:
 
-- **Continuous Batching** و**PagedAttention**: مدمجتان تلقائياً في vLLM.
-- **FlashAttention**: يختارها vLLM تلقائياً حسب العتاد إن كانت مدعومة.
-- **Prefix Caching**: مفعّلة (`enable_prefix_caching`) لإعادة استخدام الـ KV cache لجزء الـ system prompt/سياق RAG المتكرر بين الطلبات.
-- **Streaming**: نقاط `*/stream` تبث الفروقات النصية أولاً بأول.
+**ليش مو vLLM**: نسخة vLLM المتوفرة حالياً (0.25.1) عندها باغ معروف وغير مُصلَح بعد بدعم معمارية `Gemma4ForConditionalGeneration` — بعض طبقات self-attention تشارك KV مع طبقات أخرى (لا تملك `k_norm` خاص بها)، بينما كود vLLM يبني هذه الطبقة لكل الطبقات بدون شرط فيفشل تحميل الأوزان (`weights were not initialized from checkpoint`). راجع [vllm-project/vllm#44788](https://github.com/vllm-project/vllm/issues/44788) — عدة محاولات إصلاح مفتوحة لكن ولا واحدة مدموجة بعد. `transformers` (المصدر الرسمي) يحمّل المعمارية الحقيقية مباشرة فلا يعاني من هذا.
+
+- **قفل طلب واحد** (`asyncio.Lock` بـ `app/engine.py`): بديل مبسّط لـ Continuous Batching الحقيقي — طلب واحد على GPU بنفس اللحظة، الباقي ينتظر بالدور. **الثمن الفعلي مقابل vLLM**: بطء أكبر تحت حمل متزامن عالٍ (بدون PagedAttention/batching ديناميكي)؛ يُعاد تقييمه لاحقاً إذا نضج دعم vLLM لـ Gemma4 أو زاد الحمل.
+- **Streaming**: عبر `transformers.TextIteratorStreamer` بخيط منفصل — نقاط `*/stream` تبث الفروقات النصية أولاً بأول.
 - **RAG**: `app/rag/` (لهجة) + `app/products.py` (منتجات) يقلّصان السياق المُمرَّر للموديل بدل حقن البيانات كاملة.
 - **قالب محادثة حقيقي**: `LLMEngine.render_prompt()` يستخدم `tokenizer.apply_chat_template()` للموديل المحمَّل فعلياً (Gemma أو أي موديل آخر) بدل قالب ثابت مكتوب يدوياً — يبقى صحيحاً مهما تغيّر `MODEL_NAME`.
-- **FastAPI غير متزامن (async)**: كل نقاط الميزات `async def` وتستهلك مولّد vLLM غير المتزامن دون حجب الحلقة.
+- **إيقاف نصي مخصص**: `stop` (مثل `[ORDER_READY]`, `[/TOOL_CALL]`) عبر `StoppingCriteria` يفحص النص المفكوك أول بأول — `transformers.generate()` لا يدعم `stop` نصياً أصلاً بعكس vLLM.
+- **FastAPI غير متزامن (async)**: كل نقاط الميزات `async def`؛ التوليد نفسه يشتغل بخيط منفصل (`threading.Thread`) عبر `TextIteratorStreamer` حتى لا يحجب حلقة FastAPI.
 
-vLLM يحتاج GPU/Linux ولا يعمل محلياً على Windows؛ محلياً (`llm_engine.ready == False`) ترجع كل الميزات تلقائياً لوضع fallback (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod. التثبيت الفعلي في [requirements-gpu.txt](requirements-gpu.txt) ويحدث تلقائياً ضمن `start.sh` والـ Dockerfile.
+`transformers` يحتاج GPU/Linux ولا يعمل محلياً على Windows؛ محلياً (`llm_engine.ready == False`) ترجع كل الميزات تلقائياً لوضع fallback (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod. التثبيت الفعلي في [requirements-gpu.txt](requirements-gpu.txt) ويحدث تلقائياً ضمن `start.sh` والـ Dockerfile.
 
 ### آلية "الوكيل يقرر" و"استدعاء الأدوات"
 
-بدل الاعتماد على tool-calling الأصلي لـ vLLM (غير مؤكّد الدعم لموديل حديث جداً مثل Gemma 4)، نستخدم نمطاً نصياً بسيطاً:
+بدل الاعتماد على tool-calling الأصلي لأي محرك (غير مؤكّد الدعم لموديل حديث جداً مثل Gemma 4)، نستخدم نمطاً نصياً بسيطاً:
 
-- **[ORDER_READY]** (`app/features/sales/prompts.py`): الوكيل يختم رده بهذا السطر متى ما قرر إن العميل جاهز للشراء. يُمرَّر كـ `stop` لـ vLLM فما يوصل للعميل، ونتحقق منه عبر `stop_reason` (`app/engine.py`) بدل البحث بالنص.
+- **[ORDER_READY]** (`app/features/sales/prompts.py`): الوكيل يختم رده بهذا السطر متى ما قرر إن العميل جاهز للشراء. يُمرَّر كـ `stop` فما يوصل للعميل، ونتحقق منه عبر `stop_reason` (`app/engine.py`) بدل البحث بالنص.
 - **[TOOL_CALL]{...}[/TOOL_CALL]** (`app/tool_loop.py`): نفس الفكرة معمَّمة لأي أداة (تتبع طلب، بحث ويب) — الموديل يطلب الأداة بنص محدد، الخادم ينفّذها ويعيد التوليد بجولة إضافية.
 
 ## الإعداد (متغيرات بيئة — انسخ [.env.example](.env.example) إلى `.env`)

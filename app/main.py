@@ -1,4 +1,4 @@
-"""FastAPI backend — يعمل محلياً وعلى RunPod (قالب PyTorch) مع vLLM + RAG.
+"""FastAPI backend — يعمل محلياً وعلى RunPod (قالب PyTorch) مع transformers + RAG.
 
 كل ميزة براوترها الخاص تحت app/features/*/router.py — هذا الملف فقط ينشئ
 التطبيق، يشغّل دورة حياة المحرك (lifespan)، ويجمع كل الراوترات."""
@@ -27,12 +27,14 @@ except ImportError:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # يشغّل vLLM AsyncLLMEngine مرة واحدة عند الإقلاع (Continuous Batching +
-    # PagedAttention + Prefix Caching مفعّلة عبر app/config.py).
-    # محلياً بدون GPU/vLLM يبقى llm_engine.ready == False وكل الميزات ترجع
-    # لوضع fallback (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod.
+    # يحمّل موديل transformers مرة واحدة عند الإقلاع، ويشغّل worker الـ
+    # micro-batching بالخلفية (انظر app/engine.py لتفاصيل الاختيار عن vLLM).
+    # محلياً بدون GPU/transformers يبقى llm_engine.ready == False وكل الميزات
+    # ترجع لوضع fallback (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod.
     await llm_engine.start()
     yield
+    # يلغي worker الـ batching ويفشل أي طلبات لسا بالطابور بدل تركها معلَّقة.
+    await llm_engine.shutdown()
 
 
 app = FastAPI(
@@ -64,6 +66,13 @@ def health():
     return {"status": "healthy"}
 
 
+@app.get("/metrics")
+def metrics():
+    """إحصاءات worker الـ micro-batching (app/engine.py) — عدد الطلبات،
+    متوسط حجم الدفعة، أزمنة استجابة p50/p95، عمق الطابور الحالي."""
+    return llm_engine.get_metrics()
+
+
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
@@ -81,7 +90,7 @@ def gpu_info():
     info = {
         "torch": torch.__version__,
         "cuda": torch.cuda.is_available(),
-        "vllm_ready": llm_engine.ready,
+        "model_ready": llm_engine.ready,
     }
     if torch.cuda.is_available():
         info["device_count"] = torch.cuda.device_count()

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""أدوات مشتركة للتعامل مع Hugging Face Hub — مستخدَمة من app/engine.py (vLLM)
+"""أدوات مشتركة للتعامل مع Hugging Face Hub — مستخدَمة من app/engine.py (transformers)
 وapp/features/order_intake/vision.py (transformers خام) كلاهما يحتاج نفس
 منطق تحميل محوّل LoRA."""
 

@@ -26,12 +26,16 @@ class Settings(BaseSettings):
     # المحوّل خاص. لا قيمة افتراضية أبداً؛ يُقرأ فقط من متغير البيئة HF_TOKEN.
     hf_token: Optional[str] = None
 
-    # دقّة الحساب — "auto" يترك vLLM يقرر حسب العتاد، أو "float16"/"bfloat16"
+    # دقّة الحساب — "auto"/"bfloat16" يحمّل bfloat16، أي قيمة أخرى تحمّل float16
+    # (انظر app/engine.py: LLMEngine.start)
     dtype: str = "auto"
-    # التكميم: None لـ FP16/BF16 الكامل، أو "bitsandbytes" لـ INT8 (إن كانت نسخة vLLM تدعمها)
+    # التكميم: غير مستخدَم حالياً بمحرك transformers (كان لـ vLLM فقط) — أُبقي
+    # الحقل لعدم كسر .env قديمة، لكن app/engine.py لا يقرأه.
     quantization: Optional[str] = None
 
-    # PagedAttention + Continuous Batching (مدمجة في vLLM تلقائياً، هذي فقط حدود السعة)
+    # قفل طلب واحد بنفس اللحظة على GPU (asyncio.Lock بـ app/engine.py) — هذي
+    # فقط حدود سعة سياق الموديل، مو batching حقيقي (انظر app/engine.py لتفاصيل
+    # الاختيار عن vLLM/PagedAttention).
     gpu_memory_utilization: float = 0.85
     max_model_len: int = 4096
     max_num_seqs: int = 32  # أقصى عدد طلبات مجمّعة سوية (continuous batching)

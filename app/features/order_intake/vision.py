@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """وصف/استخراج نص من صورة عبر قدرة Gemma 4 البصرية الأصلية — بنفس نسخة الموديل
-والأوزان المحمَّلة أصلاً بـ app/engine.py (vLLM يدعم Gemma4ForConditionalGeneration
-متعدد الوسائط أصلاً). **ماكو نسخة ثانية من الموديل هنا** — فقط استدعاء إضافي
-لنفس المحرك مع `multi_modal_data`.
+والأوزان المحمَّلة أصلاً بـ app/engine.py (transformers، AutoModelForImageTextToText
+يدعم Gemma4ForConditionalGeneration متعدد الوسائط أصلاً). **ماكو نسخة ثانية من
+الموديل هنا** — فقط استدعاء إضافي لنفس المحرك مع `multi_modal_data`.
 """
 
 import io
@@ -36,18 +36,18 @@ class NotConfiguredImageDescriber(ImageDescriber):
     async def describe(self, image_bytes: bytes) -> str:
         raise NotImplementedError(
             "ميزة وصف الصورة غير متوفرة بهذه البيئة — Pillow غير مثبَّتة، أو محرك "
-            "vLLM غير جاهز (طبيعي محلياً بدون GPU؛ يجب أن تعمل على RunPod)."
+            "الموديل غير جاهز (طبيعي محلياً بدون GPU؛ يجب أن تعمل على RunPod)."
         )
 
 
-class VLLMVisionDescriber(ImageDescriber):
-    """يستخدم نفس llm_engine (vLLM) المستخدَم بباقي الميزات النصية — الصورة قبل
-    النص بالبرومبت حسب توصية Gemma 4 لأفضل أداء."""
+class TransformersVisionDescriber(ImageDescriber):
+    """يستخدم نفس llm_engine (transformers) المستخدَم بباقي الميزات النصية —
+    الصورة قبل النص بالبرومبت حسب توصية Gemma 4 لأفضل أداء."""
 
     async def describe(self, image_bytes: bytes) -> str:
         if not llm_engine.ready:
             raise NotImplementedError(
-                "محرك vLLM غير جاهز (طبيعي محلياً بدون GPU؛ يجب أن يكون جاهزاً على RunPod)."
+                "محرك الموديل غير جاهز (طبيعي محلياً بدون GPU؛ يجب أن يكون جاهزاً على RunPod)."
             )
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         messages = [{
@@ -66,5 +66,5 @@ class VLLMVisionDescriber(ImageDescriber):
 
 
 image_describer: ImageDescriber = (
-    VLLMVisionDescriber() if PIL_AVAILABLE else NotConfiguredImageDescriber()
+    TransformersVisionDescriber() if PIL_AVAILABLE else NotConfiguredImageDescriber()
 )

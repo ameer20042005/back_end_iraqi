@@ -56,7 +56,7 @@ class OrderConfirmation(BaseModel):
 def parse_order_extraction(raw: str) -> OrderExtraction:
     """يحوّل نص خام من الموديل إلى OrderExtraction، مع محاولة تنظيف بسيطة
     (أسوار Markdown، نص قبل/بعد الكائن) إذا فشل guided decoding أو لم يكن
-    مدعوماً بنسخة vLLM المثبَّتة. يرجع OrderExtraction فارغ عند فشل التحليل
+    مدعوماً بمحرك التوليد الحالي. يرجع OrderExtraction فارغ عند فشل التحليل
     بدل رمي استثناء يكسر الطلب بالكامل."""
     text = raw.strip()
     if text.startswith("```"):

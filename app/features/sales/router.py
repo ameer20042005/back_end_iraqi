@@ -7,6 +7,7 @@ JSON، ونحسب الأسعار/المجموع من الكتالوج الحقي
 """
 
 import json
+import logging
 import uuid
 from typing import List, Optional
 
@@ -16,6 +17,7 @@ from pydantic import BaseModel
 
 from app import sessions
 from app.config import settings
+from app.context_blocks import products_context_block
 from app.engine import llm_engine
 from app.features.sales.prompts import (
     ORDER_READY_MARKER,
@@ -23,9 +25,12 @@ from app.features.sales.prompts import (
     build_sales_prompt,
 )
 from app.features.sales.service import resolve_order
+from app.guards import check_numbers
 from app.order_schema import OrderConfirmation, OrderExtraction, parse_order_extraction
 from app.products import product_repository
 from app.rag import search as search_words
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -100,7 +105,7 @@ async def sales_chat(req: SalesChatRequest):
             result_holder=result_holder,
         )
         order_ready = result_holder.get("stop_reason") == ORDER_READY_MARKER
-        engine_name = "vllm"
+        engine_name = "transformers"
     else:
         answer = _fallback_sales_answer(req.message, rag_products)
         order_ready = _fallback_order_ready(req.message)
@@ -108,6 +113,11 @@ async def sales_chat(req: SalesChatRequest):
 
     sessions.append(key, "user", req.message)
     sessions.append(key, "assistant", answer)
+
+    if engine_name == "transformers":
+        bad_numbers = check_numbers(answer, products_context_block(rag_products))
+        if bad_numbers:
+            logger.warning("رد المبيعات فيه أرقام غير موجودة بالكتالوج: %s (session=%s)", bad_numbers, session_id)
 
     order = await _maybe_build_order(key, rag_words) if order_ready else None
 
@@ -145,15 +155,22 @@ async def sales_chat_stream(req: SalesChatRequest):
                 collected.append(delta)
                 yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             order_ready = result_holder.get("stop_reason") == ORDER_READY_MARKER
+            engine_name = "transformers"
         else:
             answer = _fallback_sales_answer(req.message, rag_products)
             collected.append(answer)
             order_ready = _fallback_order_ready(req.message)
+            engine_name = "fallback"
             yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
 
         answer = "".join(collected)
         sessions.append(key, "user", req.message)
         sessions.append(key, "assistant", answer)
+
+        if engine_name == "transformers":
+            bad_numbers = check_numbers(answer, products_context_block(rag_products))
+            if bad_numbers:
+                logger.warning("رد المبيعات (stream) فيه أرقام غير موجودة بالكتالوج: %s (session=%s)", bad_numbers, session_id)
 
         order = await _maybe_build_order(key, rag_words) if order_ready else None
 

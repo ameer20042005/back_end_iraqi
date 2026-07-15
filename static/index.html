@@ -488,7 +488,7 @@
     border-radius: 6px;
     letter-spacing: 0.2px;
   }
-  .engine-pill.vllm { background: var(--accent-soft); color: var(--accent-strong); }
+  .engine-pill.transformers { background: var(--accent-soft); color: var(--accent-strong); }
   .engine-pill.fallback { background: var(--warn-soft); color: var(--warn); }
 
   .latency {
@@ -680,10 +680,10 @@
       var ms = Math.round(performance.now() - t0);
       if (res.ok) {
         var gpuRes = await fetch(baseUrl() + "/gpu").then(function (r) { return r.json(); }).catch(function () { return null; });
-        var vllm = gpuRes && gpuRes.vllm_ready;
+        var modelReady = gpuRes && gpuRes.model_ready;
         statusDot.className = "dot ok";
-        statusText.textContent = vllm
-          ? "متصل — vLLM جاهز (" + ms + "ms)"
+        statusText.textContent = modelReady
+          ? "متصل — الموديل جاهز (" + ms + "ms)"
           : "متصل — وضع fallback بدون GPU (" + ms + "ms)";
       } else {
         statusDot.className = "dot bad";
@@ -740,7 +740,7 @@
       method: "GET",
       path: "/gpu",
       title: "GET /gpu",
-      desc: "معلومات GPU/CUDA وحالة محرك vLLM — للتأكد إن الموديل شغال فعلاً على RunPod (بدل وضع fallback).",
+      desc: "معلومات GPU/CUDA وحالة محرك الموديل — للتأكد إن الموديل شغال فعلاً على RunPod (بدل وضع fallback).",
       render: renderSimpleGet
     },
     {
@@ -1037,7 +1037,7 @@
         meta.innerHTML =
           '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
           '<span class="latency">' + ms + " ms</span>" +
-          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "vllm" ? "vLLM" : "fallback") + "</span>" : "");
+          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "transformers" ? "transformers" : "fallback") + "</span>" : "");
 
         if (json.session_id) {
           sessionId = json.session_id;
@@ -1256,7 +1256,7 @@
         meta.innerHTML =
           '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
           '<span class="latency">' + ms + " ms</span>" +
-          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "vllm" ? "vLLM" : "fallback") + "</span>" : "");
+          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "transformers" ? "transformers" : "fallback") + "</span>" : "");
         if (json.session_id) {
           sessionId = json.session_id;
           sessionPill.querySelector(".val").textContent = sessionId;

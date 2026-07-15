@@ -13,7 +13,7 @@ from app.context_blocks import products_context_block, words_context_block
 Message = Dict[str, str]
 
 # سطر مستقل يضيفه الموديل بنهاية رده متى ما قرر إن العميل جاهز لتثبيت الطلب.
-# يُمرَّر كـ stop sequence لـ vLLM حتى ينقطع التوليد عنده ولا يوصل للعميل أبداً.
+# يُمرَّر كـ stop string حتى ينقطع التوليد عنده ولا يوصل للعميل أبداً.
 ORDER_READY_MARKER = "[ORDER_READY]"
 
 SALES_SYSTEM_PROMPT = f"""أنت وكيل مبيعات عراقي محترف وبارع بفن الإقناع، تتحدث باللهجة العراقية بالكامل.
