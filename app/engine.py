@@ -1,33 +1,36 @@
 # -*- coding: utf-8 -*-
 """غلاف حول transformers (AutoModelForImageTextToText.generate) — يشغّل الموديل
-مباشرة عبر مكتبة transformers الرسمية بدل vLLM.
+مباشرة عبر مكتبة transformers الرسمية بدل vLLM، مع dynamic micro-batching
+مبني فوق generate() الجاهزة نفسها (مو حلقة توليد يدوية).
 
 **لماذا مو vLLM**: نسخة vLLM المتوفرة حالياً (0.25.1) عندها باغ معروف وغير
 مُصلَح بعد بدعم معمارية Gemma4ForConditionalGeneration — يبني طبقة k_norm لكل
 طبقات self-attention بشكل غير مشروط، بينما الموديل الحقيقي (KV-sharing بين
 بعض الطبقات) لا يملك k_norm لكل الطبقات، فيفشل تحميل الأوزان
 ("weights were not initialized from checkpoint"). راجع
-https://github.com/vllm-project/vllm/issues/44788 — لا يوجد إصلاح مدموج حتى
-الآن رغم عدة محاولات متضاربة. transformers (المصدر الرسمي من Google/HF) لا
-يعاني من هذا لأنه يحمّل المعمارية الحقيقية مباشرة — نفس ما اشتغل بنجاح في
-gemma_iraqi_merge_fixed.ipynb.
+https://github.com/vllm-project/vllm/issues/44788.
 
-**لماذا generate() الجاهزة، مو حلقة توليد يدوية**: جُرِّب فعلياً محرك
-micro-batching يدوي (استدعاء self.model() مباشرة بحلقة with past_key_values
-متراكمة) لمحاكاة continuous batching، لكنه أنتج هذياناً كاملاً غير مترابط.
-السبب: معمارية Gemma4 (KV-sharing بين طبقات attention محلية/عامة) تعتمد
-داخلياً على `cache_position` دقيقة لتحديد أين تُكتب/تُقرأ القيم بالطبقات
-المشتركة تحديداً — `generate()` الجاهزة تبنيها صحيحة تلقائياً عبر
-prepare_inputs_for_generation، لكن استدعاء forward يدوياً بدونها (تمرير
-position_ids فقط لا يكفي) يخلي الطبقات المشتركة تقرأ K/V بإزاحة خاطئة فينتج
-هذياناً. الحل الآمن المُختبَر فعلياً (نفس ما نجح بالنوتبوك) هو استخدام
-generate() نفسها.
+**لماذا batching فوق generate() وليس حلقة توليد يدوية**: جُرِّبت حلقة يدوية
+(استدعاء self.model() مباشرة مع past_key_values متراكمة) وأنتجت هذياناً
+كاملاً — معمارية Gemma4 (KV-sharing) تعتمد على `cache_position` دقيقة تبنيها
+generate() داخلياً عبر prepare_inputs_for_generation، وتكرارها يدوياً هش وخطر.
+generate() الجاهزة بالمقابل تدعم دفعة مبطَّنة (left padding) أصلاً وتدير الـ
+cache صح لكل صفوف الدفعة — نفس الوصفة المجرَّبة بالنوتبوك لكن بدفعة بدل طلب
+واحد. الثمن الوحيد: ماكو بث توكن-بتوكن لكل طلب على حدة (الرد يرجع كاملاً) —
+وهذا مقبول لأن حارس الأرقام بالراوترات يجمّع الرد كاملاً قبل إرساله أصلاً.
 
-**الثمن**: نفقد PagedAttention وContinuous Batching الحقيقي لـ vLLM — الطلبات
-تُعالَج بالتتابع (قفل asyncio.Lock واحد حول كل استدعاء GPU) بدل تجميعها
-ديناميكياً. مقبول لحجم حركة معتدل؛ يُعاد تقييمه لاحقاً إذا نضج دعم vLLM
-لـ Gemma4 أو زاد الحمل بشكل يستدعي محرك batching حقيقي (بعد التحقق من دعمه
-الفعلي لهذه المعمارية تحديداً، بما فيها آلية KV-sharing).
+**كيف يشتغل**: الطلبات النصية تدخل طابوراً؛ worker واحد يجمّعها (حتى MAX_BATCH
+أو MAX_WAIT_MS، أيهما أسبق)، يرمّزها بدفعة واحدة بـ left padding، يستدعي
+generate() مرة وحدة للدفعة كاملة بخيط منفصل (asyncio.to_thread)، يفك تشفير
+كل صف على حدة، يقص عند stop strings الخاصة بكل طلب، ويحل Future كل طلب.
+النتيجة: 10 طلبات متزامنة = دفعة واحدة بزمن قريب من زمن طلب واحد، بدل 10
+أزمنة متراكمة بالتتابع (كانت توصل 110+ ثانية للطلب الأخير).
+
+**التوليد حتمي دائماً** (do_sample=False) — وصفة النوتبوك المعتمدة الوحيدة؛
+أي sampling أنتج انهيار مخرجات بالتجربة. طلبات temperature تُتجاهل عمداً.
+
+طلبات الصور (multi_modal_data) نادرة ولا تُدمج بالدفعة النصية — مسار منفصل
+بقفل بسيط.
 
 غير متوفر محلياً على Windows بدون GPU — عندها يبقى `ready = False` والباك اند
 يرجع لوضع RAG-only (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod.
@@ -35,8 +38,9 @@ generate() نفسها.
 
 import asyncio
 import os
-import threading
-from typing import AsyncGenerator, Dict, List, Optional
+import time
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, Dict, List, Optional, Tuple
 
 from app.config import settings
 
@@ -44,7 +48,7 @@ from app.hf_utils import resolve_lora_path
 
 try:
     import torch
-    from transformers import AutoModelForImageTextToText, AutoProcessor, TextIteratorStreamer
+    from transformers import AutoModelForImageTextToText, AutoProcessor
 
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
@@ -58,13 +62,33 @@ except ImportError:
     PEFT_AVAILABLE = False
 
 
+MAX_BATCH = 16    # أقصى عدد طلبات نصية بدفعة generate() واحدة
+MAX_WAIT_MS = 30  # أقصى انتظار لتجميع الدفعة بعد وصول أول طلب
+
+
+@dataclass
+class _PendingRequest:
+    prompt: str
+    max_new_tokens: int
+    stop_strings: List[str]
+    future: "asyncio.Future" = field(default=None)
+
+
 class LLMEngine:
     def __init__(self):
         self.model = None
         self.tokenizer = None
         self.processor = None  # للبرومبتات متعددة الوسائط (صورة/صوت) — انظر render_multimodal_prompt
-        self.extra_stop_token_ids: List[int] = []  # مثلاً <end_of_turn> لـ Gemma — انظر start()
-        self._lock = asyncio.Lock()  # طلب واحد بنفس اللحظة على GPU (بديل continuous batching)
+        self.extra_stop_token_ids: List[int] = []  # تُكتشف تلقائياً بالـ probe — انظر start()
+        self._queue: "asyncio.Queue" = asyncio.Queue()
+        self._worker_task: Optional["asyncio.Task"] = None
+        self._mm_lock = asyncio.Lock()  # طلبات الصور فقط
+        self.metrics = {
+            "requests_served": 0,
+            "batches_run": 0,
+            "batch_size_sum": 0,
+            "batch_latencies_ms": [],  # آخر 500 دفعة
+        }
 
     @property
     def ready(self) -> bool:
@@ -86,7 +110,7 @@ class LLMEngine:
             dtype=dtype,
             device_map="auto",
             trust_remote_code=True,   # لازمة لمعمارية Gemma 4 متعددة الوسائط
-            attn_implementation="eager",  # مطلوب لمعمارية E4B (نفس وصفة النوتبوك المعتمدة)
+            attn_implementation="eager",  # مطلوب لمعمارية E4B (وصفة النوتبوك المعتمدة)
         )
 
         if settings.lora_path and PEFT_AVAILABLE:
@@ -101,16 +125,18 @@ class LLMEngine:
             settings.model_name, token=settings.hf_token or None
         )
         self.tokenizer = self.processor.tokenizer
+        # left padding إلزامي للتوليد بدفعة: مع right padding آخر توكن حقيقي
+        # بالصفوف الأقصر يصير بمنتصف التسلسل وgenerate() تكمل من الـ padding.
+        self.tokenizer.padding_side = "left"
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
         # اكتشاف توكنات التوقف **تلقائياً** من قالب المحادثة (نمط الـ probe
-        # المعتمد بخلية الاستدلال الاحترافية في gemma_iraqi_merge_fixed.ipynb):
-        # نبني محادثة قصيرة كاملة (user+assistant بدون generation prompt)
-        # فتنتهي حتماً بتوكنات إغلاق الدور الحقيقية، ونلتقط منها التوكنات
-        # الخاصة (special) الأخيرة. ممنوع كتابة اسم التوكن يدوياً
-        # (convert_tokens_to_ids("<end_of_turn>")) — بهذا الموديل الاسم
-        # المكتوب يدوياً يتحول بصمت لمعرّف خاطئ/UNK فالتوليد لا يتوقف أبداً
-        # ويكمل يؤلف أدوار user/model وهمية بعد نهاية الرد (حصل فعلياً
-        # بالاختبار على RunPod). المتوقع لهذا الموديل: [1, 106].
+        # المعتمد بالنوتبوك): نبني محادثة قصيرة كاملة فتنتهي حتماً بتوكنات
+        # إغلاق الدور الحقيقية. ممنوع البحث بالاسم (convert_tokens_to_ids
+        # ("<end_of_turn>")) — الاسم يتحول بصمت لمعرّف خاطئ بهذا الـ tokenizer
+        # فالتوليد ما يتوقف ويؤلف أدوار user/model وهمية (حصل فعلياً).
+        # المتوقع لهذا الموديل: [1, 106].
         try:
             probe = self.tokenizer.apply_chat_template(
                 [{"role": "user", "content": "هلو"},
@@ -127,10 +153,26 @@ class LLMEngine:
                 [self.tokenizer.eos_token_id] if self.tokenizer.eos_token_id is not None else []
             )
 
+        self._worker_task = asyncio.create_task(self._worker())
+
     async def shutdown(self) -> None:
-        """لا يوجد worker/طابور بالإصدار الحالي (قفل تسلسلي بسيط) — موجودة
-        فقط لتماثل واجهة lifespan في app/main.py."""
-        return
+        """يُستدعى من lifespan عند إيقاف السيرفر — يلغي الـ worker ويفشل أي
+        طلبات لسا بالطابور بدل تركها معلَّقة."""
+        if self._worker_task is not None:
+            self._worker_task.cancel()
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        while not self._queue.empty():
+            try:
+                req = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if req.future is not None and not req.future.done():
+                req.future.set_exception(RuntimeError("الخادم يتوقف"))
 
     def render_prompt(self, messages: List[Dict[str, str]], tools: Optional[List[dict]] = None) -> str:
         """يحوّل قائمة رسائل (system/user/assistant) لنص برومبت باستخدام قالب
@@ -160,28 +202,76 @@ class LLMEngine:
             )
         return self.render_prompt(messages)
 
-    def _build_stopping_criteria(self, prompt_len: int, stop: Optional[List[str]]):
-        """StoppingCriteria نصي — transformers.generate() لا يدعم `stop`
-        كسلاسل نصية أصلاً (فقط stop_token_ids)، فنفحص النص المُفكَّك أول
-        بأول ونوقف التوليد يدوياً لحظة ظهور أي من السلاسل المطلوبة."""
-        from transformers import StoppingCriteria, StoppingCriteriaList
+    # ------------------------------------------------------------------
+    # Micro-batching فوق generate() — نص فقط
+    # ------------------------------------------------------------------
 
-        if not stop:
-            return None
+    async def _worker(self) -> None:
+        while True:
+            first = await self._queue.get()
+            batch = [first]
+            deadline = time.monotonic() + (MAX_WAIT_MS / 1000)
+            while len(batch) < MAX_BATCH:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    batch.append(await asyncio.wait_for(self._queue.get(), timeout=remaining))
+                except asyncio.TimeoutError:
+                    break
 
-        tokenizer = self.tokenizer
-        state = {"hit": None}
+            t0 = time.monotonic()
+            try:
+                results = await asyncio.to_thread(self._run_batch, batch)
+            except Exception as exc:
+                # لا نترك أي طلب معلَّقاً لو فشلت الدفعة — الجميع يستلم الخطأ
+                # والـ worker يكمل للدفعة الجاية.
+                for req in batch:
+                    if req.future is not None and not req.future.done():
+                        req.future.set_exception(exc)
+            else:
+                for req, res in zip(batch, results):
+                    if req.future is not None and not req.future.done():
+                        req.future.set_result(res)
+            finally:
+                elapsed_ms = (time.monotonic() - t0) * 1000
+                self.metrics["batches_run"] += 1
+                self.metrics["batch_size_sum"] += len(batch)
+                self.metrics["requests_served"] += len(batch)
+                self.metrics["batch_latencies_ms"].append(elapsed_ms)
+                if len(self.metrics["batch_latencies_ms"]) > 500:
+                    self.metrics["batch_latencies_ms"] = self.metrics["batch_latencies_ms"][-500:]
 
-        class _StringStop(StoppingCriteria):
-            def __call__(self, input_ids, scores, **kwargs) -> bool:
-                text = tokenizer.decode(input_ids[0][prompt_len:], skip_special_tokens=True)
-                for s in stop:
-                    if s in text:
-                        state["hit"] = s
-                        return True
-                return False
+    def _run_batch(self, batch: List[_PendingRequest]) -> List[Tuple[str, Optional[str]]]:
+        """يشغّل دفعة كاملة بـ generate() واحدة (يعمل بخيط منفصل عبر
+        asyncio.to_thread). يرجع لكل طلب (النص بعد قص stop strings،
+        وstop_reason إن وُجد)."""
+        enc = self.tokenizer(
+            [req.prompt for req in batch], return_tensors="pt", padding=True
+        ).to(self.model.device)
+        input_len = enc["input_ids"].shape[1]
+        max_new = max(req.max_new_tokens for req in batch)
 
-        return StoppingCriteriaList([_StringStop()]), state
+        with torch.no_grad():
+            out = self.model.generate(
+                **enc,
+                max_new_tokens=max_new,
+                do_sample=False,  # حتمي دائماً — وصفة النوتبوك؛ sampling = انهيار مخرجات
+                eos_token_id=list(self.extra_stop_token_ids) or None,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
+
+        results: List[Tuple[str, Optional[str]]] = []
+        for i, req in enumerate(batch):
+            text = self.tokenizer.decode(out[i][input_len:], skip_special_tokens=True)
+            stop_reason = None
+            for s in req.stop_strings:
+                if s in text:
+                    text = text[: text.index(s)]
+                    stop_reason = s
+                    break
+            results.append((text, stop_reason))
+        return results
 
     async def generate_stream(
         self,
@@ -195,94 +285,82 @@ class LLMEngine:
         top_p: Optional[float] = None,
         top_k: Optional[int] = None,
     ) -> AsyncGenerator[str, None]:
-        """يبث الفروقات (delta) نصياً أولاً بأول عبر TextIteratorStreamer
-        (يشتغل بخيط منفصل، نقرأ منه هنا بشكل async).
+        """الطلبات النصية تدخل طابور الـ micro-batching وتُنفَّذ بدفعة generate()
+        مشتركة — الرد يُبث كقطعة واحدة كاملة بعد انتهاء الدفعة (ماكو بث
+        توكن-بتوكن؛ حارس الأرقام بالراوترات يجمّع الرد كاملاً قبل إرساله أصلاً).
+        طلبات الصور (multi_modal_data) تمر بمسار منفصل بقفل بسيط.
+
+        `temperature`/`top_p`/`top_k` تُتجاهل عمداً — التوليد حتمي دائماً
+        (do_sample=False)، أي sampling أنتج انهيار مخرجات بالتجربة الفعلية.
 
         `result_holder`: إن مُرِّر (dict فارغ)، يُعبَّأ بعد انتهاء التوليد بـ
-        `stop_reason`/`finish_reason` — تُستخدم لمعرفة أي stop-string أوقف
-        التوليد (مثل [ORDER_READY]) دون تسريب النص نفسه للعميل.
-
-        `multi_modal_data`: مثلاً `{"image": pil_image}` — يستخدم نفس الموديل
-        والأوزان المحمَّلة أصلاً (بدون نسخة ثانية). استخدم `render_multimodal_prompt`
-        بدل `render_prompt` لبناء `prompt` عند تمرير هذا الوسيط.
-
-        قفل واحد (`self._lock`) حول كل استدعاء GPU — بديل مبسّط لـ continuous
-        batching الحقيقي: طلب واحد بنفس اللحظة، الباقي ينتظر بالدور.
+        `stop_reason`/`finish_reason` — لمعرفة أي stop-string أوقف التوليد
+        (مثل [ORDER_READY]) دون تسريب النص نفسه للعميل.
         """
-        async with self._lock:
-            temp = temperature if temperature is not None else settings.temperature
-            do_sample = temp is not None and temp > 0.0
+        if multi_modal_data and "image" in multi_modal_data:
+            async for delta in self._generate_multimodal(
+                prompt, max_tokens, stop, result_holder, multi_modal_data
+            ):
+                yield delta
+            return
 
-            if multi_modal_data and "image" in multi_modal_data:
-                inputs = self.processor(
-                    text=prompt, images=multi_modal_data["image"], return_tensors="pt"
-                ).to(self.model.device)
-            else:
-                inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        req = _PendingRequest(
+            prompt=prompt,
+            max_new_tokens=max_tokens or settings.max_new_tokens,
+            stop_strings=stop or [],
+            future=asyncio.get_running_loop().create_future(),
+        )
+        await self._queue.put(req)
+        text, stop_reason = await req.future
 
-            streamer = TextIteratorStreamer(
-                self.tokenizer, skip_prompt=True, skip_special_tokens=True
-            )
+        if result_holder is not None:
+            result_holder["stop_reason"] = stop_reason
+            result_holder["finish_reason"] = "stop" if stop_reason else "length"
+        if text:
+            yield text
 
-            stop_ids = list(self.extra_stop_token_ids) or None
-            stopping = self._build_stopping_criteria(inputs["input_ids"].shape[1], stop)
-            stopping_criteria, stop_state = stopping if stopping else (None, {"hit": None})
+    async def _generate_multimodal(
+        self,
+        prompt: str,
+        max_tokens: Optional[int],
+        stop: Optional[List[str]],
+        result_holder: Optional[dict],
+        multi_modal_data: dict,
+    ) -> AsyncGenerator[str, None]:
+        """مسار الصور — generate() لطلب واحد تحت قفل (نادر الاستخدام،
+        order_intake فقط، فلا يبرر تعقيد دمجه بالدفعة النصية)."""
+        async with self._mm_lock:
+            inputs = self.processor(
+                text=prompt, images=multi_modal_data["image"], return_tensors="pt"
+            ).to(self.model.device)
+            input_len = inputs["input_ids"].shape[1]
 
-            # حتمي (do_sample=False) هو الوصفة المعتمدة الوحيدة — لا نمرر
-            # temperature/top_p/top_k نهائياً عندها (تمريرها مع greedy يطلق
-            # تحذيرات وقد يغيّر السلوك ببعض إصدارات transformers).
-            gen_kwargs = dict(
-                **inputs,
-                max_new_tokens=max_tokens or settings.max_new_tokens,
-                do_sample=do_sample,
-                eos_token_id=stop_ids,
-                stopping_criteria=stopping_criteria,
-                streamer=streamer,
-            )
-            if do_sample:
-                gen_kwargs["temperature"] = temp
-                gen_kwargs["top_p"] = top_p if top_p is not None else settings.top_p
-                gen_kwargs["top_k"] = top_k if top_k is not None else settings.top_k
-            gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
+            def _gen():
+                with torch.no_grad():
+                    return self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_tokens or settings.max_new_tokens,
+                        do_sample=False,
+                        eos_token_id=list(self.extra_stop_token_ids) or None,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                    )
 
-            thread = threading.Thread(target=self.model.generate, kwargs=gen_kwargs)
-            thread.start()
+            out = await asyncio.to_thread(_gen)
+            text = self.tokenizer.decode(out[0][input_len:], skip_special_tokens=True)
 
-            previous_text = ""
-            full_text = ""
-            loop = asyncio.get_event_loop()
-            try:
-                while True:
-                    delta = await loop.run_in_executor(None, self._next_or_none, streamer)
-                    if delta is None:
+            stop_reason = None
+            if stop:
+                for s in stop:
+                    if s in text:
+                        text = text[: text.index(s)]
+                        stop_reason = s
                         break
-                    full_text += delta
-                    # لا نبث النص بعد لحظة ظهور stop string — نفس سلوك vLLM
-                    # (stop غير مُتضمَّن بالنص المُرسَل للعميل).
-                    if stop:
-                        hit = next((s for s in stop if s in full_text), None)
-                        if hit:
-                            visible = full_text[: full_text.index(hit)][len(previous_text):]
-                            if visible:
-                                yield visible
-                            stop_state["hit"] = hit
-                            break
-                    yield delta
-                    previous_text = full_text
-            finally:
-                thread.join(timeout=5)
 
             if result_holder is not None:
-                hit = stop_state.get("hit")
-                result_holder["stop_reason"] = hit
-                result_holder["finish_reason"] = "stop" if hit else "length"
-
-    @staticmethod
-    def _next_or_none(streamer):
-        try:
-            return next(streamer)
-        except StopIteration:
-            return None
+                result_holder["stop_reason"] = stop_reason
+                result_holder["finish_reason"] = "stop" if stop_reason else "length"
+            if text:
+                yield text
 
     async def generate_full(
         self,
@@ -305,11 +383,25 @@ class LLMEngine:
         return "".join(chunks)
 
     def get_metrics(self) -> dict:
-        """لا يوجد batching/طابور بهذا الإصدار (قفل تسلسلي بسيط) — إحصاءات
-        بسيطة فقط لبقاء /metrics بـ app/main.py يعمل بلا كسر."""
+        latencies = sorted(self.metrics["batch_latencies_ms"])
+        n = len(latencies)
+
+        def _pct(p: float) -> Optional[float]:
+            if not n:
+                return None
+            return round(latencies[min(n - 1, int(n * p))], 1)
+
         return {
-            "mode": "sequential_lock",
-            "note": "لا يوجد micro-batching حالياً — قفل asyncio.Lock واحد حول كل استدعاء GPU.",
+            "mode": "generate_micro_batching",
+            "requests_served": self.metrics["requests_served"],
+            "batches_run": self.metrics["batches_run"],
+            "avg_batch_size": (
+                round(self.metrics["batch_size_sum"] / self.metrics["batches_run"], 2)
+                if self.metrics["batches_run"] else 0
+            ),
+            "batch_latency_ms_p50": _pct(0.50),
+            "batch_latency_ms_p95": _pct(0.95),
+            "queue_depth": self._queue.qsize(),
         }
 
 
