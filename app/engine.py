@@ -279,12 +279,21 @@ class LLMEngine:
         past_key_values = None
         cur_input_ids = input_ids
         cur_attention_mask = attention_mask
+        # position_ids يدوية إلزامية هنا: نستدعي self.model() (forward خام)
+        # مباشرة، مو generate()، وبدون تمريرها صراحةً الموديل يفترض مواضع
+        # 0,1,2,... متتالية متجاهلاً الـ left-padding بالكامل — يخلي كل توكن
+        # حقيقي بموضع خاطئ (خصوصاً بدفعة فيها أطوال مختلفة) وينتج هذياناً
+        # كاملاً رغم إن attention_mask نفسه صحيح. نحسبها من cumsum على
+        # attention_mask (نفس منطق generate() الداخلي) ونحدّثها بكل خطوة.
+        position_ids = cur_attention_mask.long().cumsum(-1) - 1
+        position_ids.masked_fill_(cur_attention_mask == 0, 1)
 
         with torch.no_grad():
             for step in range(max_new):
                 outputs = self.model(
                     input_ids=cur_input_ids,
                     attention_mask=cur_attention_mask,
+                    position_ids=position_ids,
                     past_key_values=past_key_values,
                     use_cache=True,
                 )
@@ -358,6 +367,10 @@ class LLMEngine:
                     break
 
                 cur_input_ids = next_tokens.unsqueeze(-1)
+                # موضع التوكن الجديد = آخر موضع مستخدَم + 1 لكل صف (وليس
+                # عمود مشترك ثابت — صفوف الدفعة المختلفة الطول لها padding
+                # مختلف فتختلف مواضعها الحقيقية).
+                position_ids = position_ids[:, -1:] + 1
                 cur_attention_mask = torch.cat(
                     [cur_attention_mask, torch.ones((n, 1), dtype=cur_attention_mask.dtype, device=device)],
                     dim=-1,
