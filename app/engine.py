@@ -102,20 +102,30 @@ class LLMEngine:
         )
         self.tokenizer = self.processor.tokenizer
 
-        # نمرر <end_of_turn> و eos_token_id الأساسي معاً كـ stop token ids —
-        # الموديل يتوقف أحياناً بـ eos الأساسي بدل <end_of_turn>، والاعتماد على
-        # واحد منهم فقط يخلي التوليد يكمل بعد نهاية الرد الفعلي وينتج نصاً
-        # مشوّشاً (stop_ids = [106, 1] بالضبط بتوثيق النموذج على Hugging Face).
+        # اكتشاف توكنات التوقف **تلقائياً** من قالب المحادثة (نمط الـ probe
+        # المعتمد بخلية الاستدلال الاحترافية في gemma_iraqi_merge_fixed.ipynb):
+        # نبني محادثة قصيرة كاملة (user+assistant بدون generation prompt)
+        # فتنتهي حتماً بتوكنات إغلاق الدور الحقيقية، ونلتقط منها التوكنات
+        # الخاصة (special) الأخيرة. ممنوع كتابة اسم التوكن يدوياً
+        # (convert_tokens_to_ids("<end_of_turn>")) — بهذا الموديل الاسم
+        # المكتوب يدوياً يتحول بصمت لمعرّف خاطئ/UNK فالتوليد لا يتوقف أبداً
+        # ويكمل يؤلف أدوار user/model وهمية بعد نهاية الرد (حصل فعلياً
+        # بالاختبار على RunPod). المتوقع لهذا الموديل: [1, 106].
         try:
-            eot_id = self.tokenizer.convert_tokens_to_ids("<end_of_turn>")
-            stop_ids = set()
-            if isinstance(eot_id, int) and eot_id >= 0:
-                stop_ids.add(eot_id)
+            probe = self.tokenizer.apply_chat_template(
+                [{"role": "user", "content": "هلو"},
+                 {"role": "assistant", "content": "هلا بيك"}],
+                add_generation_prompt=False, return_dict=True, return_tensors="pt",
+            )["input_ids"][0].tolist()
+            special = set(self.tokenizer.all_special_ids)
+            stop_ids = {t for t in probe[-3:] if t in special}
             if self.tokenizer.eos_token_id is not None:
                 stop_ids.add(self.tokenizer.eos_token_id)
             self.extra_stop_token_ids = list(stop_ids)
         except Exception:
-            self.extra_stop_token_ids = []
+            self.extra_stop_token_ids = (
+                [self.tokenizer.eos_token_id] if self.tokenizer.eos_token_id is not None else []
+            )
 
     async def shutdown(self) -> None:
         """لا يوجد worker/طابور بالإصدار الحالي (قفل تسلسلي بسيط) — موجودة
