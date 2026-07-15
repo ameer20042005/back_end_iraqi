@@ -15,5 +15,8 @@ def build_order_intake_prompt(raw_text: str, rag_words: List[dict]) -> List[Mess
     system_content = ORDER_EXTRACTION_SYSTEM_PROMPT + words_context_block(rag_words)
     return [
         {"role": "system", "content": system_content},
-        {"role": "user", "content": raw_text},
+        # أمر التحويل الصريح بنهاية رسالة المستخدم (نفس أسلوب
+        # build_order_extraction_prompt بميزة المبيعات) — بدونه الموديل
+        # المدرَّب على ردود مبيعات باللهجة يميل يرد كبائع بدل إخراج JSON.
+        {"role": "user", "content": f"نص طلب الزبون:\n{raw_text}\n\nحوّل النص أعلاه إلى JSON حسب المخطط المطلوب الآن — أخرج JSON فقط."},
     ]

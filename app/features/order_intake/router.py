@@ -6,6 +6,8 @@
 app/features/order_intake/vision.py).
 """
 
+import logging
+import re
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -19,7 +21,11 @@ from app.features.sales.service import resolve_order
 from app.order_schema import OrderConfirmation, OrderExtraction, parse_order_extraction
 from app.rag import search as search_words
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/orders", tags=["order_intake"])
+
+_PHONE_RE = re.compile(r"07\d{9}")
 
 
 @router.post("/create", response_model=OrderConfirmation)
@@ -57,6 +63,18 @@ async def create_order(
             prompt, max_tokens=512, temperature=0.0, guided_json=schema
         )
         extraction = parse_order_extraction(raw_json)
+        if not extraction.items:
+            # الموديل مدرَّب على ردود مبيعات عراقية قصيرة، وبدون guided
+            # decoding (كان ميزة vLLM، غير مدعوم بـ transformers) قد يرد
+            # بلهجة عراقية بدل JSON فيفشل التحليل بصمت. نسجّل الناتج الخام
+            # للتشخيص ونرجع لاستخراج بدائي: النص كاملاً كاسم منتج (resolve_order
+            # يطابقه على الكتالوج بـ BM25) + رقم الهاتف بـ regex.
+            logger.warning("استخراج JSON فشل — الناتج الخام من الموديل: %r", raw_json[:500])
+            phone_match = _PHONE_RE.search(raw_text)
+            extraction = OrderExtraction(
+                customer_phone=phone_match.group() if phone_match else None,
+                items=[{"product_name": raw_text, "quantity": 1}],
+            )
     else:
         extraction = OrderExtraction(items=[{"product_name": raw_text, "quantity": 1}])
 
