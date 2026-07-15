@@ -43,13 +43,16 @@ class Settings(BaseSettings):
     # Prefix Caching للبرومبت الثابت (system prompt + سياق RAG المتكرر)
     enable_prefix_caching: bool = True
 
-    # توليد — القيم مطابقة لخلية "كود الاستدلال الصحيح" (GEN_BALANCED) في
-    # llm_iraqi_best.ipynb: أجوبة بيانات التدريب قصيرة (10-30 توكن غالباً)،
-    # وtemperature أعلى من 0.3 أنتج انحرافاً ملحوظاً بالتجربة الفعلية. بدون
-    # repetition_penalty نهائياً لأنه كان يخرب مفردات اللهجة العراقية.
+    # توليد — الوصفة المعتمدة الوحيدة (خلية الاستدلال الاحترافية في
+    # gemma_iraqi_merge_fixed.ipynb): **حتمي فقط** (temperature=0.0 →
+    # do_sample=False في app/engine.py). أي sampling (حتى temperature=0.3
+    # اللي كانت مضبوطة أيام vLLM) أنتج انهيار مخرجات كامل (هذيان غير مترابط)
+    # مع هذا الموديل بالتجربة الفعلية على RunPod — "الوضع المتوازن محذوف
+    # نهائياً" بنص النوتبوك. بدون repetition_penalty نهائياً لأنه كان يخرب
+    # مفردات اللهجة العراقية. أجوبة التدريب قصيرة؛ الطول الزائد = هذيان.
     max_new_tokens: int = 64
-    temperature: float = 0.3
-    top_p: float = 0.8
+    temperature: float = 0.0
+    top_p: float = 1.0
     top_k: int = 20
 
     # RAG (لهجة عراقية + منتجات)

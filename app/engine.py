@@ -218,17 +218,21 @@ class LLMEngine:
             stopping = self._build_stopping_criteria(inputs["input_ids"].shape[1], stop)
             stopping_criteria, stop_state = stopping if stopping else (None, {"hit": None})
 
+            # حتمي (do_sample=False) هو الوصفة المعتمدة الوحيدة — لا نمرر
+            # temperature/top_p/top_k نهائياً عندها (تمريرها مع greedy يطلق
+            # تحذيرات وقد يغيّر السلوك ببعض إصدارات transformers).
             gen_kwargs = dict(
                 **inputs,
                 max_new_tokens=max_tokens or settings.max_new_tokens,
                 do_sample=do_sample,
-                temperature=temp if do_sample else None,
-                top_p=top_p if top_p is not None else settings.top_p,
-                top_k=top_k if top_k is not None else settings.top_k,
                 eos_token_id=stop_ids,
                 stopping_criteria=stopping_criteria,
                 streamer=streamer,
             )
+            if do_sample:
+                gen_kwargs["temperature"] = temp
+                gen_kwargs["top_p"] = top_p if top_p is not None else settings.top_p
+                gen_kwargs["top_k"] = top_k if top_k is not None else settings.top_k
             gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
 
             thread = threading.Thread(target=self.model.generate, kwargs=gen_kwargs)
