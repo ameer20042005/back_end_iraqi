@@ -137,9 +137,9 @@ vLLM يحتاج GPU/Linux ولا يعمل محلياً على Windows؛ محلي
 
 | المتغير | الافتراضي | الوصف |
 |---|---|---|
-| `MODEL_NAME` | `google/gemma-4-E4B-it` | الموديل الأساسي (يُنزَّل تلقائياً من HF Hub) |
-| `LORA_PATH` | `ameer4wisam/gemma-iraqi-finetune` | مسار محلي أو معرّف مستودع HF لمحوّل LoRA (يُنزَّل تلقائياً إذا كان معرّف مستودع) |
-| `LORA_RANK` | `16` | يجب أن يطابق قيمة `r` الفعلية في `adapter_config.json` على المستودع، وإلا يُتجاهل المحوّل بصمت |
+| `MODEL_NAME` | `ameer4wisam/gemma-iraqi-finetune-v2` | الموديل المدموج (base + LoRA اللهجة العراقية مندمجين بالأوزان فعلياً، يشمل أبراج الرؤية/الصوت — يُنزَّل تلقائياً من HF Hub) |
+| `LORA_PATH` | (فارغ) | غير مطلوب مع موديل مدموج. فعّله فقط لو رجعت لموديل base + محوّل LoRA منفصل (مسار محلي أو معرّف مستودع HF يُنزَّل تلقائياً) |
+| `LORA_RANK` | `16` | يُستخدم فقط إن كان `LORA_PATH` معبّأً؛ يجب أن يطابق قيمة `r` الفعلية في `adapter_config.json` على المستودع، وإلا يُتجاهل المحوّل بصمت |
 | `HF_TOKEN` | (فارغ) | **مطلوب** — Gemma موديل بوابة (gated) ومستودع المحوّل خاص، بدون توكن صحيح يفشل التنزيل بخطأ 401/403 |
 | `DTYPE` | `auto` | `auto` / `float16` / `bfloat16` |
 | `QUANTIZATION` | (فارغ) | `bitsandbytes` لتحميل INT8، أو اتركه فارغاً لـ FP16/BF16 |
@@ -156,7 +156,7 @@ vLLM يحتاج GPU/Linux ولا يعمل محلياً على Windows؛ محلي
 
 - **المكتبات**: `start.sh` والـ `Dockerfile` يشغّلون `pip install -r requirements.txt -r requirements-gpu.txt` تلقائياً (والـ`Dockerfile`/`start.sh` يثبّتان `ffmpeg` أيضاً، لازم لتحويل الصوت لنص).
 - **الموديل الأساسي** (`MODEL_NAME`): `AsyncLLMEngine` ينزّله من Hugging Face Hub أول مرة يشتغل فيها ([app/engine.py](app/engine.py))، ويُخزَّن بذاكرة التخزين المؤقت (`~/.cache/huggingface` أو `HF_HOME`) فيُعاد استخدامه بالتشغيلات اللاحقة على نفس الـ pod/volume بدون إعادة تنزيل.
-- **محوّل LoRA** (`LORA_PATH`): إذا كانت القيمة معرّف مستودع HF بدل مسار محلي، يُنزَّل تلقائياً عبر `huggingface_hub.snapshot_download` في `LLMEngine.start`.
+- **محوّل LoRA** (`LORA_PATH`): فارغ افتراضياً لأن `MODEL_NAME` مدموج بالفعل. إذا عبّأته (رجوع لموديل base + محوّل منفصل) وكانت القيمة معرّف مستودع HF بدل مسار محلي، يُنزَّل تلقائياً عبر `huggingface_hub.snapshot_download` في `LLMEngine.start`.
 - **موديل تحويل الصوت** (`WHISPER_MODEL`): ينزّله `transformers.pipeline` تلقائياً أول استخدام لـ `/orders/create` بصوت.
 
 **خطوة لازمة قبل أول تشغيل — إعداد `HF_TOKEN`:**

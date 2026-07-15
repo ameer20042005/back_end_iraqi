@@ -12,11 +12,15 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # الموديل — يُنزَّل تلقائياً من Hugging Face Hub عند أول إقلاع (بدون أي أمر يدوي)
-    model_name: str = "google/gemma-4-E4B-it"
-    # مسار محوّل LoRA: مسار محلي، أو معرّف مستودع HF (مثال أدناه) فيُنزَّل تلقائياً أيضاً
-    lora_path: Optional[str] = "ameer4wisam/gemma-iraqi-finetune"
-    lora_rank: int = 16  # تأكد من مطابقتها لقيمة "r" الفعلية بـ adapter_config.json على المستودع
+    # الموديل — النسخة المدموجة (base + LoRA اللهجة العراقية مندمجين بالأوزان
+    # فعلياً عبر merge_and_unload، انظر gemma_iraqi_merge_fixed.ipynb) تشمل
+    # أبراج الرؤية/الصوت كاملة. يُنزَّل تلقائياً من Hugging Face Hub عند أول
+    # إقلاع (بدون أي أمر يدوي).
+    model_name: str = "ameer4wisam/gemma-iraqi-finetune-v2"
+    # مسار محوّل LoRA منفصل: غير مطلوب بعد الآن لأن model_name أعلاه مدموج
+    # بالفعل. اتركه None إلا إذا رجعت لموديل base + محوّل غير مندمج.
+    lora_path: Optional[str] = None
+    lora_rank: int = 16  # تأكد من مطابقتها لقيمة "r" الفعلية بـ adapter_config.json على المستودع (فقط إن استُخدم lora_path)
 
     # توكن Hugging Face — مطلوب لأن Gemma موديل بوابة (gated) وربما مستودع
     # المحوّل خاص. لا قيمة افتراضية أبداً؛ يُقرأ فقط من متغير البيئة HF_TOKEN.
