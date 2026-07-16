@@ -246,7 +246,11 @@ curl -X POST http://localhost:8000/orders/create -F "image=@order.jpg"
   "created_at": "2026-07-09T15:54:35.246950+00:00",
   "customer_name": null,
   "customer_phone": null,
+  "customer_phone2": null,
   "customer_address": null,
+  "customer_city": null,
+  "customer_district": null,
+  "state_code": null,
   "items": [
     {
       "product_id": "p003",
@@ -262,10 +266,13 @@ curl -X POST http://localhost:8000/orders/create -F "image=@order.jpg"
   "subtotal": 15000.0,
   "total": 15000.0,
   "currency": "IQD",
+  "quoted_price": null,
   "notes": null,
   "confirmation_message": "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
 }
 ```
+
+**ملاحظة — تصحيح المحافظة تلقائياً**: هذا المسار يستخدم برومت `plane.md` (بجذر المستودع) مع مرجع جغرافي من `states.xlsx`/`districts.xlsx` (18 محافظة، ~4900 منطقة → `app/rag/locations.json`). المناطق الواردة بنص الزبون تُطابَق قبل التوليد وتُحقن بالبرومت، وبعد الاستخراج إذا كانت المنطقة معروفة وتتبع محافظة واحدة تُعتمد محافظتها حتمياً بدل تخمين الموديل، ويُرجَع كودها بـ `state_code`. بعد أي تحديث لملفي الإكسل: `python -m app.rag.prepare_locations`.
 
 **أخطاء محتملة:**
 
@@ -288,7 +295,12 @@ curl -X POST http://localhost:8000/orders/create -F "image=@order.jpg"
 | `created_at` | string (ISO 8601, UTC) | وقت تثبيت الطلب |
 | `customer_name` | string \| null | اسم العميل إن ذُكر بالمحادثة/النص |
 | `customer_phone` | string \| null | رقم الهاتف إن ذُكر |
-| `customer_address` | string \| null | العنوان إن ذُكر |
+| `customer_phone2` | string \| null | رقم هاتف ثانٍ إن ذُكر (`/orders/create` فقط) |
+| `customer_address` | string \| null | العنوان إن ذُكر (بـ `/orders/create`: "محافظة - منطقة - تفصيل") |
+| `customer_city` | string \| null | المحافظة بالاسم الرسمي بقاعدة بيانات شركة التوصيل — تُصحَّح تلقائياً من مرجع المناطق (states.xlsx/districts.xlsx) |
+| `customer_district` | string \| null | المنطقة/الحي كما وردت برسالة الزبون |
+| `state_code` | string \| null | كود المحافظة بنظام شركة التوصيل (`BGD`, `BAS`...) |
+| `quoted_price` | string \| null | السعر كما ورد برسالة الزبون — للاطلاع فقط، لا يدخل بحساب `total` |
 | `items` | array of `ResolvedOrderItem` | عناصر الطلب بعد مطابقتها بالكتالوج |
 | `suggested_product` | object \| null | `{id, name, price, currency}` — المنتج الإضافي المقترَح إن وافق عليه العميل |
 | `subtotal` / `total` | number \| null | مجموع أسعار العناصر المطابَقة فقط (`matched: true`) — محسوبة بالسيرفر من الكتالوج، مو من الموديل |

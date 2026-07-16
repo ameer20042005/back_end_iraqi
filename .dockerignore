@@ -5,3 +5,6 @@ __pycache__/
 .git/
 .env
 *.md
+# plane.md هو الـ system prompt لاستخراج الطلبات — يُقرأ وقت التشغيل
+# (app/features/order_intake/prompts.py) فلازم يدخل الصورة رغم استثناء *.md
+!plane.md

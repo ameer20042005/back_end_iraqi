@@ -1,22 +1,44 @@
 # -*- coding: utf-8 -*-
-"""استخراج طلب من نص وحيد (بدل محادثة) — نص مكتوب مباشرة، أو ناتج تفريغ صوت،
-أو (لاحقاً) وصف صورة. يعيد استخدام نفس مخطط ونص استخراج JSON الخاص بميزة
-المبيعات بدل تكراره."""
+"""برومت استخراج طلب من رسالة عراقية خام (نص/صوت/صورة) بمسار /orders/create.
 
+الـ system prompt الكامل يعيش بملف plane.md بجذر المستودع (المصدر الوحيد —
+عدّله هناك)، ويُحقن معه مرجع جغرافي من قاعدة بيانات شركة التوصيل
+(app/rag/locations.py) حتى لا يخطئ الموديل بالمحافظة (city).
+"""
+
+import os
 from typing import Dict, List
 
-from app.context_blocks import words_context_block
-from app.features.sales.prompts import ORDER_EXTRACTION_SYSTEM_PROMPT
+from app.context_blocks import locations_context_block, words_context_block
+from app.rag import all_state_names
 
 Message = Dict[str, str]
 
+_PLANE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "plane.md"
+)
 
-def build_order_intake_prompt(raw_text: str, rag_words: List[dict]) -> List[Message]:
-    system_content = ORDER_EXTRACTION_SYSTEM_PROMPT + words_context_block(rag_words)
+# السطر الختامي بـ plane.md مصمَّم ليسبق نص الزبون مباشرة — ننقله لرسالة
+# المستخدم حتى تُحقن كتل RAG (المواقع/اللهجة) قبله لا بعده.
+_FINAL_INSTRUCTION = "الآن استخرج البيانات من النص التالي وأرجع JSON فقط:"
+
+with open(_PLANE_PATH, encoding="utf-8") as _f:
+    _SYSTEM_BASE = _f.read().strip()
+if _SYSTEM_BASE.endswith(_FINAL_INSTRUCTION):
+    _SYSTEM_BASE = _SYSTEM_BASE[: -len(_FINAL_INSTRUCTION)].rstrip()
+
+
+def build_order_intake_prompt(
+    raw_text: str,
+    rag_words: List[dict],
+    rag_locations: List[dict],
+) -> List[Message]:
+    system_content = (
+        _SYSTEM_BASE
+        + locations_context_block(rag_locations, all_state_names())
+        + words_context_block(rag_words)
+    )
     return [
         {"role": "system", "content": system_content},
-        # أمر التحويل الصريح بنهاية رسالة المستخدم (نفس أسلوب
-        # build_order_extraction_prompt بميزة المبيعات) — بدونه الموديل
-        # المدرَّب على ردود مبيعات باللهجة يميل يرد كبائع بدل إخراج JSON.
-        {"role": "user", "content": f"نص طلب الزبون:\n{raw_text}\n\nحوّل النص أعلاه إلى JSON حسب المخطط المطلوب الآن — أخرج JSON فقط."},
+        {"role": "user", "content": f"{_FINAL_INSTRUCTION}\n{raw_text}"},
     ]
