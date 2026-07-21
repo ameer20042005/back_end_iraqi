@@ -34,13 +34,23 @@ _fix_cuda_lib_path() {
     # مكتبات CUDA runtime قد تُثبَّت كحزم pip (nvidia-cuda-runtime-cu13...)
     # بدون إضافة مسارها لـ loader path — شائع بقوالب PyTorch العامة (غير
     # صورة vllm/vllm-openai الرسمية)، ويظهر كـ "libcudart.so.13: cannot open
-    # shared object file" رغم أن الملف موجود فعلاً بمجلد site-packages.
-    local dirs
-    dirs=$(find / -maxdepth 6 -type d -path '*/nvidia/*/lib' 2>/dev/null | grep -v '^/proc' | paste -sd: -)
+    # shared object file" رغم أن الملف موجود فعلاً بمجلد site-packages، عادة
+    # بمسار عميق مثل .../dist-packages/nvidia/cu13/lib (8+ مستويات من /).
+    # نسأل Python نفسه أين مثبَّتة حزمة nvidia بدل find من الجذر (أسرع، وما
+    # يعتمد على تخمين maxdepth صحيح).
+    local nvidia_pkg_dir dirs
+    nvidia_pkg_dir=$(python3 -c "import nvidia, os; print(os.path.dirname(nvidia.__path__[0]))" 2>/dev/null)
+    if [ -z "${nvidia_pkg_dir}" ] || [ ! -d "${nvidia_pkg_dir}" ]; then
+        echo "==> حزمة nvidia (pip) غير موجودة — تخطي إصلاح مسار CUDA"
+        return
+    fi
+    dirs=$(find "${nvidia_pkg_dir}/nvidia" -maxdepth 2 -type d -name lib 2>/dev/null | paste -sd: -)
     if [ -n "${dirs}" ]; then
         export LD_LIBRARY_PATH="${dirs}:${LD_LIBRARY_PATH}"
         echo "==> أُضيفت مسارات مكتبات CUDA من حزم nvidia pip إلى LD_LIBRARY_PATH:"
         echo "    ${dirs}"
+    else
+        echo "==> ماكو مجلدات lib تحت ${nvidia_pkg_dir}/nvidia — الإصلاح ما ينطبق هنا"
     fi
 }
 
