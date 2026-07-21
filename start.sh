@@ -30,6 +30,14 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 VLLM_LOG="/tmp/vllm_boot.log"
 
+# تنظيف عمليات vLLM/uvicorn عالقة من تشغيلة سابقة (مثلاً start.sh انقطع
+# بمنتصف الطريق أو أُعيد تشغيله يدوياً بنفس الجلسة) — بدونه المحاولة الجديدة
+# تفشل بـ "Address already in use" على نفس المنفذ رغم أن الإصلاح الفعلي نجح.
+pkill -9 -f "vllm.entrypoints.openai.api_server.*--port ${VLLM_PORT}" 2>/dev/null || true
+fuser -k "${VLLM_PORT}/tcp" 2>/dev/null || true
+fuser -k "${API_PORT}/tcp" 2>/dev/null || true
+sleep 1
+
 _fix_cuda_lib_path() {
     # مكتبات CUDA runtime قد تُثبَّت كحزم pip (nvidia-cuda-runtime-cu13...)
     # بدون إضافة مسارها لـ loader path — شائع بقوالب PyTorch العامة (غير
