@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Iraqi Backend API",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 

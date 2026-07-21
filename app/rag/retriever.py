@@ -51,11 +51,21 @@ def _strip_al(token):
     return token
 
 
+def _strip_plural_suffix(token):
+    """حذف لاحقات الجمع العربية الشائعة (جمع مؤنث سالم/جمع مذكر سالم) إذا
+    بقي من الكلمة 3 حروف فأكثر، حتى تتطابق صيغة الجمع مع المفرد بالفهرس
+    (مثال: «لابتوبات» ↔ «لابتوب»، «سماعات» ↔ «سماعة»)."""
+    for suffix in ("ات", "ون", "ين"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            return token[: -len(suffix)]
+    return token
+
+
 _STOPWORDS_NORM = {_strip_al(normalize(w)) for w in _STOPWORDS}
 
 
 def tokenize(text, keep_stopwords=False):
-    tokens = [_strip_al(t) for t in normalize(text).split()]
+    tokens = [_strip_plural_suffix(_strip_al(t)) for t in normalize(text).split()]
     if keep_stopwords:
         return tokens
     return [t for t in tokens if t not in _STOPWORDS_NORM]
