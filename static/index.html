@@ -680,7 +680,7 @@
       var ms = Math.round(performance.now() - t0);
       if (res.ok) {
         var gpuRes = await fetch(baseUrl() + "/gpu").then(function (r) { return r.json(); }).catch(function () { return null; });
-        var modelReady = gpuRes && gpuRes.model_ready;
+        var modelReady = gpuRes && gpuRes.vllm_ready;
         statusDot.className = "dot ok";
         statusText.textContent = modelReady
           ? "متصل — الموديل جاهز (" + ms + "ms)"
