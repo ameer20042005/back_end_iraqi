@@ -1,5 +1,6 @@
 #!/bin/bash
-# سكربت الإقلاع: يشغّل خادم vLLM (منفذ 8001، بالخلفية) + FastAPI (منفذ 8000).
+# سكربت الإقلاع: يشغّل خادم vLLM (منفذ داخلي، بالخلفية — افتراضياً 18001،
+# انظر VLLM_PORT أدناه) + FastAPI (منفذ 8000، هو الوحيد المكشوف من RunPod).
 #
 # مصمَّم لصورة vllm/vllm-openai:gemma4-unified (انظر Dockerfile) — الصورة
 # الوحيدة حالياً بدعم Gemma4ForConditionalGeneration (PR #44429، ما صدر بعد
@@ -23,20 +24,34 @@ command -v ffmpeg >/dev/null 2>&1 || {
     apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg
 }
 
+# 8001 مستخدَم أحياناً من خدمة نظام على قوالب RunPod العامة (لاحظنا nginx
+# داخلي ماسكه بالفعل على بعض الـ Pods) — 18001 منفذ داخلي (بين الحاويتين
+# فقط، ما يحتاج Expose من لوحة RunPod) أقل عرضة للتصادم. غيّره بـ VLLM_PORT
+# لو لسا يتصادم بمنفذك.
 MODEL_NAME="${MODEL_NAME:-ameer4wisam/gemma-iraqi-finetune-v2}"
-VLLM_PORT="${VLLM_PORT:-8001}"
+VLLM_PORT="${VLLM_PORT:-18001}"
 API_PORT="${API_PORT:-8000}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 VLLM_LOG="/tmp/vllm_boot.log"
 
-# تنظيف عمليات vLLM/uvicorn عالقة من تشغيلة سابقة (مثلاً start.sh انقطع
-# بمنتصف الطريق أو أُعيد تشغيله يدوياً بنفس الجلسة) — بدونه المحاولة الجديدة
-# تفشل بـ "Address already in use" على نفس المنفذ رغم أن الإصلاح الفعلي نجح.
+# تنظيف عمليات لنا عالقة من تشغيلة سابقة (start.sh انقطع بمنتصف الطريق أو
+# أُعيد تشغيله يدوياً بنفس الجلسة)، ثم تحقق أن VLLM_PORT فاضي فعلاً — لو
+# لسا محجوز فمن خدمة نظام (لاحظنا nginx داخلي ماسك 8001 على بعض قوالب
+# RunPod العامة) وليس عملية vllm سابقة لنا، فنفشل بخطأ واضح فوراً بدل تكرار
+# "Address already in use" الغامض من داخل vLLM.
+_port_owner() {
+    ss -ltnp 2>/dev/null | grep ":$1 " | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | head -1
+}
 pkill -9 -f "vllm.entrypoints.openai.api_server.*--port ${VLLM_PORT}" 2>/dev/null || true
-fuser -k "${VLLM_PORT}/tcp" 2>/dev/null || true
-fuser -k "${API_PORT}/tcp" 2>/dev/null || true
+pkill -9 -f "uvicorn app.main:app" 2>/dev/null || true
 sleep 1
+owner=$(_port_owner "${VLLM_PORT}")
+if [ -n "${owner}" ]; then
+    echo "🛑 المنفذ ${VLLM_PORT} محجوز فعلاً من عملية نظام: ${owner} (مو خادم vLLM سابق لنا)."
+    echo "   غيّر VLLM_PORT لمنفذ ثاني، مثلاً: VLLM_PORT=18002 bash start.sh"
+    exit 1
+fi
 
 _fix_cuda_lib_path() {
     # مكتبات CUDA runtime قد تُثبَّت كحزم pip (nvidia-cuda-runtime-cu13...)
