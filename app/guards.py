@@ -24,17 +24,28 @@ import re
 from typing import List, Optional
 
 _NUMBER_RE = re.compile(r"\d[\d,\.]*")
+_PHONE_RE = re.compile(r"^07\d{9}$")
+
+
+def _strip_separators(num: str) -> str:
+    """يزيل فواصل الآلاف (750,000 → 750000) حتى تتطابق مع أرقام الكتالوج
+    الخام (بدون تنسيق) رغم اختلاف صيغة الكتابة."""
+    return num.replace(",", "")
 
 
 def check_numbers(reply: str, reference_text: str) -> List[str]:
     """يرجع قائمة الأرقام المالية بـ `reply` غير الموجودة حرفياً بـ
     `reference_text`. يتجاهل أرقاماً قصيرة بدون فواصل/عشرية (≤ رقمين) لأنها
-    غالباً عدد قطع أو سنين ضمان، مو سعراً."""
-    allowed = set(_NUMBER_RE.findall(reference_text))
+    غالباً عدد قطع أو سنين ضمان، مو سعراً، وأرقام هاتف عراقية (07xxxxxxxxx)
+    لأنها بيانات عميل مو سعراً مختلَقاً."""
+    allowed = {_strip_separators(n) for n in _NUMBER_RE.findall(reference_text)}
     bad = []
     for num in _NUMBER_RE.findall(reply):
         clean = num.rstrip(".,")
-        if clean in allowed:
+        if _PHONE_RE.match(clean):
+            continue
+        norm = _strip_separators(clean)
+        if norm in allowed:
             continue
         if "," not in clean and "." not in clean and len(clean) <= 2:
             continue
