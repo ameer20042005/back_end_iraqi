@@ -97,11 +97,18 @@ def check_topics(reply: str, user_message: str, reference_text: str) -> Optional
     reply_words = _word_set(reply)
     user_words = _word_set(user_message)
     catalog_words = _word_set(reference_text)
+    # الوكيل مأمور (SALES_SYSTEM_PROMPT) يسأل العميل عن عنوان التوصيل قبل
+    # تثبيت الطلب — سؤال عن العنوان مو ادّعاء معلومة عن خدمة الشحن، فما
+    # يحتاج يكون مذكوراً بوصف المنتج. نميّزه بعلامة الاستفهام: جملة خبرية
+    # ("عندنا توصيل مجاني") تُفحص عادي، بينما سؤال ("وين عنوانك؟") يُستثنى.
+    is_question = "؟" in reply or "?" in reply
 
     for name, kws in TOPIC_GROUPS.items():
         asked = any(k in user_words for k in kws)
         mentioned = any(k in reply_words for k in kws)
         if not (asked or mentioned):
+            continue
+        if name == "توصيل" and is_question and mentioned and not asked:
             continue
         covered = any(k in catalog_words or k in reference_text for k in kws)
         if covered:
