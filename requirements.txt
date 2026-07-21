@@ -1,5 +1,6 @@
-# ملاحظة: لا نثبّت torch هنا — موجود مسبقاً في صورة RunPod
-# runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404 (torch 2.8.0 + CUDA 12.8.1)
+# ملاحظة: لا نثبّت torch/vllm هنا — موجودة مسبقاً في صورة
+# vllm/vllm-openai:gemma4-unified (انظر Dockerfile). httpx أدناه هو قناة
+# الاتصال بخادم vLLM (app/engine.py).
 fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
@@ -11,6 +12,3 @@ python-dotenv>=1.0
 # أداة البحث بالإنترنت (app/tools/web_search.py) — DuckDuckGo بدون API key
 ddgs>=9.0
 
-# تنزيل محوّل LoRA من Hugging Face Hub (app/hf_utils.py) — مكتبة خفيفة بدون
-# GPU/torch، تشتغل محلياً بدون مشاكل (خلاف transformers أدناه بـ requirements-gpu.txt)
-huggingface_hub>=0.24

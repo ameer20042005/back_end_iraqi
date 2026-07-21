@@ -25,7 +25,7 @@ from app.features.sales.prompts import (
     build_sales_prompt,
 )
 from app.features.sales.service import resolve_order
-from app.guards import check_numbers
+from app.guards import check_numbers, check_topics
 from app.order_schema import OrderConfirmation, OrderExtraction, parse_order_extraction
 from app.products import product_repository
 from app.rag import search as search_words
@@ -37,6 +37,11 @@ router = APIRouter(prefix="/sales", tags=["sales"])
 _SESSION_PREFIX = "sales:"
 
 _PURCHASE_KEYWORDS = ["اشتريها", "اشتريه", "خلص اشتري", "احجزلي", "ابيها", "أبيها", "موافق", "زبطت", "خذلي"]
+
+# رد بديل حتمي عندما يتدخل درع المواضيع (app/guards.py: check_topics) — الموديل
+# ادّعى معلومة عن موضوع (ضمان/تركيب/تقسيط...) غير مغطّى بمعلومات المنتج
+# المسترجَعة، فنستبدل الرد بإحالة صريحة بدل ترك هلوسة توصل للعميل.
+SAFE_TOPIC_REPLY = "خليني أتأكد من هذي المعلومة وأرد عليك، حتى ما أگلك شي غلط."
 
 
 class SalesChatRequest(BaseModel):
@@ -119,23 +124,31 @@ async def sales_chat(req: SalesChatRequest):
             result_holder=result_holder,
         )
         order_ready = result_holder.get("stop_reason") == ORDER_READY_MARKER
-        engine_name = "transformers"
+        engine_name = "vllm"
     else:
         answer = _fallback_sales_answer(req.message, rag_products)
         order_ready = _fallback_order_ready(req.message)
         engine_name = "fallback"
 
-    # حارس الأرقام — إلغاء فعلي مو تسجيل فقط: أي رقم مالي مو موجود حرفياً
-    # بكتالوج RAG يعني الموديل اختلقه من أوزانه، فنستبدل الرد كاملاً برد
-    # آمن مبني من أسعار الكتالوج الحقيقية قبل ما يوصل شي للعميل.
-    if engine_name == "transformers":
-        bad_numbers = check_numbers(answer, products_context_block(rag_products))
-        if bad_numbers:
+    # الدروع ثنائية الاتجاه — إلغاء فعلي مو تسجيل فقط (نفس تسلسل خلية
+    # الاستدلال بالنوتبوك: المواضيع أولاً لأنها تفهم السياق، الأرقام ثانياً).
+    if engine_name == "vllm":
+        reference_text = products_context_block(rag_products)
+        reason = check_topics(answer, req.message, reference_text)
+        if reason:
             logger.warning(
-                "أرقام مختلَقة برد المبيعات أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
-                bad_numbers, session_id, answer[:300],
+                "درع المواضيع تدخّل برد المبيعات: %s (session=%s) — الرد الأصلي: %r",
+                reason, session_id, answer[:300],
             )
-            answer = _safe_price_answer(rag_products)
+            answer = SAFE_TOPIC_REPLY
+        else:
+            bad_numbers = check_numbers(answer, reference_text)
+            if bad_numbers:
+                logger.warning(
+                    "أرقام مختلَقة برد المبيعات أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
+                    bad_numbers, session_id, answer[:300],
+                )
+                answer = _safe_price_answer(rag_products)
 
     sessions.append(key, "user", req.message)
     sessions.append(key, "assistant", answer)
@@ -178,15 +191,24 @@ async def sales_chat_stream(req: SalesChatRequest):
             ):
                 collected.append(delta)
             order_ready = result_holder.get("stop_reason") == ORDER_READY_MARKER
-            engine_name = "transformers"
+            engine_name = "vllm"
             answer = "".join(collected)
-            bad_numbers = check_numbers(answer, products_context_block(rag_products))
-            if bad_numbers:
+            reference_text = products_context_block(rag_products)
+            reason = check_topics(answer, req.message, reference_text)
+            if reason:
                 logger.warning(
-                    "أرقام مختلَقة برد المبيعات (stream) أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
-                    bad_numbers, session_id, answer[:300],
+                    "درع المواضيع تدخّل برد المبيعات (stream): %s (session=%s) — الرد الأصلي: %r",
+                    reason, session_id, answer[:300],
                 )
-                answer = _safe_price_answer(rag_products)
+                answer = SAFE_TOPIC_REPLY
+            else:
+                bad_numbers = check_numbers(answer, reference_text)
+                if bad_numbers:
+                    logger.warning(
+                        "أرقام مختلَقة برد المبيعات (stream) أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
+                        bad_numbers, session_id, answer[:300],
+                    )
+                    answer = _safe_price_answer(rag_products)
         else:
             answer = _fallback_sales_answer(req.message, rag_products)
             order_ready = _fallback_order_ready(req.message)

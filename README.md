@@ -1,7 +1,7 @@
 # back_end_iraqi — FastAPI على RunPod
 
-باكند FastAPI جاهز للعمل محلياً وعلى RunPod بقالب:
-`runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` (PyTorch 2.8.0 + CUDA 12.8.1 + Ubuntu 24.04)
+باكند FastAPI جاهز للعمل محلياً وعلى RunPod بصورة:
+`vllm/vllm-openai:gemma4-unified` (خادم vLLM الرسمي بدعم Gemma 4 — انظر [Dockerfile](Dockerfile))
 
 ثلاث ميزات، كل وحدة براوترها ونصوصها الخاصة تحت `app/features/`:
 
@@ -22,8 +22,8 @@ uvicorn app.main:app --reload --port 8000
 
 ثم افتح: http://localhost:8000/docs
 
-> ملاحظة: torch/transformers غير مثبتين بالبيئة المحلية (حجمهم كبير وموجودين مسبقاً بصورة RunPod).
-> `/gpu` سترجع `cuda: false`، وكل نقاط `/sales/*` و`/support/*` ترجع "[وضع محلي بدون GPU]" بدل توليد حقيقي — يكفي لاختبار الـ API نفسها.
+> ملاحظة: محلياً ماكو خادم vLLM (يحتاج GPU/Linux — موجود مسبقاً بصورة vLLM على RunPod).
+> `/gpu` سترجع `vllm_ready: false`، وكل نقاط `/sales/*` و`/support/*` ترجع "[وضع محلي بدون GPU]" بدل توليد حقيقي — يكفي لاختبار الـ API نفسها.
 
 ## الرفع على RunPod — طريقتان
 
@@ -90,7 +90,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 | الملف | الدور |
 |---|---|
 | `app/config.py` | إعدادات مشتركة عبر متغيرات بيئة (موديل، RAG، أدوات) — **بدون أي سر مكتوب بالكود** |
-| `app/engine.py` | غلاف transformers (`AutoModelForImageTextToText.generate`): `render_prompt()` يبني نص البرومبت من chat template الموديل الفعلي، `generate_stream/full()` مع دعم `stop`/`result_holder` (قفل طلب واحد بنفس اللحظة على GPU) |
+| `app/engine.py` | عميل vLLM: يتصل بخادم vLLM OpenAI-متوافق منفصل (منفذ 8001) عبر `/v1/chat/completions`، مع دعم `stop`/`result_holder`/`guided_json`/صور — vLLM يدير continuous batching وPagedAttention داخلياً |
 | `app/tool_loop.py` | حلقة استدعاء أدوات عامة (`[TOOL_CALL]{...}[/TOOL_CALL]`) — مستخدمة حالياً من `support`، قابلة للربط بأي ميزة أخرى |
 | `app/context_blocks.py` | صياغة نتائج RAG (لهجة/منتجات) كمقاطع نصية تُدمَج بأي system prompt |
 | `app/sessions.py` | ذاكرة محادثة بالذاكرة (in-memory)، مفاتيحها مسبوقة باسم الميزة (`sales:...`, `support:...`) |
@@ -98,7 +98,6 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 | `app/products.py` | كتالوج المنتجات: `ProductRepository` (واجهة) + `StaticProductRepository` (JSON محلي حالياً — استبدلها بقاعدتك) |
 | `app/order_schema.py` | `OrderExtraction` (خام من الموديل) / `OrderConfirmation` (بعد حساب الأسعار من الكتالوج) / `parse_order_extraction()` |
 | `app/order_gateway.py` | بوابة نظام إدارة الطلبات الخارجي: **إخراج** (`OrderStatusProvider` — تتبع حالة، تستخدمه `support`) و**إدخال** (`OrderSubmitter` — تثبيت طلب جديد، تستخدمه `sales`/`order_intake` بعد حساب الأسعار) |
-| `app/hf_utils.py` | `resolve_lora_path()` — تنزيل محوّل LoRA من Hugging Face Hub إن كان معرّف مستودع؛ مستخدَمة من `engine.py` عند دمج LoRA يدوياً (`LORA_PATH` معبّأ) |
 | `app/tools/web_search.py` | أداة بحث ويب عامة عبر DuckDuckGo (`ddgs`) — بدون أي API key |
 
 ## نقاط توصيل مؤجَّلة (Mock الآن، استبدلها لاحقاً)
@@ -112,20 +111,21 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
   - لربط API حقيقي: أعطني رابط كل عملية (استعلام بمعرّف الطلب، بحث برقم الهاتف، تثبيت طلب جديد) وشكل الاستجابة، وأطبّق صنفين (`HttpOrderStatusProvider`, `HttpOrderSubmitter`) وأبدّل السطرين الأخيرين — بدون تغيير أي راوتر.
 - **وصف الصورة** (`app/features/order_intake/vision.py`): مفعّلة عبر **نفس محرك الموديل** المستخدَم بباقي الميزات (Gemma 4 يدعم صور أصلاً عبر `multi_modal_data` — انظر `app/engine.py: render_multimodal_prompt`/`generate_full`) — **ماكو نسخة ثانية من الموديل ولا استهلاك VRAM إضافي**. محلياً بدون GPU ترجع `501` واضحة.
 
-## محرك الاستدلال — transformers مباشرة (مو vLLM)
+## محرك الاستدلال — خادم vLLM منفصل
 
-مبني حول **transformers** (`AutoModelForImageTextToText.generate`، `app/engine.py`) وليس vLLM:
+البنية: **FastAPI (منفذ 8000) عميل HTTP رفيع ← خادم vLLM OpenAI-متوافق (منفذ 8001)** يخدم الموديل المدموج بـ continuous batching حقيقي — مئات الطلبات المتزامنة تتقاسم الـ GPU تلقائياً (PagedAttention) بدون طوابير يدوية.
 
-**ليش مو vLLM**: نسخة vLLM المتوفرة حالياً (0.25.1) عندها باغ معروف وغير مُصلَح بعد بدعم معمارية `Gemma4ForConditionalGeneration` — بعض طبقات self-attention تشارك KV مع طبقات أخرى (لا تملك `k_norm` خاص بها)، بينما كود vLLM يبني هذه الطبقة لكل الطبقات بدون شرط فيفشل تحميل الأوزان (`weights were not initialized from checkpoint`). راجع [vllm-project/vllm#44788](https://github.com/vllm-project/vllm/issues/44788) — عدة محاولات إصلاح مفتوحة لكن ولا واحدة مدموجة بعد. `transformers` (المصدر الرسمي) يحمّل المعمارية الحقيقية مباشرة فلا يعاني من هذا.
+دعم معمارية `Gemma4ForConditionalGeneration` وصل لـ vLLM عبر [PR #44429](https://github.com/vllm-project/vllm/pull/44429) — متوفر حالياً فقط بالصورة المثبَّتة `vllm/vllm-openai:gemma4-unified` (انظر [Dockerfile](Dockerfile)) أو nightly wheel، ولم يصدر بعد بإصدار مستقر. (هذا حلّ الباغ القديم [#44788](https://github.com/vllm-project/vllm/issues/44788) الذي فرض علينا سابقاً محرك transformers + micro-batching يدوي — حُذف ذلك المسار بالكامل.)
 
-- **قفل طلب واحد** (`asyncio.Lock` بـ `app/engine.py`): بديل مبسّط لـ Continuous Batching الحقيقي — طلب واحد على GPU بنفس اللحظة، الباقي ينتظر بالدور. **الثمن الفعلي مقابل vLLM**: بطء أكبر تحت حمل متزامن عالٍ (بدون PagedAttention/batching ديناميكي)؛ يُعاد تقييمه لاحقاً إذا نضج دعم vLLM لـ Gemma4 أو زاد الحمل.
-- **Streaming**: عبر `transformers.TextIteratorStreamer` بخيط منفصل — نقاط `*/stream` تبث الفروقات النصية أولاً بأول.
+- **قالب المحادثة بجهة الخادم**: `/v1/chat/completions` يستقبل `messages` مباشرة وvLLM يطبّق chat template الموديل الفعلي — `render_prompt()` صارت تمريراً مباشراً.
+- **إيقاف نصي مخصص**: `stop` (مثل `[ORDER_READY]`, `[/TOOL_CALL]`) مدعوم أصلياً بـ vLLM، ونقرأ `stop_reason` من الاستجابة لمعرفة أي علامة أوقفت التوليد.
+- **Structured outputs**: استخراج JSON (`guided_json`) عبر `response_format: json_schema` — vLLM يقيّد التوليد بالمخطط فعلياً (guided decoding)، مو مجرد تلميح بالبرومبت.
+- **صور**: تُرسل كـ `image_url` (data URI base64) بنفس الطلب — نفس الموديل، ماكو نسخة ثانية.
+- **حتمي دائماً**: `temperature=0.0` بكل الطلبات (وصفة النوتبوك المعتمدة — أي sampling أنتج انهيار مخرجات بالتجربة).
 - **RAG**: `app/rag/` (لهجة) + `app/products.py` (منتجات) يقلّصان السياق المُمرَّر للموديل بدل حقن البيانات كاملة.
-- **قالب محادثة حقيقي**: `LLMEngine.render_prompt()` يستخدم `tokenizer.apply_chat_template()` للموديل المحمَّل فعلياً (Gemma أو أي موديل آخر) بدل قالب ثابت مكتوب يدوياً — يبقى صحيحاً مهما تغيّر `MODEL_NAME`.
-- **إيقاف نصي مخصص**: `stop` (مثل `[ORDER_READY]`, `[/TOOL_CALL]`) عبر `StoppingCriteria` يفحص النص المفكوك أول بأول — `transformers.generate()` لا يدعم `stop` نصياً أصلاً بعكس vLLM.
-- **FastAPI غير متزامن (async)**: كل نقاط الميزات `async def`؛ التوليد نفسه يشتغل بخيط منفصل (`threading.Thread`) عبر `TextIteratorStreamer` حتى لا يحجب حلقة FastAPI.
+- **فاحص جاهزية**: `app/engine.py` يفحص خادم vLLM دورياً — الميزات تشتغل فوراً بوضع fallback وتتحول تلقائياً لوضع الموديل أول ما يكمل vLLM تحميل الأوزان (ويرجعن لـ fallback لو سقط الخادم).
 
-`transformers` يحتاج GPU/Linux ولا يعمل محلياً على Windows؛ محلياً (`llm_engine.ready == False`) ترجع كل الميزات تلقائياً لوضع fallback (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod. التثبيت الفعلي في [requirements-gpu.txt](requirements-gpu.txt) ويحدث تلقائياً ضمن `start.sh` والـ Dockerfile.
+محلياً بدون خادم vLLM (`llm_engine.ready == False`) ترجع كل الميزات تلقائياً لوضع fallback (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod عبر [start.sh](start.sh) (يشغّل الخادمين سوية).
 
 ### آلية "الوكيل يقرر" و"استدعاء الأدوات"
 
@@ -138,14 +138,12 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 | المتغير | الافتراضي | الوصف |
 |---|---|---|
-| `MODEL_NAME` | `ameer4wisam/gemma-iraqi-finetune-v2` | الموديل المدموج (base + LoRA اللهجة العراقية مندمجين بالأوزان فعلياً، يشمل أبراج الرؤية/الصوت — يُنزَّل تلقائياً من HF Hub) |
-| `LORA_PATH` | (فارغ) | غير مطلوب مع موديل مدموج. فعّله فقط لو رجعت لموديل base + محوّل LoRA منفصل (مسار محلي أو معرّف مستودع HF يُنزَّل تلقائياً) |
-| `LORA_RANK` | `16` | يُستخدم فقط إن كان `LORA_PATH` معبّأً؛ يجب أن يطابق قيمة `r` الفعلية في `adapter_config.json` على المستودع، وإلا يُتجاهل المحوّل بصمت |
-| `HF_TOKEN` | (فارغ) | **مطلوب** — Gemma موديل بوابة (gated) ومستودع المحوّل خاص، بدون توكن صحيح يفشل التنزيل بخطأ 401/403 |
-| `DTYPE` | `auto` | `auto` / `float16` / `bfloat16` |
-| `QUANTIZATION` | (فارغ) | `bitsandbytes` لتحميل INT8، أو اتركه فارغاً لـ FP16/BF16 |
-| `MAX_NUM_SEQS` | `32` | عرض الـ Continuous Batching |
-| `MAX_MODEL_LEN` | `4096` | أقصى طول سياق |
+| `MODEL_NAME` | `ameer4wisam/gemma-iraqi-finetune-v2` | الموديل المدموج (base + LoRA اللهجة العراقية مندمجين بالأوزان فعلياً، يشمل أبراج الرؤية/الصوت — ينزّله خادم vLLM تلقائياً من HF Hub) |
+| `HF_TOKEN` | (فارغ) | **مطلوب** — Gemma موديل بوابة (gated) والمستودع المدموج قد يكون خاصاً، بدون توكن صحيح يفشل التنزيل بخطأ 401/403 |
+| `VLLM_BASE_URL` | `http://127.0.0.1:8001/v1` | عنوان خادم vLLM من جهة الباك اند (`app/engine.py`) |
+| `VLLM_PORT` | `8001` | منفذ خادم vLLM (يقرأه `start.sh`) |
+| `GPU_MEMORY_UTILIZATION` | `0.90` | نسبة VRAM لموديل vLLM + KV cache (حسب الوصفة الرسمية) |
+| `MAX_MODEL_LEN` | `4096` | أقصى طول سياق — أقصر = KV cache يتسع لطلبات متزامنة أكثر |
 | `RAG_TOP_K` | `5` | عدد وثائق RAG المسترجَعة لكل سؤال |
 | `WHISPER_MODEL` | `ayoubkirouane/whisper-small-ar` | موديل تحويل الصوت لنص العربي (`app/features/order_intake/transcribe.py`) |
 
@@ -155,9 +153,8 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 كل شي يتنزّل وحده عند أول إقلاع، بدون أي أمر يدوي:
 
-- **المكتبات**: `start.sh` والـ `Dockerfile` يشغّلون `pip install -r requirements.txt -r requirements-gpu.txt` تلقائياً (والـ`Dockerfile`/`start.sh` يثبّتان `ffmpeg` أيضاً، لازم لتحويل الصوت لنص).
-- **الموديل الأساسي** (`MODEL_NAME`): `AsyncLLMEngine` ينزّله من Hugging Face Hub أول مرة يشتغل فيها ([app/engine.py](app/engine.py))، ويُخزَّن بذاكرة التخزين المؤقت (`~/.cache/huggingface` أو `HF_HOME`) فيُعاد استخدامه بالتشغيلات اللاحقة على نفس الـ pod/volume بدون إعادة تنزيل.
-- **محوّل LoRA** (`LORA_PATH`): فارغ افتراضياً لأن `MODEL_NAME` مدموج بالفعل. إذا عبّأته (رجوع لموديل base + محوّل منفصل) وكانت القيمة معرّف مستودع HF بدل مسار محلي، يُنزَّل تلقائياً عبر `huggingface_hub.snapshot_download` في `LLMEngine.start`.
+- **المكتبات**: الـ `Dockerfile` (المبني على صورة vLLM الرسمية) يثبّت متطلبات FastAPI و`ffmpeg` (لازم لتحويل الصوت لنص) — vllm/torch/transformers موجودة مسبقاً بالصورة.
+- **الموديل المدموج** (`MODEL_NAME`): ينزّله خادم vLLM من Hugging Face Hub أول إقلاع ([start.sh](start.sh))، ويُخزَّن بذاكرة التخزين المؤقت (`~/.cache/huggingface` أو `HF_HOME`) فيُعاد استخدامه بالتشغيلات اللاحقة على نفس الـ pod/volume بدون إعادة تنزيل.
 - **موديل تحويل الصوت** (`WHISPER_MODEL`): ينزّله `transformers.pipeline` تلقائياً أول استخدام لـ `/orders/create` بصوت.
 
 **خطوة لازمة قبل أول تشغيل — إعداد `HF_TOKEN`:**

@@ -78,11 +78,11 @@ async def create_order(
         )
         plane = parse_plane_extraction(raw_json)
         if plane is None or not plane.orders:
-            # الموديل مدرَّب على ردود مبيعات عراقية قصيرة، وبدون guided
-            # decoding (كان ميزة vLLM، غير مدعوم بـ transformers) قد يرد
-            # بلهجة عراقية بدل JSON فيفشل التحليل بصمت. نسجّل الناتج الخام
-            # للتشخيص ونرجع لاستخراج بدائي: النص كاملاً كاسم منتج (resolve_order
-            # يطابقه على الكتالوج بـ BM25) + رقم الهاتف بـ regex.
+            # guided decoding (vLLM structured outputs) يقيّد الناتج بالمخطط
+            # فعلياً، لكن نبقي مسار الفشل دفاعياً (خادم قديم/إعداد ناقص قد
+            # يتجاهل response_format فيرد الموديل بلهجة عراقية بدل JSON).
+            # نسجّل الناتج الخام للتشخيص ونرجع لاستخراج بدائي: النص كاملاً
+            # كاسم منتج (resolve_order يطابقه بالكتالوج بـ BM25) + الهاتف بـ regex.
             logger.warning("استخراج JSON فشل — الناتج الخام من الموديل: %r", raw_json[:500])
         if plane is None:
             phone_match = _PHONE_RE.search(raw_text)

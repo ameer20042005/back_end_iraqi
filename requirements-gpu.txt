@@ -1,28 +1,17 @@
-# متطلبات RunPod فقط (GPU/Linux) — لا تُثبَّت محلياً على Windows بدون CUDA.
-# torch موجود مسبقاً في صورة runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
-
-# محرك التوليد: transformers مباشرة (AutoModelForImageTextToText.generate)،
-# مو vLLM — نسخة vLLM المتوفرة حالياً (0.25.1) عندها باغ غير مُصلَح بعد بدعم
-# معمارية Gemma4ForConditionalGeneration (KV-sharing بين بعض الطبقات يخلي
-# تحميل الأوزان يفشل: "weights were not initialized from checkpoint"،
-# راجع https://github.com/vllm-project/vllm/issues/44788). transformers هو
-# المصدر الرسمي ولا يعاني من هذا. تأكد أن الإصدار يدعم Gemma4 فعلياً.
+# متطلبات GPU — **صارت شبه فارغة عمداً**: محرك التوليد الآن خادم vLLM منفصل
+# (صورة vllm/vllm-openai:gemma4-unified بالـ Dockerfile — تحتوي vllm/torch/
+# transformers مسبقاً)، والباك اند عميل HTTP رفيع فقط (httpx بـ requirements.txt).
+#
+# آلية transformers.generate() + micro-batching اليدوي القديمة حُذفت بالكامل
+# من app/engine.py، ومعها peft (دمج LoRA صار بالنوتبوك حصراً — الموديل
+# المرفوع مدموج جاهز) وbitsandbytes (كانت للتكميم، غير مستخدمة).
+#
+# transformers تبقى مطلوبة فقط لميزة تحويل الصوت لنص (Whisper يعمل داخل
+# عملية FastAPI — app/features/order_intake/transcribe.py، ويحتاج ffmpeg
+# أيضاً: مثبَّت بالـ Dockerfile) — موجودة أصلاً بصورة vLLM؛ السطر هنا فقط
+# لمن يشغّل بدون الصورة الرسمية.
 transformers>=4.44
 
-# لدمج محوّل LoRA يدوياً عند الإقلاع إذا كان LORA_PATH معبّأ (app/engine.py:
-# LLMEngine.start عبر peft.PeftModel + merge_and_unload). غير مطلوبة إذا
-# MODEL_NAME يشير لموديل مدموج مسبقاً (الإعداد الافتراضي بـ app/config.py).
-peft>=0.11
-
-# اختياري: تحميل الموديل بـ INT8 — غير مستخدَم فعلياً بمحرك transformers
-# الحالي (كان لـ vLLM)، أُبقيت للتوافق مع بيئات .env قديمة.
-bitsandbytes>=0.43
-
-# AutoProcessor لبرومبتات الصور (app/engine.py: render_multimodal_prompt) +
-# تحويل الصوت لنص (app/features/order_intake/transcribe.py). تحتاج أيضاً
-# ffmpeg (ثبَّتناه بالـ Dockerfile عبر apt-get — لو تشغّل عبر start.sh مباشرة
-# على Pod تأكد إنه مثبَّت: `apt-get install -y ffmpeg`).
-
-# فك ترميز الصورة المرفوعة (app/features/order_intake/vision.py) — الوصف
-# نفسه يصير عبر نفس محرك vLLM المستخدَم بباقي الميزات، بدون تحميل موديل ثانٍ.
+# فك ترميز الصورة المرفوعة (app/features/order_intake/vision.py) — التحويل
+# لـ data URI يصير بـ app/engine.py والاستدلال البصري عند خادم vLLM.
 Pillow>=10.0

@@ -488,7 +488,7 @@
     border-radius: 6px;
     letter-spacing: 0.2px;
   }
-  .engine-pill.transformers { background: var(--accent-soft); color: var(--accent-strong); }
+  .engine-pill.vllm { background: var(--accent-soft); color: var(--accent-strong); }
   .engine-pill.fallback { background: var(--warn-soft); color: var(--warn); }
 
   .latency {
@@ -1144,7 +1144,7 @@
         meta.innerHTML =
           '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
           '<span class="latency">' + ms + " ms</span>" +
-          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "transformers" ? "transformers" : "fallback") + "</span>" : "");
+          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "vllm" ? "vllm" : json.engine) + "</span>" : "");
 
         if (json.session_id) {
           sessionId = json.session_id;
@@ -1363,7 +1363,7 @@
         meta.innerHTML =
           '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
           '<span class="latency">' + ms + " ms</span>" +
-          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "transformers" ? "transformers" : "fallback") + "</span>" : "");
+          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "vllm" ? "vllm" : json.engine) + "</span>" : "");
         if (json.session_id) {
           sessionId = json.session_id;
           sessionPill.querySelector(".val").textContent = sessionId;

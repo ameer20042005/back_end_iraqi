@@ -1,281 +1,213 @@
 # -*- coding: utf-8 -*-
-"""غلاف حول transformers (AutoModelForImageTextToText.generate) — يشغّل الموديل
-مباشرة عبر مكتبة transformers الرسمية بدل vLLM، مع dynamic micro-batching
-مبني فوق generate() الجاهزة نفسها (مو حلقة توليد يدوية).
+"""عميل vLLM — الباك اند يتصل بخادم vLLM OpenAI-متوافق منفصل بدل تحميل
+الموديل داخل عملية FastAPI.
 
-**لماذا مو vLLM**: نسخة vLLM المتوفرة حالياً (0.25.1) عندها باغ معروف وغير
-مُصلَح بعد بدعم معمارية Gemma4ForConditionalGeneration — يبني طبقة k_norm لكل
-طبقات self-attention بشكل غير مشروط، بينما الموديل الحقيقي (KV-sharing بين
-بعض الطبقات) لا يملك k_norm لكل الطبقات، فيفشل تحميل الأوزان
-("weights were not initialized from checkpoint"). راجع
-https://github.com/vllm-project/vllm/issues/44788.
+**البنية** (حسب وصفة vLLM الرسمية لـ Gemma 4):
+    ┌─────────────────────┐  HTTP   ┌──────────────────────────────┐
+    │ FastAPI (منفذ 8000) │ ──────► │ vLLM serve (منفذ 8001)       │
+    │ RAG + دروع + جلسات  │         │ gemma-iraqi-finetune-v2      │
+    └─────────────────────┘         │ continuous batching حقيقي    │
+                                    └──────────────────────────────┘
 
-**لماذا batching فوق generate() وليس حلقة توليد يدوية**: جُرِّبت حلقة يدوية
-(استدعاء self.model() مباشرة مع past_key_values متراكمة) وأنتجت هذياناً
-كاملاً — معمارية Gemma4 (KV-sharing) تعتمد على `cache_position` دقيقة تبنيها
-generate() داخلياً عبر prepare_inputs_for_generation، وتكرارها يدوياً هش وخطر.
-generate() الجاهزة بالمقابل تدعم دفعة مبطَّنة (left padding) أصلاً وتدير الـ
-cache صح لكل صفوف الدفعة — نفس الوصفة المجرَّبة بالنوتبوك لكن بدفعة بدل طلب
-واحد. الثمن الوحيد: ماكو بث توكن-بتوكن لكل طلب على حدة (الرد يرجع كاملاً) —
-وهذا مقبول لأن حارس الأرقام بالراوترات يجمّع الرد كاملاً قبل إرساله أصلاً.
+دعم Gemma4ForConditionalGeneration وصل لـ vLLM عبر PR #44429 (صورة
+vllm/vllm-openai:gemma4-unified أو nightly wheel) — انظر Dockerfile/start.sh.
+هذا يستبدل آلية transformers.generate() + micro-batching اليدوي السابقة
+بالكامل: vLLM يدير PagedAttention وcontinuous batching داخلياً، فمئات
+الطلبات المتزامنة تتقاسم الـ GPU تلقائياً بدون طوابير يدوية.
 
-**كيف يشتغل**: الطلبات النصية تدخل طابوراً؛ worker واحد يجمّعها (حتى MAX_BATCH
-أو MAX_WAIT_MS، أيهما أسبق)، يرمّزها بدفعة واحدة بـ left padding، يستدعي
-generate() مرة وحدة للدفعة كاملة بخيط منفصل (asyncio.to_thread)، يفك تشفير
-كل صف على حدة، يقص عند stop strings الخاصة بكل طلب، ويحل Future كل طلب.
-النتيجة: 10 طلبات متزامنة = دفعة واحدة بزمن قريب من زمن طلب واحد، بدل 10
-أزمنة متراكمة بالتتابع (كانت توصل 110+ ثانية للطلب الأخير).
+**قالب المحادثة يطبّقه vLLM بجهة الخادم** (/v1/chat/completions يستقبل
+messages مباشرة) — لذلك render_prompt/render_multimodal_prompt صارتا تمريراً
+مباشراً للرسائل، والراوترات ما تغيّرت.
 
-**التوليد حتمي دائماً** (do_sample=False) — وصفة النوتبوك المعتمدة الوحيدة؛
-أي sampling أنتج انهيار مخرجات بالتجربة. طلبات temperature تُتجاهل عمداً.
+**التوليد حتمي دائماً** (temperature=0.0) — وصفة النوتبوك المعتمدة الوحيدة؛
+أي sampling أنتج انهيار مخرجات بالتجربة الفعلية. طلبات temperature تُتجاهل.
 
-طلبات الصور (multi_modal_data) نادرة ولا تُدمج بالدفعة النصية — مسار منفصل
-بقفل بسيط.
-
-غير متوفر محلياً على Windows بدون GPU — عندها يبقى `ready = False` والباك اند
-يرجع لوضع RAG-only (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod.
+محلياً بدون خادم vLLM يبقى `ready = False` والباك اند يرجع لوضع fallback
+(بدون توليد نموذج) — نفس السلوك السابق.
 """
 
 import asyncio
-import os
+import base64
+import io
+import logging
 import time
-from dataclasses import dataclass, field
-from typing import AsyncGenerator, Dict, List, Optional, Tuple
+from typing import AsyncGenerator, Dict, List, Optional, Union
+
+import httpx
 
 from app.config import settings
 
-from app.hf_utils import resolve_lora_path
+logger = logging.getLogger(__name__)
 
-try:
-    import torch
-    from transformers import AutoModelForImageTextToText, AutoProcessor
+Message = Dict[str, object]
+# messages جاهزة، أو نص خام (توافقاً مع أي مستدعٍ قديم يمرر نصاً)
+PromptLike = Union[str, List[Message]]
 
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-
-try:
-    from peft import PeftModel
-
-    PEFT_AVAILABLE = True
-except ImportError:
-    PEFT_AVAILABLE = False
+_READY_POLL_SECONDS = 10   # فترة إعادة فحص جاهزية خادم vLLM بالخلفية
+_REQUEST_TIMEOUT = 120.0   # مهلة طلب توليد واحد (ثوانٍ)
 
 
-MAX_BATCH = 16    # أقصى عدد طلبات نصية بدفعة generate() واحدة
-MAX_WAIT_MS = 30  # أقصى انتظار لتجميع الدفعة بعد وصول أول طلب
-
-
-@dataclass
-class _PendingRequest:
-    prompt: str
-    max_new_tokens: int
-    stop_strings: List[str]
-    future: "asyncio.Future" = field(default=None)
+def _image_to_data_uri(image) -> str:
+    """يحوّل صورة PIL إلى data URI (base64 JPEG) بصيغة OpenAI image_url —
+    خادم vLLM يستقبل الصور بهذه الصيغة عبر /v1/chat/completions."""
+    buf = io.BytesIO()
+    image.convert("RGB").save(buf, format="JPEG", quality=90)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
 class LLMEngine:
     def __init__(self):
-        self.model = None
-        self.tokenizer = None
-        self.processor = None  # للبرومبتات متعددة الوسائط (صورة/صوت) — انظر render_multimodal_prompt
-        self.extra_stop_token_ids: List[int] = []  # تُكتشف تلقائياً بالـ probe — انظر start()
-        self._queue: "asyncio.Queue" = asyncio.Queue()
-        self._worker_task: Optional["asyncio.Task"] = None
-        self._mm_lock = asyncio.Lock()  # طلبات الصور فقط
+        self._ready = False
+        self._client: Optional[httpx.AsyncClient] = None
+        self._poller_task: Optional["asyncio.Task"] = None
         self.metrics = {
             "requests_served": 0,
-            "batches_run": 0,
-            "batch_size_sum": 0,
-            "batch_latencies_ms": [],  # آخر 500 دفعة
+            "request_latencies_ms": [],  # آخر 500 طلب
+            "errors": 0,
         }
 
     @property
     def ready(self) -> bool:
-        return self.model is not None
+        return self._ready
+
+    # ------------------------------------------------------------------
+    # دورة الحياة
+    # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        if not TRANSFORMERS_AVAILABLE:
-            return
-
-        # يسمح لـ huggingface_hub بالمصادقة تلقائياً عند تحميل موديل بوابة
-        # (gated) مثل Gemma أو مستودع خاص.
-        if settings.hf_token:
-            os.environ.setdefault("HF_TOKEN", settings.hf_token)
-
-        dtype = torch.bfloat16 if settings.dtype in ("auto", "bfloat16") else torch.float16
-
-        model = AutoModelForImageTextToText.from_pretrained(
-            settings.model_name,
-            dtype=dtype,
-            device_map="auto",
-            trust_remote_code=True,   # لازمة لمعمارية Gemma 4 متعددة الوسائط
-            attn_implementation="eager",  # مطلوب لمعمارية E4B (وصفة النوتبوك المعتمدة)
+        """يفتح عميل HTTP ويشغّل فاحص جاهزية بالخلفية — ما ننتظر vLLM هنا
+        حتى لا نأخر إقلاع FastAPI (خادم vLLM يستغرق دقائق بتحميل الأوزان)؛
+        الفاحص يقلب ready=True أول ما يجهز."""
+        self._client = httpx.AsyncClient(
+            base_url=settings.vllm_base_url, timeout=_REQUEST_TIMEOUT
         )
-
-        if settings.lora_path and PEFT_AVAILABLE:
-            lora_local_path = resolve_lora_path(settings.lora_path, settings.hf_token or None)
-            model = PeftModel.from_pretrained(model, lora_local_path)
-            model = model.merge_and_unload()
-
-        model.eval()
-        self.model = model
-
-        self.processor = AutoProcessor.from_pretrained(
-            settings.model_name, token=settings.hf_token or None
-        )
-        self.tokenizer = self.processor.tokenizer
-        # left padding إلزامي للتوليد بدفعة: مع right padding آخر توكن حقيقي
-        # بالصفوف الأقصر يصير بمنتصف التسلسل وgenerate() تكمل من الـ padding.
-        self.tokenizer.padding_side = "left"
-        if self.tokenizer.pad_token_id is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
-        # اكتشاف توكنات التوقف **تلقائياً** من قالب المحادثة (نمط الـ probe
-        # المعتمد بالنوتبوك): نبني محادثة قصيرة كاملة فتنتهي حتماً بتوكنات
-        # إغلاق الدور الحقيقية. ممنوع البحث بالاسم (convert_tokens_to_ids
-        # ("<end_of_turn>")) — الاسم يتحول بصمت لمعرّف خاطئ بهذا الـ tokenizer
-        # فالتوليد ما يتوقف ويؤلف أدوار user/model وهمية (حصل فعلياً).
-        # المتوقع لهذا الموديل: [1, 106].
-        try:
-            probe = self.tokenizer.apply_chat_template(
-                [{"role": "user", "content": "هلو"},
-                 {"role": "assistant", "content": "هلا بيك"}],
-                add_generation_prompt=False, return_dict=True, return_tensors="pt",
-            )["input_ids"][0].tolist()
-            special = set(self.tokenizer.all_special_ids)
-            stop_ids = {t for t in probe[-3:] if t in special}
-            if self.tokenizer.eos_token_id is not None:
-                stop_ids.add(self.tokenizer.eos_token_id)
-            self.extra_stop_token_ids = list(stop_ids)
-        except Exception:
-            self.extra_stop_token_ids = (
-                [self.tokenizer.eos_token_id] if self.tokenizer.eos_token_id is not None else []
-            )
-
-        self._worker_task = asyncio.create_task(self._worker())
+        self._poller_task = asyncio.create_task(self._readiness_poller())
 
     async def shutdown(self) -> None:
-        """يُستدعى من lifespan عند إيقاف السيرفر — يلغي الـ worker ويفشل أي
-        طلبات لسا بالطابور بدل تركها معلَّقة."""
-        if self._worker_task is not None:
-            self._worker_task.cancel()
+        if self._poller_task is not None:
+            self._poller_task.cancel()
             try:
-                await self._worker_task
-            except asyncio.CancelledError:
+                await self._poller_task
+            except (asyncio.CancelledError, Exception):
                 pass
-            except Exception:
-                pass
-        while not self._queue.empty():
-            try:
-                req = self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            if req.future is not None and not req.future.done():
-                req.future.set_exception(RuntimeError("الخادم يتوقف"))
+        if self._client is not None:
+            await self._client.aclose()
+        self._ready = False
 
-    def render_prompt(self, messages: List[Dict[str, str]], tools: Optional[List[dict]] = None) -> str:
-        """يحوّل قائمة رسائل (system/user/assistant) لنص برومبت باستخدام قالب
-        المحادثة الحقيقي (chat template) للموديل المحمَّل فعلياً — بدل قالب ثابت
-        مكتوب يدوياً، حتى يبقى صحيحاً بغض النظر عن MODEL_NAME (Gemma، Qwen...).
+    async def _probe(self) -> bool:
+        """فحص واحد لجاهزية خادم vLLM (/v1/models يرجع 200 فقط بعد اكتمال
+        تحميل الموديل فعلياً)."""
+        try:
+            resp = await self._client.get("/models", timeout=5.0)
+            return resp.status_code == 200
+        except Exception:
+            return False
 
-        `tools`: تعريفات أدوات بصيغة JSON schema (اختياري) تُمرَّر لقالب
-        المحادثة إن كان الموديل يدعم native function-calling؛ نحن لا نعتمد
-        عليها فعلياً (انظر app/tool_loop.py) لكن تمريرها غير مكلف إن دعمها القالب.
-        """
-        if self.tokenizer is not None:
-            kwargs = {"tokenize": False, "add_generation_prompt": True}
-            if tools:
-                kwargs["tools"] = tools
-            return self.tokenizer.apply_chat_template(messages, **kwargs)
-        # احتياطي بدائي (محلياً بدون GPU/tokenizer) — نص بسيط يكفي فقط لوضع fallback
-        lines = [f"{m['role']}: {m['content']}" for m in messages]
-        return "\n".join(lines) + "\nassistant:"
-
-    def render_multimodal_prompt(self, messages: List[Dict[str, object]]) -> str:
-        """نفس فكرة render_prompt لكن عبر AutoProcessor بدل tokenizer وحده —
-        لازم لصياغة برومبت يحتوي محتوى صورة (`{"type": "image"}`) بشكل صحيح.
-        استخدمه فقط للطلبات اللي فيها multi_modal_data."""
-        if self.processor is not None:
-            return self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-        return self.render_prompt(messages)
-
-    # ------------------------------------------------------------------
-    # Micro-batching فوق generate() — نص فقط
-    # ------------------------------------------------------------------
-
-    async def _worker(self) -> None:
+    async def _readiness_poller(self) -> None:
+        """يفحص الجاهزية دورياً: يلتقط إقلاع vLLM المتأخر عن FastAPI، ويكتشف
+        سقوط الخادم لاحقاً فيرجّع الميزات لوضع fallback بدل أخطاء 500."""
         while True:
-            first = await self._queue.get()
-            batch = [first]
-            deadline = time.monotonic() + (MAX_WAIT_MS / 1000)
-            while len(batch) < MAX_BATCH:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                try:
-                    batch.append(await asyncio.wait_for(self._queue.get(), timeout=remaining))
-                except asyncio.TimeoutError:
-                    break
+            was_ready = self._ready
+            self._ready = await self._probe()
+            if self._ready and not was_ready:
+                logger.info("✅ خادم vLLM جاهز على %s", settings.vllm_base_url)
+            elif was_ready and not self._ready:
+                logger.warning("⚠️ خادم vLLM ما عاد يستجيب — الميزات رجعت لوضع fallback")
+            await asyncio.sleep(_READY_POLL_SECONDS)
 
-            t0 = time.monotonic()
-            try:
-                results = await asyncio.to_thread(self._run_batch, batch)
-            except Exception as exc:
-                # لا نترك أي طلب معلَّقاً لو فشلت الدفعة — الجميع يستلم الخطأ
-                # والـ worker يكمل للدفعة الجاية.
-                for req in batch:
-                    if req.future is not None and not req.future.done():
-                        req.future.set_exception(exc)
-            else:
-                for req, res in zip(batch, results):
-                    if req.future is not None and not req.future.done():
-                        req.future.set_result(res)
-            finally:
-                elapsed_ms = (time.monotonic() - t0) * 1000
-                self.metrics["batches_run"] += 1
-                self.metrics["batch_size_sum"] += len(batch)
-                self.metrics["requests_served"] += len(batch)
-                self.metrics["batch_latencies_ms"].append(elapsed_ms)
-                if len(self.metrics["batch_latencies_ms"]) > 500:
-                    self.metrics["batch_latencies_ms"] = self.metrics["batch_latencies_ms"][-500:]
+    # ------------------------------------------------------------------
+    # صياغة البرومبت — تمرير مباشر (vLLM يطبّق قالب المحادثة بجهة الخادم)
+    # ------------------------------------------------------------------
 
-    def _run_batch(self, batch: List[_PendingRequest]) -> List[Tuple[str, Optional[str]]]:
-        """يشغّل دفعة كاملة بـ generate() واحدة (يعمل بخيط منفصل عبر
-        asyncio.to_thread). يرجع لكل طلب (النص بعد قص stop strings،
-        وstop_reason إن وُجد)."""
-        enc = self.tokenizer(
-            [req.prompt for req in batch], return_tensors="pt", padding=True
-        ).to(self.model.device)
-        input_len = enc["input_ids"].shape[1]
-        max_new = max(req.max_new_tokens for req in batch)
+    def render_prompt(
+        self, messages: List[Message], tools: Optional[List[dict]] = None
+    ) -> List[Message]:
+        """كان يحوّل الرسائل لنص عبر chat template محلي — الآن vLLM يطبّق
+        القالب بجهة الخادم، فنمرر الرسائل كما هي. `tools` غير مستخدمة (بروتوكول
+        الأدوات عندنا نصّي عبر app/tool_loop.py، مو native function-calling)."""
+        return messages
 
-        with torch.no_grad():
-            out = self.model.generate(
-                **enc,
-                max_new_tokens=max_new,
-                do_sample=False,  # حتمي دائماً — وصفة النوتبوك؛ sampling = انهيار مخرجات
-                eos_token_id=list(self.extra_stop_token_ids) or None,
-                pad_token_id=self.tokenizer.pad_token_id,
-            )
+    def render_multimodal_prompt(self, messages: List[Message]) -> List[Message]:
+        """تمرير مباشر — تحويل محتوى الصورة لصيغة OpenAI يصير بـ _to_openai_messages
+        وقت الإرسال (يحتاج الصورة نفسها من multi_modal_data)."""
+        return messages
 
-        results: List[Tuple[str, Optional[str]]] = []
-        for i, req in enumerate(batch):
-            text = self.tokenizer.decode(out[i][input_len:], skip_special_tokens=True)
-            stop_reason = None
-            for s in req.stop_strings:
-                if s in text:
-                    text = text[: text.index(s)]
-                    stop_reason = s
-                    break
-            results.append((text, stop_reason))
-        return results
+    # ------------------------------------------------------------------
+    # التوليد عبر /v1/chat/completions
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _to_openai_messages(
+        prompt: PromptLike, multi_modal_data: Optional[dict]
+    ) -> List[Message]:
+        """يطبّع المدخل لرسائل OpenAI: نص خام يُغلَّف كرسالة user، ومحتوى
+        `{"type": "image"}` يُستبدل بـ image_url (data URI) من multi_modal_data."""
+        if isinstance(prompt, str):
+            messages: List[Message] = [{"role": "user", "content": prompt}]
+        else:
+            messages = [dict(m) for m in prompt]
+
+        image = (multi_modal_data or {}).get("image")
+        if image is None:
+            return messages
+
+        data_uri = _image_to_data_uri(image)
+        for m in messages:
+            content = m.get("content")
+            if not isinstance(content, list):
+                continue
+            new_content = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "image":
+                    new_content.append(
+                        {"type": "image_url", "image_url": {"url": data_uri}}
+                    )
+                else:
+                    new_content.append(item)
+            m["content"] = new_content
+        return messages
+
+    async def _chat_completion(
+        self,
+        messages: List[Message],
+        max_tokens: int,
+        stop: Optional[List[str]],
+        guided_json: Optional[dict],
+    ) -> dict:
+        body: dict = {
+            "model": settings.model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": 0.0,  # حتمي دائماً — sampling = انهيار مخرجات (مجرَّب)
+        }
+        if stop:
+            body["stop"] = stop
+        if guided_json:
+            # structured outputs بصيغة OpenAI القياسية — vLLM يقيّد التوليد
+            # بالمخطط فعلياً (guided decoding)، مو مجرد تلميح بالبرومبت.
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "extraction", "schema": guided_json},
+            }
+
+        t0 = time.monotonic()
+        try:
+            resp = await self._client.post("/chat/completions", json=body)
+            resp.raise_for_status()
+        except Exception:
+            self.metrics["errors"] += 1
+            raise
+        finally:
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            self.metrics["requests_served"] += 1
+            self.metrics["request_latencies_ms"].append(elapsed_ms)
+            if len(self.metrics["request_latencies_ms"]) > 500:
+                self.metrics["request_latencies_ms"] = self.metrics["request_latencies_ms"][-500:]
+        return resp.json()
 
     async def generate_stream(
         self,
-        prompt: str,
+        prompt: PromptLike,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         stop: Optional[List[str]] = None,
@@ -285,86 +217,50 @@ class LLMEngine:
         top_p: Optional[float] = None,
         top_k: Optional[int] = None,
     ) -> AsyncGenerator[str, None]:
-        """الطلبات النصية تدخل طابور الـ micro-batching وتُنفَّذ بدفعة generate()
-        مشتركة — الرد يُبث كقطعة واحدة كاملة بعد انتهاء الدفعة (ماكو بث
-        توكن-بتوكن؛ حارس الأرقام بالراوترات يجمّع الرد كاملاً قبل إرساله أصلاً).
-        طلبات الصور (multi_modal_data) تمر بمسار منفصل بقفل بسيط.
+        """يولّد الرد كاملاً ويبثّه كقطعة واحدة — عمداً مو توكن-بتوكن: حارس
+        الأرقام/المواضيع بالراوترات يفحص الرد كاملاً قبل إرسال أي جزء للعميل،
+        فالبث الجزئي ما ينفع أصلاً (رقم مختلَق مبثوث حياً ما ينسحب).
 
-        `temperature`/`top_p`/`top_k` تُتجاهل عمداً — التوليد حتمي دائماً
-        (do_sample=False)، أي sampling أنتج انهيار مخرجات بالتجربة الفعلية.
+        `temperature`/`top_p`/`top_k` تُتجاهل عمداً — التوليد حتمي دائماً.
 
-        `result_holder`: إن مُرِّر (dict فارغ)، يُعبَّأ بعد انتهاء التوليد بـ
-        `stop_reason`/`finish_reason` — لمعرفة أي stop-string أوقف التوليد
-        (مثل [ORDER_READY]) دون تسريب النص نفسه للعميل.
+        `result_holder`: إن مُرِّر (dict فارغ)، يُعبَّأ بعد التوليد بـ
+        `stop_reason` (أي stop-string أوقف التوليد، مثل [ORDER_READY]) و
+        `finish_reason` — نفس عقد الواجهة السابق حرفياً.
         """
-        if multi_modal_data and "image" in multi_modal_data:
-            async for delta in self._generate_multimodal(
-                prompt, max_tokens, stop, result_holder, multi_modal_data
-            ):
-                yield delta
-            return
-
-        req = _PendingRequest(
-            prompt=prompt,
-            max_new_tokens=max_tokens or settings.max_new_tokens,
-            stop_strings=stop or [],
-            future=asyncio.get_running_loop().create_future(),
+        messages = self._to_openai_messages(prompt, multi_modal_data)
+        data = await self._chat_completion(
+            messages,
+            max_tokens=max_tokens or settings.max_new_tokens,
+            stop=stop,
+            guided_json=guided_json,
         )
-        await self._queue.put(req)
-        text, stop_reason = await req.future
+
+        choice = data["choices"][0]
+        text = (choice.get("message") or {}).get("content") or ""
+
+        # vLLM يرجع stop_reason (حقل خاص به) = الـ stop string اللي أوقف
+        # التوليد. احتياطاً (نسخ ما ترجعه): نقص النص يدوياً لو الـ stop وصل.
+        stop_reason = choice.get("stop_reason")
+        if isinstance(stop_reason, int):  # توكن إيقاف رقمي = إنهاء طبيعي
+            stop_reason = None
+        if stop and not stop_reason:
+            for s in stop:
+                if s in text:
+                    text = text[: text.index(s)]
+                    stop_reason = s
+                    break
 
         if result_holder is not None:
             result_holder["stop_reason"] = stop_reason
-            result_holder["finish_reason"] = "stop" if stop_reason else "length"
+            result_holder["finish_reason"] = (
+                "stop" if (stop_reason or choice.get("finish_reason") == "stop") else "length"
+            )
         if text:
             yield text
 
-    async def _generate_multimodal(
-        self,
-        prompt: str,
-        max_tokens: Optional[int],
-        stop: Optional[List[str]],
-        result_holder: Optional[dict],
-        multi_modal_data: dict,
-    ) -> AsyncGenerator[str, None]:
-        """مسار الصور — generate() لطلب واحد تحت قفل (نادر الاستخدام،
-        order_intake فقط، فلا يبرر تعقيد دمجه بالدفعة النصية)."""
-        async with self._mm_lock:
-            inputs = self.processor(
-                text=prompt, images=multi_modal_data["image"], return_tensors="pt"
-            ).to(self.model.device)
-            input_len = inputs["input_ids"].shape[1]
-
-            def _gen():
-                with torch.no_grad():
-                    return self.model.generate(
-                        **inputs,
-                        max_new_tokens=max_tokens or settings.max_new_tokens,
-                        do_sample=False,
-                        eos_token_id=list(self.extra_stop_token_ids) or None,
-                        pad_token_id=self.tokenizer.pad_token_id,
-                    )
-
-            out = await asyncio.to_thread(_gen)
-            text = self.tokenizer.decode(out[0][input_len:], skip_special_tokens=True)
-
-            stop_reason = None
-            if stop:
-                for s in stop:
-                    if s in text:
-                        text = text[: text.index(s)]
-                        stop_reason = s
-                        break
-
-            if result_holder is not None:
-                result_holder["stop_reason"] = stop_reason
-                result_holder["finish_reason"] = "stop" if stop_reason else "length"
-            if text:
-                yield text
-
     async def generate_full(
         self,
-        prompt: str,
+        prompt: PromptLike,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         stop: Optional[List[str]] = None,
@@ -383,7 +279,7 @@ class LLMEngine:
         return "".join(chunks)
 
     def get_metrics(self) -> dict:
-        latencies = sorted(self.metrics["batch_latencies_ms"])
+        latencies = sorted(self.metrics["request_latencies_ms"])
         n = len(latencies)
 
         def _pct(p: float) -> Optional[float]:
@@ -392,16 +288,13 @@ class LLMEngine:
             return round(latencies[min(n - 1, int(n * p))], 1)
 
         return {
-            "mode": "generate_micro_batching",
+            "mode": "vllm_openai_client",
+            "vllm_base_url": settings.vllm_base_url,
+            "vllm_ready": self._ready,
             "requests_served": self.metrics["requests_served"],
-            "batches_run": self.metrics["batches_run"],
-            "avg_batch_size": (
-                round(self.metrics["batch_size_sum"] / self.metrics["batches_run"], 2)
-                if self.metrics["batches_run"] else 0
-            ),
-            "batch_latency_ms_p50": _pct(0.50),
-            "batch_latency_ms_p95": _pct(0.95),
-            "queue_depth": self._queue.qsize(),
+            "errors": self.metrics["errors"],
+            "request_latency_ms_p50": _pct(0.50),
+            "request_latency_ms_p95": _pct(0.95),
         }
 
 

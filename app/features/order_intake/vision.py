@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""وصف/استخراج نص من صورة عبر قدرة Gemma 4 البصرية الأصلية — بنفس نسخة الموديل
-والأوزان المحمَّلة أصلاً بـ app/engine.py (transformers، AutoModelForImageTextToText
-يدعم Gemma4ForConditionalGeneration متعدد الوسائط أصلاً). **ماكو نسخة ثانية من
-الموديل هنا** — فقط استدعاء إضافي لنفس المحرك مع `multi_modal_data`.
+"""وصف/استخراج نص من صورة عبر قدرة Gemma 4 البصرية الأصلية — بنفس خادم vLLM
+المستخدَم بباقي الميزات (يدعم الصور عبر /v1/chat/completions بصيغة image_url؛
+التحويل من PIL لـ data URI يصير بـ app/engine.py). **ماكو نسخة ثانية من
+الموديل** — فقط استدعاء إضافي لنفس المحرك مع `multi_modal_data`.
 """
 
 import io
@@ -40,8 +40,8 @@ class NotConfiguredImageDescriber(ImageDescriber):
         )
 
 
-class TransformersVisionDescriber(ImageDescriber):
-    """يستخدم نفس llm_engine (transformers) المستخدَم بباقي الميزات النصية —
+class VllmVisionDescriber(ImageDescriber):
+    """يستخدم نفس llm_engine (عميل vLLM) المستخدَم بباقي الميزات النصية —
     الصورة قبل النص بالبرومبت حسب توصية Gemma 4 لأفضل أداء."""
 
     async def describe(self, image_bytes: bytes) -> str:
@@ -66,5 +66,5 @@ class TransformersVisionDescriber(ImageDescriber):
 
 
 image_describer: ImageDescriber = (
-    TransformersVisionDescriber() if PIL_AVAILABLE else NotConfiguredImageDescriber()
+    VllmVisionDescriber() if PIL_AVAILABLE else NotConfiguredImageDescriber()
 )
