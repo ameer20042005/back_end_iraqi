@@ -255,6 +255,21 @@ class LLMEngine:
             result_holder["finish_reason"] = (
                 "stop" if (stop_reason or choice.get("finish_reason") == "stop") else "length"
             )
+
+        # رد فارغ رغم توليد توكنات فعلي = عطل بمستوى المُرمِّز/الأوزان، مو
+        # سلوك طبيعي. نصرخ باللوق بدل ما نمرره بصمت: وقع فعلاً (2026-07-26)
+        # إن ترقية transformers لـ 5.x خلّت المُرمِّز يحمّل بـ vocab_size=5،
+        # فصار كل نص عربي <unk> والموديل يرجّع فراغاً — وبقى العطل مخفي أيام
+        # لأن اللوق كان يطبع finish_reason='stop' وكأن كل شي تمام.
+        completion_tokens = (data.get("usage") or {}).get("completion_tokens") or 0
+        if not text.strip() and completion_tokens > 0:
+            logger.error(
+                "⚠️ رد فارغ من vLLM رغم توليد %s توكن — تحقق من المُرمِّز "
+                "(tokenizer.json موجود بالمستودع؟ vocab_size منطقي؟) أو من أوزان "
+                "الموديل. finish_reason=%s stop_reason=%r",
+                completion_tokens, choice.get("finish_reason"), stop_reason,
+            )
+
         if text:
             yield text
 
