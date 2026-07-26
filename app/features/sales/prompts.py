@@ -40,23 +40,11 @@ SALES_SYSTEM_PROMPT = f"""أنت وكيل مبيعات عراقي محترف و�
   (بدون أي نص إضافي بنفس السطر، وبعد أن تكون قد أكّدت للعميل تفاصيل طلبه بجملة طبيعية باللهجة العراقية).
 - لا تكتب {ORDER_READY_MARKER} إلا عند اكتمال معلومات التواصل والتوصيل أعلاه ومرور خطوة الملخّص والتأكيد الصريح."""
 
-ORDER_EXTRACTION_SYSTEM_PROMPT = """أنت نظام استخراج بيانات دقيق. مهمتك تحويل المحادثة أدناه إلى JSON فقط
-—بدون أي نص قبله أو بعده، وبدون Markdown— يطابق هذا المخطط تماماً:
-
-{
-  "customer_name": "اسم العميل إن ذُكر، وإلا null",
-  "customer_phone": "رقم الهاتف إن ذُكر، وإلا null",
-  "customer_address": "العنوان إن ذُكر، وإلا null",
-  "customer_city": "المحافظة إن ذُكرت، وإلا null",
-  "customer_district": "المنطقة/الحي إن ذُكر، وإلا null",
-  "items": [{"product_name": "اسم المنتج كما ذكره العميل أو الوكيل", "quantity": 1}],
-  "suggested_product_name": "اسم المنتج الإضافي الذي اقترحه الوكيل إن وافق عليه العميل، وإلا null",
-  "notes": "أي ملاحظة إضافية ذكرها العميل (عنوان توصيل خاص، وقت تسليم...)، وإلا null",
-  "confirmation_note": "جملة قصيرة ودّية باللهجة العراقية لتأكيد الطلب، بدون ذكر أي أرقام أو أسعار (تُحسب لاحقاً من النظام)"
-}
-
-استخدم المعلومات المرجعية عن اللهجة العراقية أدناه إن ساعدتك على فهم الكميات أو تأكيد الشراء المذكور بالمحادثة بدقة.
-لا تحسب سعراً أو مجموعاً بنفسك أبداً — هذا الحقل غير موجود بالمخطط أعلاه عمداً."""
+# ملاحظة: كان هنا ORDER_EXTRACTION_SYSTEM_PROMPT بمخطط خاص بالمبيعات
+# (customer_name/items/confirmation_note). حُذف عمداً: استخراج الطلب من
+# المحادثة صار يمر ببرومت plane.md نفسه عبر app/order_extraction.py، حتى
+# يطلع الطلب بصيغة JSON وحدة مهما كان مصدره (محادثة، رسالة، صوت، صورة).
+# وجود مخططين متوازيين كان يعني أن شكل الطلب يتغيّر حسب الطريق اللي جاء منه.
 
 
 def build_sales_prompt(
@@ -72,12 +60,6 @@ def build_sales_prompt(
     return messages
 
 
-def build_order_extraction_prompt(history: List[Message], rag_words: List[dict]) -> List[Message]:
-    system_content = ORDER_EXTRACTION_SYSTEM_PROMPT + words_context_block(rag_words)
-    messages: List[Message] = [{"role": "system", "content": system_content}]
-    messages.extend(history)
-    messages.append({
-        "role": "user",
-        "content": "حوّل المحادثة أعلاه إلى JSON حسب المخطط المطلوب الآن.",
-    })
-    return messages
+# build_order_extraction_prompt حُذفت مع مخططها — استخراج الطلب من المحادثة
+# يستعمل build_order_intake_prompt (برومت plane.md) بـ
+# app/features/sales/router.py::_maybe_build_order.
