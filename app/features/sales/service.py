@@ -7,19 +7,56 @@
 حينها هو quoted_price المذكور برسالة الزبون.
 """
 
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from app.order_gateway import order_submitter
 from app.order_schema import OrderConfirmation, OrderExtraction, ResolvedOrderItem
 from app.products import ProductRepository, product_repository
 
+logger = logging.getLogger(__name__)
+
+_PHONE_RE = re.compile(r"^07\d{9}$")
+
+# كلمات تأكيد/ردود قصيرة تطلع اسم منتج عند فشل الاستخراج ورجوعه للمسار
+# البدائي (يبني الطلب من آخر رسالة عميل، وهي عادةً «نعم»).
+_NOT_A_PRODUCT = {
+    "نعم", "اي", "اكيد", "أكيد", "زين", "تمام", "اوكي", "اوك", "خلص",
+    "موافق", "زبطت", "ثبت", "ثبتها", "ثبته", "شكرا", "شكراً", "هلو", "مرحبا",
+}
+
 
 def _resolve_product(repo: ProductRepository, name: str) -> Optional[dict]:
     matches = repo.search(name, top_k=1)
     return matches[0] if matches else None
+
+
+def _submission_blockers(order: OrderConfirmation) -> List[str]:
+    """أسباب منع إرسال الطلب لنظام الطلبات الخارجي — فحص المخرَج الأخير.
+
+    ليش موجود: بوابة الاكتمال بـ app/features/sales/router.py تحرس **المدخل**
+    (هل ذكر العميل هاتفه وعنوانه؟)، لكن بينها وبين الإرسال تجري خطوة استخراج
+    بالموديل ممكن تفشل. عند فشلها يرجع المسار البدائي (_fallback_extraction)
+    طلباً مبنياً من آخر رسالة عميل — وآخر رسالة عادةً «نعم» — فيطلع طلب
+    اسم منتجه «نعم» بلا اسم ولا هاتف ويُرسل كأنه صحيح. الحارس هنا يقطع
+    هذا: طلب ناقص يُرجَع للعميل بالـ API لكن ما يدخل نظام الطلبات."""
+    blockers = []
+    if not (order.customer_phone and _PHONE_RE.match(order.customer_phone.strip())):
+        blockers.append("phone")
+    if not (order.customer_name and order.customer_name.strip()):
+        blockers.append("name")
+    if not (order.customer_city or order.customer_district or order.customer_address):
+        blockers.append("location")
+    real_items = [
+        i for i in order.items
+        if i.product_name.strip() and i.product_name.strip() not in _NOT_A_PRODUCT
+    ]
+    if not real_items:
+        blockers.append("items")
+    return blockers
 
 
 async def resolve_order(
@@ -98,12 +135,21 @@ async def resolve_order(
         confirmation_message=note,
     )
 
+    # فحص المخرَج الأخير قبل نظام الطلبات — انظر _submission_blockers.
+    blockers = _submission_blockers(confirmation)
+    if blockers:
+        logger.warning(
+            "طلب ناقص ما انرسل لنظام الطلبات — الناقص: %s (order_id=%s)",
+            blockers, confirmation.order_id,
+        )
+        return confirmation
+
     # يرسل الطلب المؤكَّد لنظام إدارة الطلبات الخارجي (Mock حالياً — انظر
     # app/order_gateway.py). لا نفشل تسليم الرد للعميل لو تعذّر الإرسال؛ الطلب
     # يبقى موجوداً بالرد على أي حال ويمكن إعادة محاولة إرساله لاحقاً.
     try:
         await order_submitter.submit(confirmation)
     except Exception:
-        pass
+        logger.exception("فشل إرسال الطلب لنظام الطلبات (order_id=%s)", confirmation.order_id)
 
     return confirmation

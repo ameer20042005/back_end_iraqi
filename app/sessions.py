@@ -14,6 +14,8 @@ _MAX_PRODUCTS = 12  # آخر N منتج ظهر بالجلسة يبقى مرجع�
 _sessions: Dict[str, List[Dict[str, str]]] = defaultdict(list)
 # منتجات ظهرت بأي دور سابق من نفس الجلسة — انظر remember_products().
 _session_products: Dict[str, List[dict]] = defaultdict(list)
+# آخر موقع ذكره العميل بهذه الجلسة — انظر remember_location().
+_session_location: Dict[str, dict] = {}
 
 
 def get(session_id: str) -> List[Dict[str, str]]:
@@ -51,3 +53,25 @@ def remember_products(session_id: str, products: List[dict]) -> None:
 def known_products(session_id: str) -> List[dict]:
     """كل المنتجات اللي مرّت بهذه الجلسة — مرجع الدروع التراكمي."""
     return _session_products.get(session_id, [])
+
+
+def remember_location(session_id: str, city: str = "", district: str = "") -> None:
+    """يخزّن آخر محافظة/منطقة ذكرها العميل صراحةً بهذه الجلسة.
+
+    السبب: العميل يذكر حيّه بأول المحادثة («اني من الحارثية») ثم تكمل
+    المحادثة عشر رسائل بالمنتج والسعر. عند تثبيت الطلب يخرج الحي فارغاً
+    لأنه طلع من نافذة _MAX_TURNS، فينحفظ الطلب بلا منطقة أو — أسوأ — يملأ
+    الوكيل الفراغ بتخمين. الحقلان يُحدَّثان كلٌّ على حدة: ذكر منطقة جديدة
+    ما لازم يمسح المحافظة المعروفة والعكس."""
+    if not (city or district):
+        return
+    known = _session_location.setdefault(session_id, {"city": "", "district": ""})
+    if city:
+        known["city"] = city
+    if district:
+        known["district"] = district
+
+
+def known_location(session_id: str) -> dict:
+    """آخر موقع معروف بهذه الجلسة: {"city", "district"} (قيم فارغة إن ماكو)."""
+    return _session_location.get(session_id, {"city": "", "district": ""})
