@@ -41,7 +41,10 @@ _PURCHASE_KEYWORDS = ["اشتريها", "اشتريه", "خلص اشتري", "ا
 # رد بديل حتمي عندما يتدخل درع المواضيع (app/guards.py: check_topics) — الموديل
 # ادّعى معلومة عن موضوع (ضمان/تركيب/تقسيط...) غير مغطّى بمعلومات المنتج
 # المسترجَعة، فنستبدل الرد بإحالة صريحة بدل ترك هلوسة توصل للعميل.
-SAFE_TOPIC_REPLY = "خليني أتأكد من هذي المعلومة وأرد عليك، حتى ما أگلك شي غلط."
+SAFE_TOPIC_REPLY = (
+    "عذراً حبيبي، هذي النقطة تحديداً أحب أتأكد منها قبل ما أگلك شي، "
+    "خليني أتحقق وأرجعلك بيها فوراً."
+)
 
 
 class SalesChatRequest(BaseModel):
@@ -74,10 +77,18 @@ def _safe_price_answer(rag_products: List[dict]) -> str:
         lines = "، ".join(
             f"{p['name']} بـ{p['price']:,} {p.get('currency', 'IQD')}" for p in rag_products[:3]
         )
-        return f"خليني أدقّقلك السعر حتى ما أغلطلك — اللي أگدر أأكده هسه: {lines}."
-    # ماكو منتج مطابق أصلاً بالكتالوج — الرد الطبيعي رفض توفّر (الموديل
-    # غالباً اخترع منتجاً وسعراً سوية)، مو كلام عن دقة السعر.
-    return "والله هذا ماكو عدنا هسه، بس أتأكدلك إذا راح يتوفر وأرد عليك."
+        return (
+            "معليش حبيبي، حبيت أدقّقلك السعر حتى ما أغلط وياك — "
+            f"اللي أگدر أأكده إلك هسه: {lines}."
+        )
+    # ماكو أي منتج معروف بهذي الجلسة. الرد القديم كان يرفض التوفّر («ماكو
+    # عدنا») وهذا غلط فادح بسياق تثبيت طلب أو إعطاء عنوان — العميل يعطي
+    # بياناته فيجيه رفض. الرد المحايد يصلح لكل السياقات: نأجّل الرقم بس، ولا
+    # ندّعي نفي توفّر ما نعرفه.
+    return (
+        "عذراً حبيبي، خليني أتأكدلك من التفاصيل والسعر بالضبط وأرجعلك بيها "
+        "فوراً حتى ما أگلك رقم غلط."
+    )
 
 
 def _fallback_order_ready(message: str) -> bool:
@@ -111,6 +122,11 @@ async def sales_chat(req: SalesChatRequest):
     history = sessions.get(key)
     rag_words = search_words(req.message, top_k=settings.rag_top_k)
     rag_products = product_repository.search(req.message, top_k=5)
+    sessions.remember_products(key, rag_products)
+    # مرجع الدروع = منتجات الجلسة كلها لا هذا الدور وحده (انظر
+    # sessions.remember_products): آخر رسالة بأي طلب هي بيانات العميل بلا اسم
+    # منتج، فالاسترجاع يرجع فارغاً ويُحجب سعر ذُكر قبل دورين بغير حق.
+    known_products = sessions.known_products(key)
     messages = build_sales_prompt(history, req.message, rag_words, rag_products)
 
     if llm_engine.ready:
@@ -133,7 +149,7 @@ async def sales_chat(req: SalesChatRequest):
     # الدروع ثنائية الاتجاه — إلغاء فعلي مو تسجيل فقط (نفس تسلسل خلية
     # الاستدلال بالنوتبوك: المواضيع أولاً لأنها تفهم السياق، الأرقام ثانياً).
     if engine_name == "vllm":
-        reference_text = products_context_block(rag_products)
+        reference_text = products_context_block(known_products)
         reason = check_topics(answer, req.message, reference_text)
         if reason:
             logger.warning(
@@ -148,7 +164,7 @@ async def sales_chat(req: SalesChatRequest):
                     "أرقام مختلَقة برد المبيعات أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
                     bad_numbers, session_id, answer[:300],
                 )
-                answer = _safe_price_answer(rag_products)
+                answer = _safe_price_answer(known_products, req.message)
 
     sessions.append(key, "user", req.message)
     sessions.append(key, "assistant", answer)
@@ -171,6 +187,8 @@ async def sales_chat_stream(req: SalesChatRequest):
     history = sessions.get(key)
     rag_words = search_words(req.message, top_k=settings.rag_top_k)
     rag_products = product_repository.search(req.message, top_k=5)
+    sessions.remember_products(key, rag_products)
+    known_products = sessions.known_products(key)
     messages = build_sales_prompt(history, req.message, rag_words, rag_products)
 
     async def event_source():
@@ -193,7 +211,7 @@ async def sales_chat_stream(req: SalesChatRequest):
             order_ready = result_holder.get("stop_reason") == ORDER_READY_MARKER
             engine_name = "vllm"
             answer = "".join(collected)
-            reference_text = products_context_block(rag_products)
+            reference_text = products_context_block(known_products)
             reason = check_topics(answer, req.message, reference_text)
             if reason:
                 logger.warning(
@@ -208,7 +226,7 @@ async def sales_chat_stream(req: SalesChatRequest):
                         "أرقام مختلَقة برد المبيعات (stream) أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
                         bad_numbers, session_id, answer[:300],
                     )
-                    answer = _safe_price_answer(rag_products)
+                    answer = _safe_price_answer(known_products, req.message)
         else:
             answer = _fallback_sales_answer(req.message, rag_products)
             order_ready = _fallback_order_ready(req.message)
