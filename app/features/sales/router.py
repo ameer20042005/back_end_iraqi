@@ -164,7 +164,7 @@ async def sales_chat(req: SalesChatRequest):
                     "أرقام مختلَقة برد المبيعات أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
                     bad_numbers, session_id, answer[:300],
                 )
-                answer = _safe_price_answer(known_products, req.message)
+                answer = _safe_price_answer(known_products)
 
     sessions.append(key, "user", req.message)
     sessions.append(key, "assistant", answer)
@@ -226,7 +226,7 @@ async def sales_chat_stream(req: SalesChatRequest):
                         "أرقام مختلَقة برد المبيعات (stream) أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
                         bad_numbers, session_id, answer[:300],
                     )
-                    answer = _safe_price_answer(known_products, req.message)
+                    answer = _safe_price_answer(known_products)
         else:
             answer = _fallback_sales_answer(req.message, rag_products)
             order_ready = _fallback_order_ready(req.message)
