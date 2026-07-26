@@ -30,12 +30,14 @@ import re
 from itertools import combinations
 from typing import List, Optional
 
+from app.text_norm import normalize_digits as _normalize_digits
+
 _NUMBER_RE = re.compile(r"[\d٠-٩][\d٠-٩,\.]*")
 _PHONE_RE = re.compile(r"^0\d{9,10}$")
 
 # تحويل الأرقام العربية-الهندية (٠١٢٣) لخانات لاتينية حتى يطابق «٧٥٠٠٠٠»
-# سعرَ الكتالوج «750000» بدل ما يُحسب رقماً مختلَقاً.
-_ARABIC_INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+# سعرَ الكتالوج «750000» بدل ما يُحسب رقماً مختلَقاً — من الطبقة ١
+# (app/text_norm.py) حتى يبقى تعريف واحد بالمشروع كله (يغطي الفارسية أيضاً).
 
 # سلاسل أرقام مفصولة بفراغات تُقرأ رقم هاتف واحد (0770 123 4567) — تُدمج قبل
 # الفحص حتى لا تنكسر لثلاثة «أرقام مختلَقة».
@@ -121,10 +123,6 @@ def _strip_separators(num: str) -> str:
     """يزيل فواصل الآلاف (750,000 → 750000) حتى تتطابق مع أرقام الكتالوج
     الخام (بدون تنسيق) رغم اختلاف صيغة الكتابة."""
     return num.replace(",", "")
-
-
-def _normalize_digits(text: str) -> str:
-    return text.translate(_ARABIC_INDIC)
 
 
 # كميات مكتوبة لفظاً باللهجة العراقية — تُقرأ مضاعِفاً مشروعاً للسعر.

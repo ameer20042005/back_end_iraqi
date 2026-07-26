@@ -14,14 +14,22 @@ from app.engine import llm_engine
 from app.features.support.prompts import build_support_prompt
 from app.order_gateway import order_status_provider
 from app.rag import search as search_words
+from app.text_norm import normalize
 from app.tool_loop import run_with_tools
 from app.tools.web_search import web_search_tool
 
 router = APIRouter(prefix="/support", tags=["support"])
 
 _SESSION_PREFIX = "support:"
-_ORDER_ID_RE = re.compile(r"ORD-\d+", re.IGNORECASE)
-_PHONE_RE = re.compile(r"07\d{9}")
+_ORDER_ID_RE = re.compile(r"ORD[\s\-_]*(\d+)", re.IGNORECASE)
+
+# أرقام الهواتف العراقية: 07XXXXXXXXX (11 خانة). الزبون يكتبها بصيغ كثيرة —
+# بأرقام عربية-هندية، بفواصل/شرطات، بمقدمة دولية (+964 / 00964 / 964) اللي
+# تستبدل الصفر الأول. نطبّع أولاً بالطبقة ١ (أرقام لاتينية) ثم نلتقط الصيغ.
+_PHONE_RE = re.compile(
+    r"(?:(?:\+|00)?964[\s\-]*)?0?7[\s\-]*(\d[\s\-]*){9}"
+)
+_NON_DIGITS_RE = re.compile(r"\D")
 
 
 class SupportChatRequest(BaseModel):
@@ -60,6 +68,32 @@ def _format_order_reply(order: dict) -> str:
     return reply + "."
 
 
+def extract_order_id(message: str) -> Optional[str]:
+    """يستخرج معرّف الطلب بصيغته القياسية ORD-#### من نص الزبون الخام.
+
+    يقبل «ord 1001» و«ORD_1001» و«ORD-١٠٠١» — التطبيع يوحّدها كلها."""
+    match = _ORDER_ID_RE.search(normalize(message, keep_punctuation=True))
+    return f"ORD-{match.group(1)}" if match else None
+
+
+def extract_phone(message: str) -> Optional[str]:
+    """يستخرج رقم هاتف عراقي بصيغته القياسية 07XXXXXXXXX من نص الزبون الخام.
+
+    يقبل الأرقام العربية-الهندية، والفواصل والشرطات داخل الرقم، والمقدمة
+    الدولية (+964 / 00964 / 964) اللي تحلّ محل الصفر. يرجع None إذا ما وُجد
+    رقم بطول عراقي صحيح (11 خانة تبدأ بـ 07)."""
+    normalized = normalize(message, keep_punctuation=True)
+    match = _PHONE_RE.search(normalized)
+    if not match:
+        return None
+
+    digits = _NON_DIGITS_RE.sub("", match.group())
+    digits = digits.removeprefix("00").removeprefix("964")
+    if not digits.startswith("0"):
+        digits = "0" + digits
+    return digits if len(digits) == 11 and digits.startswith("07") else None
+
+
 async def _deterministic_status_answer(message: str) -> Optional[str]:
     """توجيه حتمي لطلبات التتبع: إذا الرسالة فيها رقم طلب أو هاتف، نستعلم
     من المصدر مباشرة ونبني الرد من البيانات الحقيقية — بدون تفويض القرار
@@ -67,16 +101,16 @@ async def _deterministic_status_answer(message: str) -> Optional[str]:
     [TOOL_CALL] بموثوقية ويخترع حالات طلب من خياله («قيد التجهيز يوصل خلال
     يوم» لطلب حالته الحقيقية «قيد التوصيل خلال يومين») — hallucination خطير
     بميزة دعم. يرجع None إذا الرسالة ما فيها معرّف، فتذهب لمسار الموديل+الأدوات."""
-    order_match = _ORDER_ID_RE.search(message)
-    if order_match:
-        order = await order_status_provider.get_by_order_id(order_match.group().upper())
+    order_id = extract_order_id(message)
+    if order_id:
+        order = await order_status_provider.get_by_order_id(order_id)
         if order:
             return _format_order_reply(order)
         return "والله ماكو طلب بهذا الرقم عدنا — دقّق الرقم وگلي مرة ثانية."
 
-    phone_match = _PHONE_RE.search(message)
-    if phone_match:
-        orders = await order_status_provider.search_by_phone(phone_match.group())
+    phone = extract_phone(message)
+    if phone:
+        orders = await order_status_provider.search_by_phone(phone)
         if orders:
             return "هلا بيك، هذي طلباتك: " + " | ".join(_format_order_reply(o) for o in orders)
         return "والله ماكو طلبات مسجلة بهذا الرقم — تأكد من الرقم وگلي."

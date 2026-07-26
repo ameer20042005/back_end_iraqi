@@ -17,15 +17,12 @@
 import json
 import math
 import os
-import re
 from collections import Counter, defaultdict
+
+from app.text_norm import normalize
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCUMENTS_PATH = os.path.join(BASE_DIR, "documents.jsonl")
-
-# حروف التشكيل والتطويل
-_DIACRITICS = re.compile(r"[ً-ْٰـ]")
-_NON_WORD = re.compile(r"[^\w\s]", re.UNICODE)
 
 # كلمات استفهام وربط شائعة ما تفيد البحث
 _STOPWORDS = {
@@ -35,17 +32,29 @@ _STOPWORDS = {
 }
 
 
-def normalize(text):
-    """تطبيع النص العربي: إزالة التشكيل وتوحيد الألف والياء والتاء المربوطة."""
-    text = _DIACRITICS.sub("", text)
-    text = text.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
-    text = text.replace("ى", "ي").replace("ة", "ه")
-    text = _NON_WORD.sub(" ", text)
-    return text.lower()
+# `normalize` مستوردة من app.text_norm (الطبقة ١) — تُعاد تصديرها هنا للحفاظ
+# على `from app.rag.retriever import normalize` بالكود القائم. لا تعرّف تطبيعاً
+# محلياً بهذا الملف: الفهرس والاستعلام لازم يمرّان بنفس الدالة حرفياً.
+
+
+# حروف تسبق أداة التعريف بالكلام الطبيعي: «واللابتوب»، «بالسماعة»، «للطاولة»،
+# «فالحقيبة»، «كالماوس». بدون حذفها ما تتطابق الكلمة مع «لابتوب» بالفهرس أبداً
+# — مرصود فعلياً: «زين واللابتوب؟» كان يرجع صفر نتائج فيرد الوكيل رد التهرب.
+_DEF_PREFIXES = ("و", "ب", "ل", "ف", "ك")
 
 
 def _strip_al(token):
-    """حذف أداة التعريف «ال» إذا بقي من الكلمة 3 حروف فأكثر."""
+    """حذف أداة التعريف «ال» (مع أي حرف جر/عطف قبلها) إذا بقي من الكلمة 3
+    حروف فأكثر.
+
+    «لل» حالة خاصة: لام الجر + لام التعريف بلا ألف («للطاولة» = ل + الطاولة)."""
+    if token.startswith("لل") and len(token) >= 5:
+        return token[2:]
+
+    for prefix in _DEF_PREFIXES:
+        if token.startswith(prefix + "ال") and len(token) >= 6:
+            return token[len(prefix) + 2:]
+
     if token.startswith("ال") and len(token) >= 5:
         return token[2:]
     return token

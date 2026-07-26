@@ -1,0 +1,56 @@
+[
+  {
+    "order_id": "ORD-1001",
+    "phone": "07701234567",
+    "status": "قيد التوصيل",
+    "items": [
+      { "product_name": "لابتوب لينوفو IdeaPad 15", "quantity": 1 }
+    ],
+    "eta": "خلال يومين"
+  },
+  {
+    "order_id": "ORD-1002",
+    "phone": "07709876543",
+    "status": "تم التسليم",
+    "items": [
+      { "product_name": "سماعة بلوتوث JBL", "quantity": 2 }
+    ],
+    "eta": null
+  },
+  {
+    "order_id": "ORD-1003",
+    "phone": "07512223344",
+    "status": "قيد التجهيز",
+    "items": [
+      { "product_name": "حقيبة لابتوب مبطنة", "quantity": 1 }
+    ],
+    "eta": "خلال ثلاثة أيام"
+  },
+  {
+    "order_id": "ORD-1004",
+    "phone": "07512223344",
+    "status": "تم التسليم",
+    "items": [
+      { "product_name": "ماوس لاسلكي لوجيتك", "quantity": 1 }
+    ],
+    "eta": null
+  },
+  {
+    "order_id": "ORD-1005",
+    "phone": "07801119988",
+    "status": "قيد التوصيل",
+    "items": [
+      { "product_name": "شاحن سريع 65 واط", "quantity": 3 }
+    ],
+    "eta": "اليوم"
+  },
+  {
+    "order_id": "ORD-1006",
+    "phone": "07905554433",
+    "status": "ملغي",
+    "items": [
+      { "product_name": "كيبورد ميكانيكي", "quantity": 1 }
+    ],
+    "eta": null
+  }
+]
