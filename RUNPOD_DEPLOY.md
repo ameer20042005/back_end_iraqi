@@ -9,6 +9,103 @@
 
 ---
 
+## 🚀 التشغيل السريع — Pod جديد من الصفر
+
+كل الخطوات بالترتيب، من إنشاء الـ Pod لحد أول رد من الوكيل. للتفاصيل والشروحات انزل لـ [الطريقة 1](#الطريقة-1-pod-مباشر-بالقالب-الجاهز).
+
+### 1) أنشئ الـ Pod (من لوحة RunPod)
+
+| الحقل | القيمة |
+|---|---|
+| **GPU** | A40 (48GB) أو أي GPU بـ 40GB+ |
+| **Container Image** | `vllm/vllm-openai:gemma4-unified` |
+| **Container Disk** | 50GB+ |
+| **Expose HTTP Ports** | `8000` |
+
+اضغط **Deploy**، وانتظر حتى تصير الحالة **Running**.
+
+### 2) افتح الطرفية
+
+**Connect** → **Start Web Terminal**.
+
+### 3) نزّل المشروع
+
+```bash
+cd /workspace
+git clone https://github.com/ameer20042005/back_end_iraqi.git app
+cd /workspace/app
+```
+
+### 4) حط توكن Hugging Face
+
+بدّل `hf_xxx` بتوكنك (شلون تجيبه: [قبل البدء](#1-توكن-hugging-face-hf_token)):
+
+```bash
+echo 'HF_TOKEN=hf_xxx' > /workspace/app/.env
+```
+
+### 5) شغّل السيرفر (يضل شغال بعد غلق الطرفية)
+
+```bash
+cd /workspace/app
+export HF_HUB_ENABLE_HF_TRANSFER=0
+tmux kill-session -t api 2>/dev/null
+tmux new-session -d -s api 'bash start.sh > /tmp/api.log 2>&1'
+```
+
+### 6) راقب لحد ما يجهز
+
+```bash
+tail -f /tmp/api.log
+```
+
+أول تشغيل ياخذ **دقائق** (تحميل الموديل ~24GB). اخرج من المراقبة بـ `Ctrl+C` — يوقف `tail` بس، ما يمس السيرفر.
+
+### 7) تأكد إنه جاهز
+
+```bash
+curl -s http://127.0.0.1:8000/gpu | python3 -m json.tool
+```
+
+انتظر حتى يصير `"vllm_ready": true`.
+
+### 8) جرّب أول رد
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/sales/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"شكد سعر لابتوب لينوفو؟"}' | python3 -m json.tool
+```
+
+لازم يرجع رد مبيعات عراقي بسعر من الكتالوج. لو رجع جملة اعتذار ثابتة مكررة، شوف [فحص صحة المُرمِّز](#فحص-صحة-المرمز-tokenizer).
+
+### 9) افتح لوحة الاختبار بالمتصفح
+
+```
+https://<POD_ID>-8000.proxy.runpod.net/test
+```
+
+تلقى `<POD_ID>` بزر **Connect** → **HTTP Service [Port 8000]**.
+
+### 10) اغلق الطرفية
+
+السيرفر يضل شغال داخل tmux. للتأكد: افتح طرفية جديدة وشغّل `curl -s http://127.0.0.1:8000/health`.
+
+---
+
+## ⚡ أوامر سريعة (Pod شغال أصلاً)
+
+| تريد | الأمر |
+|---|---|
+| تشوف السيرفر شغال؟ | `tmux ls` و `curl -s http://127.0.0.1:8000/health` |
+| تشوف اللوج حي | `tmux attach -t api` (اطلع: `Ctrl+B` ثم `D`) |
+| تشوف اللوج بدون دخول | `tail -f /tmp/api.log` |
+| توقف السيرفر | `tmux kill-session -t api` |
+| تعيد التشغيل | `cd /workspace/app && tmux kill-session -t api 2>/dev/null && tmux new-session -d -s api 'bash start.sh > /tmp/api.log 2>&1'` |
+| تحدّث الكود وتعيد التشغيل | انظر [تحديث الكود لاحقاً](#تحديث-الكود-لاحقاً) |
+
+---
+
 ## قبل البدء — تجهيزات إلزامية
 
 ### 1. توكن Hugging Face (`HF_TOKEN`)
