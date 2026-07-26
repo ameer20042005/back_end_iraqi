@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
-"""يحوّل OrderExtraction (خام من الموديل) إلى OrderConfirmation موثوق —
-الأسعار والمجموع تُحسب هنا من app/products.py دائماً، لا نثق بأرقام الموديل."""
+"""يحوّل OrderExtraction (خام من الموديل) إلى OrderConfirmation موثوق.
+
+**الكتالوج مساعد لا شرط**: النظام يستقبل طلبات لأي منتج، حتى لو ما كان
+موجوداً بـ app/products.py. الصنف المطابق يأخذ سعره من الكتالوج (لا نثق
+بأرقام الموديل)، وغير المطابق يُقبل كما ورد باسمه وكميته — والسعر المرجعي
+حينها هو quoted_price المذكور برسالة الزبون.
+"""
 
 import re
 import uuid
@@ -23,7 +28,7 @@ async def resolve_order(
 ) -> OrderConfirmation:
     resolved_items = []
     subtotal = 0.0
-    all_matched = True
+    matched_count = 0
     currency = None
 
     for item in extraction.items:
@@ -31,6 +36,7 @@ async def resolve_order(
         if product:
             line_total = product["price"] * item.quantity
             subtotal += line_total
+            matched_count += 1
             currency = currency or product.get("currency")
             resolved_items.append(ResolvedOrderItem(
                 product_id=str(product["id"]),
@@ -42,7 +48,8 @@ async def resolve_order(
                 matched=True,
             ))
         else:
-            all_matched = False
+            # منتج خارج الكتالوج — طلب صالح تماماً، نمرره باسمه كما ورد
+            # بدون سعر (المرجع السعري هو quoted_price من رسالة الزبون).
             resolved_items.append(ResolvedOrderItem(
                 product_name=item.product_name,
                 quantity=item.quantity,
@@ -67,8 +74,6 @@ async def resolve_order(
     if note and re.search(r"\d", note):
         note = None
     note = note or "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
-    if not all_matched:
-        note += " (تنبيه: بعض المنتجات المطلوبة ما انطبقت على الكتالوج الحالي وتحتاج مراجعة يدوية.)"
 
     confirmation = OrderConfirmation(
         order_id=str(uuid.uuid4()),
@@ -82,8 +87,11 @@ async def resolve_order(
         state_code=extraction.state_code,
         items=resolved_items,
         suggested_product=suggested_product,
-        subtotal=subtotal if resolved_items else None,
-        total=subtotal if resolved_items else None,
+        # بدون أي صنف مطابق بالكتالوج ماكو سعر نحسبه — نرجع None لا 0.0،
+        # لأن الصفر يُقرأ "الطلب مجاني" بدل "السعر غير معروف" (المرجع حينها
+        # quoted_price).
+        subtotal=subtotal if matched_count else None,
+        total=subtotal if matched_count else None,
         currency=currency,
         quoted_price=extraction.quoted_price,
         notes=extraction.notes,

@@ -1,12 +1,21 @@
 # -*- coding: utf-8 -*-
-"""وصف/استخراج نص من صورة عبر قدرة Gemma 4 البصرية الأصلية — بنفس خادم vLLM
-المستخدَم بباقي الميزات (يدعم الصور عبر /v1/chat/completions بصيغة image_url؛
-التحويل من PIL لـ data URI يصير بـ app/engine.py). **ماكو نسخة ثانية من
-الموديل** — فقط استدعاء إضافي لنفس المحرك مع `multi_modal_data`.
+"""مسار الصورة بـ /orders/create — استخراج الطلب من الصورة **باستدعاء واحد**.
+
+سابقاً كان المسار خطوتين: (1) الموديل يصف الصورة بنص عربي حر، ثم (2) الموديل
+النصي يستخرج JSON من ذلك الوصف. المشكلة إن أي معلومة ما يذكرها الوصف تضيع
+نهائياً — أرقام الهاتف والأسعار كانت تسقط، والعروض المركّبة (منتج + منتج +
+منتج بسعر واحد) تتفكّك لأصناف مكرّرة. وكلفة الاستدعاءين ضِعف زمن الاستجابة.
+
+الآن نمرر الصورة مباشرة مع نفس برومبت plane.md وguided_json، فيخرج الـ JSON
+من الصورة بخطوة واحدة: دقة أعلى وزمن أقل.
+
+يحتاج Pillow + خادم vLLM جاهز (requirements-gpu.txt) — محلياً بدون GPU يرجع
+الراوتر 501 واضحة.
 """
 
 import io
 from abc import ABC, abstractmethod
+from typing import List, Optional
 
 from app.engine import llm_engine
 
@@ -18,53 +27,81 @@ except ImportError:
     PIL_AVAILABLE = False
 
 
-_DESCRIBE_PROMPT = (
-    "هذي صورة طلب من زبون (ممكن تكون قائمة مكتوبة بخط اليد، لقطة شاشة محادثة، "
-    "أو صورة منتج). اكتب وصفاً نصياً واضحاً بالعربي لكل شي يخص الطلب المذكور "
-    "بالصورة: أسماء المنتجات، الكميات، وأي معلومات عن العميل إن وجدت. "
-    "لا تكتب أي تحليل زائد، بس الوصف المباشر."
+# أقصى بُعد للصورة قبل الإرسال. لقطات شاشة الهواتف تجي بعرض 1080-1440px،
+# وتصغيرها لـ 896 يقلّل توكنات الرؤية وزمن الترميز محسوساً بدون ما يضر
+# قراءة النص العربي بلقطات المحادثات (النص يبقى واضحاً فوق ~700px).
+_MAX_IMAGE_DIM = 896
+
+_IMAGE_INSTRUCTION = (
+    "هذي صورة طلب من زبون (قائمة مكتوبة بخط اليد، أو لقطة شاشة محادثة، أو صورة "
+    "منتج). اقرأ كل النص الظاهر بالصورة — بضمنه أرقام الهواتف بالهيدر أو داخل "
+    "الرسائل، والأسعار، والعناوين — وطبّق عليه نفس القواعد أعلاه حرفياً.\n"
+    "ملاحظات خاصة بالصور:\n"
+    "- انسخ أرقام الهواتف رقماً رقماً كما تظهر بالصورة، لا تخمّن أي خانة.\n"
+    "- العرض المركّب (\"أ + ب + ج\" بسعر واحد) هو سطر واحد بـ orders باسمه "
+    "الكامل كما ورد، مو عدة أصناف؛ والكمية المذكورة (\"3 قطع\") تخص العرض كله.\n"
+    "- تجاهل عناصر الواجهة والزخارف: الوقت، أيقونات البطارية والشبكة، أزرار "
+    "الاتصال، لوحة المفاتيح، علامات ✅ والقراءة.\n"
+    "- عبارات البائع التسويقية أو التشغيلية (\"اضافة هدية\"، \"متوفر\"، "
+    "\"وطريقة الاستعمال\") ليست منتجات — لا تدخلها بـ orders.\n"
+    "أرجع JSON فقط."
 )
 
 
-class ImageDescriber(ABC):
+def _downscale(image: "Image.Image") -> "Image.Image":
+    """يصغّر الصورة لأقصى بُعد _MAX_IMAGE_DIM مع حفظ النسبة — أهم مكسب سرعة
+    بمسار الصور: توكنات الرؤية تتناسب مع مساحة الصورة."""
+    w, h = image.size
+    longest = max(w, h)
+    if longest <= _MAX_IMAGE_DIM:
+        return image
+    scale = _MAX_IMAGE_DIM / longest
+    return image.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+
+class OrderImageReader(ABC):
     @abstractmethod
-    async def describe(self, image_bytes: bytes) -> str:
-        """يرجع نصاً عربياً يصف/يستخرج محتوى الصورة (مثلاً قائمة منتجات مطلوبة)."""
+    async def extract(self, image_bytes: bytes, messages: List[dict], schema: dict) -> str:
+        """يرجع JSON خام (نص) لطلب مستخرَج من الصورة، مقيَّداً بـ schema."""
 
 
-class NotConfiguredImageDescriber(ImageDescriber):
-    async def describe(self, image_bytes: bytes) -> str:
+class NotConfiguredImageReader(OrderImageReader):
+    async def extract(self, image_bytes: bytes, messages: List[dict], schema: dict) -> str:
         raise NotImplementedError(
-            "ميزة وصف الصورة غير متوفرة بهذه البيئة — Pillow غير مثبَّتة، أو محرك "
-            "الموديل غير جاهز (طبيعي محلياً بدون GPU؛ يجب أن تعمل على RunPod)."
+            "استخراج الطلب من الصورة غير متوفر بهذه البيئة — Pillow غير مثبَّتة، أو "
+            "محرك الموديل غير جاهز (طبيعي محلياً بدون GPU؛ يجب أن يعمل على RunPod)."
         )
 
 
-class VllmVisionDescriber(ImageDescriber):
-    """يستخدم نفس llm_engine (عميل vLLM) المستخدَم بباقي الميزات النصية —
-    الصورة قبل النص بالبرومبت حسب توصية Gemma 4 لأفضل أداء."""
+class VllmOrderImageReader(OrderImageReader):
+    """يستخدم نفس llm_engine المستخدَم بباقي الميزات — الصورة قبل النص
+    بالبرومبت حسب توصية Gemma 4 لأفضل أداء."""
 
-    async def describe(self, image_bytes: bytes) -> str:
+    async def extract(self, image_bytes: bytes, messages: List[dict], schema: dict) -> str:
         if not llm_engine.ready:
             raise NotImplementedError(
                 "محرك الموديل غير جاهز (طبيعي محلياً بدون GPU؛ يجب أن يكون جاهزاً على RunPod)."
             )
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "image"},
-                {"type": "text", "text": _DESCRIBE_PROMPT},
-            ],
-        }]
-        prompt = llm_engine.render_multimodal_prompt(messages)
-        response = await llm_engine.generate_full(
-            prompt, max_tokens=512, temperature=0.3,
+        image = _downscale(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
+
+        # نحقن الصورة برسالة المستخدم الأخيرة (اللي تحمل تعليمة الاستخراج
+        # النهائية) — الصورة أولاً ثم النص.
+        mm_messages = [dict(m) for m in messages]
+        last = mm_messages[-1]
+        last["content"] = [
+            {"type": "image"},
+            {"type": "text", "text": f"{last['content']}\n{_IMAGE_INSTRUCTION}"},
+        ]
+
+        return await llm_engine.generate_full(
+            llm_engine.render_multimodal_prompt(mm_messages),
+            max_tokens=384,
+            temperature=0.0,
+            guided_json=schema,
             multi_modal_data={"image": image},
         )
-        return response.strip()
 
 
-image_describer: ImageDescriber = (
-    VllmVisionDescriber() if PIL_AVAILABLE else NotConfiguredImageDescriber()
+order_image_reader: OrderImageReader = (
+    VllmOrderImageReader() if PIL_AVAILABLE else NotConfiguredImageReader()
 )
