@@ -565,6 +565,35 @@
   .order-card td { padding: 3px 0; }
   .order-card .num { font-variant-numeric: tabular-nums; direction: ltr; text-align: left; }
 
+  /* خانة JSON الطلب — منفصلة عن ملخّص البطاقة حتى تنقرأ وتُنسخ لوحدها */
+  .order-json { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+  .order-json summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-dim);
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .order-json summary:hover { color: var(--accent-strong); }
+  .order-json summary::-webkit-details-marker { display: none; }
+  .order-json summary::before { content: "▸"; font-size: 10px; }
+  .order-json[open] summary::before { content: "▾"; }
+  .order-json .copy-json {
+    margin-inline-start: auto;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .order-json .copy-json:hover { color: var(--accent-strong); border-color: var(--accent); }
+  /* التنسيق من pre.json-view المعتمد بالصفحة — هنا الفروق فقط */
+  .order-json pre { margin-top: 8px; max-height: 340px; overflow: auto; }
+
   .empty-state {
     color: var(--text-dim);
     font-size: 13px;
@@ -1517,8 +1546,47 @@
         ? '<div style="margin-top:8px;font-weight:600;">المجموع: <span class="num">' +
           order.total.toLocaleString() + " " + (order.currency || "") + "</span></div>"
         : "") +
-      '<div style="margin-top:6px;color:var(--text-dim);">' + escapeHtml(order.confirmation_message || "") + "</div>";
+      '<div style="margin-top:6px;color:var(--text-dim);">' + escapeHtml(order.confirmation_message || "") + "</div>" +
+      // خانة مستقلة للـ JSON الكامل: البطاقة أعلاه ملخّص للقراءة السريعة،
+      // وهذي هي الحمولة الفعلية اللي تنرسل لنظام الطلبات — مطويّة افتراضياً
+      // حتى ما تزحم البطاقة، ومعها زر نسخ للصقها بأي أداة.
+      '<details class="order-json">' +
+        "<summary>JSON الطلب الكامل" +
+          '<button type="button" class="copy-json">نسخ</button>' +
+        "</summary>" +
+        '<pre class="json-view">' + highlightJson(order) + "</pre>" +
+      "</details>";
+
+    var copyBtn = card.querySelector(".copy-json");
+    copyBtn.addEventListener("click", function (ev) {
+      // بدون هذا ينفتح/ينطوي <details> عند الضغط على زر النسخ.
+      ev.preventDefault();
+      ev.stopPropagation();
+      var text = JSON.stringify(order, null, 2);
+      var done = function () {
+        copyBtn.textContent = "✓ اننسخ";
+        setTimeout(function () { copyBtn.textContent = "نسخ"; }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text, done); });
+      } else {
+        fallbackCopy(text, done);
+      }
+    });
     return card;
+  }
+
+  function fallbackCopy(text, onDone) {
+    // clipboard API يحتاج سياقاً آمناً (https أو localhost) — بالوصول للسيرفر
+    // عبر IP أو بروكسي http يفشل، فنرجع للطريقة القديمة بدل ما ينكسر الزر.
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); onDone(); } catch (e) {}
+    document.body.removeChild(ta);
   }
 
   /* ---------------- Init ---------------- */
