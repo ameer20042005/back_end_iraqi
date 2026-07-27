@@ -44,7 +44,7 @@ import re
 from itertools import combinations
 from typing import List, Optional
 
-from app.text_norm import normalize_digits as _normalize_digits
+from app.text_norm import normalize, normalize_digits as _normalize_digits
 
 _NUMBER_RE = re.compile(r"[\d٠-٩][\d٠-٩,\.]*")
 _PHONE_RE = re.compile(r"^0\d{9,10}$")
@@ -356,6 +356,147 @@ def redact_bad_numbers(reply: str, reference_text: str) -> tuple:
             removed.append(token)
             break
     return redacted, removed
+
+
+# ============================================================
+# درع أسماء المنتجات — منع اختراع منتج غير موجود بالكتالوج
+# ============================================================
+
+# **الدرع ما يحمل أي معرفة عن منتجات بعينها.** كل شي يُشتق من الكتالوج وقت
+# التشغيل، فإضافة منتج لـ products.json (أو تبديل المصدر بقاعدة بيانات) تشتغل
+# فوراً بلا تعديل سطر هنا.
+#
+# المشكلة اللي يعالجها (عطل إنتاج): الموديل يسحب أسماء منتجات من تدريبه
+# الأساسي لما ما يلگى جواباً بالكتالوج — كتالوج فيه لابتوب لينوفو واحد،
+# والوكيل گال «ما عدنا لابتوبات» ثم عرض «Asus Core i7 رام 16» بسعر وموعد
+# توصيل مخترعين.
+#
+# الفكرة: اسم المنتج المخترع يظهر دائماً كـ**رمز** (token) مميّز مو موجود
+# بالكتالوج — كلمة لاتينية (Asus, Dell, Inspiron) أو طراز برقم (Core i7,
+# Galaxy S24). الكلام العراقي العادي ما يحتوي رموزاً من هذا النوع، فالمقارنة
+# على الرموز وحدها تمسك الاختراع بلا ما تلمس اللهجة.
+
+# رمز لاتيني بحرفين فأكثر: اسم ماركة أو طراز («Asus»، «IdeaPad»، «JBL»).
+_LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9\-]{1,}")
+
+# كلمات لاتينية عامة تظهر بالكلام الطبيعي وما تدل على منتج — استثناؤها يمنع
+# إنذارات كاذبة. قصيرة ومحدودة عمداً: كل إضافة هنا ثغرة محتملة.
+_GENERIC_LATIN = {
+    "ok", "okay", "no", "yes", "hi", "www", "http", "https", "com", "id",
+    "iqd", "usd", "sms", "api", "pdf", "gb", "tb", "mb", "kg", "cm", "mm",
+    "ssd", "hdd", "ram", "usb", "hd", "fhd", "led", "lcd", "wifi", "bluetooth",
+}
+
+# كلمات عربية شائعة تجي بعد اسم الصنف بالكلام الطبيعي بلا ما تكون اسماً
+# تجارياً («لابتوب خفيف»، «لابتوب جديد»، «سماعة زينة»). بلا استثنائها كان
+# الوصف العادي يُقرأ ماركة مخترعة.
+_ARABIC_STOPWORDS = {
+    "خفيف", "جديد", "جديده", "زين", "زينه", "ممتاز", "ممتازه", "حلو", "حلوه",
+    "قوي", "قويه", "كبير", "كبيره", "صغير", "صغيره", "رخيص", "رخيصه", "غالي",
+    "متوفر", "متوفره", "موجود", "موجوده", "مناسب", "مناسبه", "اصلي", "اصليه",
+    "بسعر", "بسعره", "واحد", "وحده", "عدنا", "عندنا", "الك", "الكم", "حبيبي",
+    "هسه", "حاليا", "ايضا", "كلش", "كثير", "شوي", "بيه", "بيها", "منه", "منها",
+    "هذا", "هذي", "هاي", "ذاك", "اللي", "الي", "بالكتالوج", "بالمخزن",
+}
+
+
+def _word_set_ordered(text: str) -> List[str]:
+    """كلمات النص عربيةً بترتيبها — نحتاج الترتيب لأن الاسم التجاري يُعرَف
+    بموقعه (يتبع اسم الصنف)، لا بوجوده وحده."""
+    return re.findall(r"[؀-ۿ]+", text)
+
+# نفي التوفّر — «ما عدنا لابتوبات». لو اجتمع النفي مع عرض منتج بنفس الرد،
+# فالرد متناقض بذاته حتى لو الماركة صحيحة.
+_AVAILABILITY_DENIALS = (
+    "ماعدنا", "ما عدنا", "ماكو عدنا", "ما اكو عدنا", "مو متوفر", "ما متوفر",
+    "غير متوفر",
+)
+# عرض منتج بعد النفي. «عدنا» **ليست** هنا عمداً: هي جزء من صيغة النفي نفسها
+# («ما عدنا تلفزيونات»)، فإدراجها كان يجعل كل نفي صادق يُقرأ تناقضاً.
+_OFFER_PHRASES = (
+    "اعرضلك", "أعرضلك", "اعرض لك", "أعرض لك", "بس اكو", "بس عدنا",
+    "بديل", "البديل", "نوفرلك", "نجيبلك", "متوفر بدله", "بدله عدنا",
+)
+
+
+def check_product_names(reply: str, reference_text: str) -> List[str]:
+    """يرجع رموز المنتجات المذكورة بالرد وغير الموجودة بالكتالوج.
+
+    **الدرع مشتق من الكتالوج بالكامل** — ما عنده قائمة ماركات مكتوبة بالكود.
+    أضف أي منتج لـ products.json ويصير مسموحاً فوراً، واحذفه فيصير ممنوعاً،
+    بلا أي تعديل هنا. وإذا انبدل مصدر المنتجات بقاعدة بيانات، يشتغل كما هو.
+
+    درع ثالث مستقل عن الأرقام والمواضيع، أضيف بعد عطل إنتاج: الموديل اخترع
+    لابتوب «Asus Core i7 رام 16» ما موجود بالكتالوج إطلاقاً، وعرضه على الزبون
+    بسعر وموعد توصيل. حارس الأرقام مسك السعر المخترع فنقّحه، لكن **اسم المنتج
+    عبر بلا أي فحص** — فطلع رد يعرض منتجاً ما نملكه.
+
+    ليش الرموز اللاتينية: اسم المنتج المخترع يظهر دائماً كرمز مميّز مو موجود
+    بالكتالوج. الكلام العراقي العادي ما يحتوي رموزاً كهذي، فالمقارنة عليها
+    تمسك الاختراع بلا ما تلمس اللهجة ولا تحتاج معرفة مسبقة بالماركات.
+    """
+    reference_l = _normalize_digits(reference_text).lower()
+    allowed_latin = {t.lower() for t in _LATIN_TOKEN_RE.findall(reference_l)}
+    found = []
+
+    for token in _LATIN_TOKEN_RE.findall(_normalize_digits(reply)):
+        low = token.lower()
+        if low in _GENERIC_LATIN or low in allowed_latin:
+            continue
+        if low not in [f.lower() for f in found]:
+            found.append(token)
+
+    # الماركة مكتوبة بالعربي («لابتوب ايسر») ما تنمسك بالرموز اللاتينية.
+    # نمسكها بنفس المبدأ المشتق من الكتالوج: الكلمة اللي **تتبع** اسم صنف
+    # معروف من الكتالوج («لابتوب»، «ماوس»، «سماعة») هي اسم تجاري — فإذا ما
+    # كانت بالكتالوج فهي مخترعة. أسماء الأصناف نفسها مشتقة من الكتالوج، ما
+    # مكتوبة هنا.
+    reply_words = _word_set_ordered(normalize(reply))
+    catalog_words = set()
+    for w in _word_set_ordered(normalize(reference_text)):
+        catalog_words.add(w)
+        catalog_words.add(_ARABIC_PREFIX.sub("", w))
+    category_words = {w for w in catalog_words if len(w) >= 4}
+    for i, word in enumerate(reply_words[:-1]):
+        if _ARABIC_PREFIX.sub("", word) not in category_words:
+            continue
+        # البادئات الملتصقة (واو العطف، الباء، اللام) تخلي «ورام» كلمة جديدة
+        # مو بالكتالوج — والكتالوج يكتبها «رام». نجرّدها قبل المقارنة، نفس
+        # مبدأ _word_set بدرع المواضيع و_strip_al بالاسترجاع.
+        nxt_raw = reply_words[i + 1]
+        nxt = _ARABIC_PREFIX.sub("", nxt_raw)
+        if (
+            len(nxt) >= 4
+            and nxt not in catalog_words
+            and nxt not in _ARABIC_STOPWORDS
+            and nxt_raw not in _ARABIC_STOPWORDS
+            and nxt not in found
+        ):
+            found.append(nxt)
+    return found
+
+
+def contradicts_availability(reply: str, reference_text: str) -> bool:
+    """هل الرد ينفي التوفّر ثم يعرض منتجاً **مو** بالكتالوج بنفس النَّفَس؟
+
+    «ما عدنا لابتوبات حالياً، بس أگدر أعرضلك لابتوب Asus...» — تناقض ذاتي
+    يفضح الاختراع. مرصود حرفياً بالإنتاج.
+
+    القيد الجوهري إن العرض لازم يكون **بلا سند بالكتالوج**: «ما عدنا
+    تلفزيونات، بس عدنا لابتوب لينوفو IdeaPad 15» رد صحيح تماماً — نفي صادق
+    مع بديل حقيقي، وهو بالضبط السلوك المطلوب من بائع جيد. بلا هذا القيد كان
+    الدرع يعاقب أفضل رد ممكن."""
+    denies = any(d in reply for d in _AVAILABILITY_DENIALS)
+    if not denies:
+        return False
+    offers = any(o in reply for o in _OFFER_PHRASES)
+    if not offers:
+        return False
+    # العرض مسنود بمنتج حقيقي من الكتالوج؟ إذن مو تناقضاً بل بيعاً سليماً.
+    reply_l = _normalize_digits(reply).lower()
+    catalog_names = re.findall(r"[^\s|،.]+", _normalize_digits(reference_text).lower())
+    significant = [w for w in catalog_names if len(w) >= 4]
+    return not any(w in reply_l for w in significant)
 
 
 # ============================================================

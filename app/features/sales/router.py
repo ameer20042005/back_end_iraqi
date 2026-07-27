@@ -30,7 +30,11 @@ from app.features.sales.prompts import (
     build_sales_prompt,
 )
 from app.features.sales.service import resolve_order
-from app.guards import redact_bad_numbers
+from app.guards import (
+    check_product_names,
+    contradicts_availability,
+    redact_bad_numbers,
+)
 from app.order_extraction import correct_location, state_code_for
 from app.order_schema import (
     OrderConfirmation,
@@ -218,6 +222,38 @@ def _order_complete_by_content(history: List[dict], user_message: str, answer: s
         return False
     return any(p in answer for p in _ORDER_DONE_PHRASES)
 
+def _full_catalog_text() -> str:
+    """نص الكتالوج **كله** — مرجع درع أسماء المنتجات.
+
+    ليش الكتالوج كامل لا المنتجات المسترجَعة: الاسترجاع يبني على رسالة العميل
+    الأخيرة، فيرجع لابتوبات لسؤال عن لابتوب. لو قسنا عليه وحده، صار ذكر
+    «ماوس لوجيتك» — وهو منتج حقيقي عدنا — «اختراعاً» لأنه مو بنتائج هذا الدور.
+    الماركة تُقاس على ما نملكه فعلاً، مو على ما استُرجع صدفةً."""
+    return " ".join(
+        f"{p['name']} {p.get('description', '')} {' '.join(p.get('tags', []))}"
+        for p in product_repository.all_products()
+    )
+
+
+def _catalog_offer_reply(rag_products: List[dict]) -> str:
+    """رد بديل حتمي مبني من الكتالوج الحقيقي وحده — يُستخدم لما يخترع الموديل
+    منتجاً مو عدنا (انظر check_product_names).
+
+    ما نرجع رد تهرب هنا: الزبون سأل سؤال توفّر ويستاهل جواباً. نعرض اللي
+    نملكه فعلاً بأسمائه وأسعاره الحرفية من الكتالوج، وإذا ماكو شي مطابق
+    ننفي بصراحة."""
+    if not rag_products:
+        return (
+            "عذراً حبيبي، ما لگيت شي مطابق لطلبك بالمتوفر عدنا هسه. "
+            "گلي شنو تحتاج بالضبط وأشوفلك."
+        )
+    lines = "، ".join(
+        f"{p['name']} بـ{p['price']:,} {p.get('currency', 'IQD')}"
+        for p in rag_products[:3]
+    )
+    return f"هلا بيك، اللي متوفر عدنا هسه: {lines}. تحب أفصّلك على أي واحد؟"
+
+
 class SalesChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
@@ -354,6 +390,17 @@ async def sales_chat(req: SalesChatRequest):
     # الاستدلال بالنوتبوك: المواضيع أولاً لأنها تفهم السياق، الأرقام ثانياً).
     if engine_name == "vllm":
         reference_text = products_context_block(known_products)
+        # درع الأسماء أولاً: منتج مخترع يبطل الرد كله، فما ينفع ننقّح أرقامه
+        # ونسلّمه — الرقم المنقَّح بجملة تعرض منتجاً ما نملكه يبقى كذبة.
+        invented = check_product_names(answer, _full_catalog_text())
+        contradiction = contradicts_availability(answer, _full_catalog_text())
+        if invented or contradiction:
+            logger.warning(
+                "منتج مخترَع برد المبيعات — ماركات: %s، تناقض توفّر: %s "
+                "(session=%s) — الرد الأصلي: %r",
+                invented, contradiction, session_id, answer[:300],
+            )
+            answer = _catalog_offer_reply(known_products)
         answer, redacted = redact_bad_numbers(answer, reference_text)
         if redacted:
             logger.warning(
@@ -431,6 +478,16 @@ async def sales_chat_stream(req: SalesChatRequest):
             engine_name = "vllm"
             answer = "".join(collected)
             reference_text = products_context_block(known_products)
+            # نفس ترتيب مسار /chat — انظر التعليق هناك.
+            invented = check_product_names(answer, _full_catalog_text())
+            contradiction = contradicts_availability(answer, _full_catalog_text())
+            if invented or contradiction:
+                logger.warning(
+                    "منتج مخترَع برد المبيعات (stream) — ماركات: %s، تناقض توفّر: %s "
+                    "(session=%s) — الرد الأصلي: %r",
+                    invented, contradiction, session_id, answer[:300],
+                )
+                answer = _catalog_offer_reply(known_products)
             answer, redacted = redact_bad_numbers(answer, reference_text)
             if redacted:
                 logger.warning(

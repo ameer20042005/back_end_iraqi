@@ -39,6 +39,14 @@ class ProductRepository(ABC):
     def get_by_id(self, product_id: str) -> Optional[dict]:
         """يرجع منتجاً واحداً بالمعرّف، أو None إذا غير موجود."""
 
+    @abstractmethod
+    def all_products(self) -> List[dict]:
+        """كل المنتجات — مرجع درع أسماء المنتجات (app/guards.py).
+
+        الدرع يقيس الماركة المذكورة برد الوكيل على ما **نملكه فعلاً**، مو على
+        ما استرجعه BM25 لهذا الدور: «ماوس لوجيتك» منتج حقيقي عدنا، وكان
+        يُقرأ اختراعاً لو قسناه على نتائج سؤال عن لابتوب."""
+
 
 class StaticProductRepository(ProductRepository):
     """فهرس BM25 بالذاكرة فوق ملف JSON محلي (نفس أسلوب app/rag/retriever.py)."""
@@ -107,6 +115,9 @@ class StaticProductRepository(ProductRepository):
 
     def get_by_id(self, product_id: str) -> Optional[dict]:
         return self._by_id.get(str(product_id))
+
+    def all_products(self) -> List[dict]:
+        return list(self.products)
 
 
 product_repository: ProductRepository = StaticProductRepository()
