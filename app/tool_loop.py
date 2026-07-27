@@ -14,14 +14,58 @@ Gemma 4) — بدلاً منه نطلب من الموديل (عبر system promp
 """
 
 import json
+import logging
 import re
 from typing import Awaitable, Callable, Dict, List, Optional
 
 from app.engine import llm_engine
 
+logger = logging.getLogger(__name__)
+
+# الصيغة المتوقَّعة: [TOOL_CALL] بآخر النص (الـ stop string يقطع التوليد عنده).
 _TOOL_CALL_TAIL = re.compile(r"\[TOOL_CALL\]\s*(\{.*\})\s*$", re.DOTALL)
 
+# صيغ منحرفة يخرجها الموديل فعلياً حين ما يلتزم حرفياً بالتعليمات. كل واحدة
+# كانت تُسقِط الاستدعاء بصمت فيتسرّب نص خام («[TOOL_CALL]{...}») للعميل، أو
+# أسوأ: يقرر الموديل يجاوب من خياله لأن الأداة «ما ردّت عليه».
+# ملاحظة على `\{.*\}`: جشع عمداً حتى يبلع الأقواس المتداخلة بـ args.
+_TOOL_CALL_ANYWHERE = re.compile(
+    r"\[TOOL_CALL\]\s*(\{.*\})\s*(?:\[/TOOL_CALL\])?", re.DOTALL
+)
+# بلا وسوم إطلاقاً: JSON عارٍ فيه مفتاح "tool" — الموديل «يتذكّر» البنية
+# وينسى الوسوم، وهي أكثر الانحرافات شيوعاً بالنماذج غير المدرَّبة على النمط.
+# القوس الأخير جشع (`.*\}`) عمداً: `args` كائن متداخل، وأي صيغة غير جشعة
+# تتوقف عند أول `}` داخلي فتنتج JSON مبتوراً لا يُفكَّك.
+_BARE_JSON = re.compile(r'(\{[^{}]*"tool"\s*:\s*"[^"]+".*\})', re.DOTALL)
+
+# رد احتياطي حين تنفد الجولات بلا إجابة نهائية. بديله السابق كان إرجاع آخر نص
+# مولَّد — أي غالباً استدعاء أداة نصف مكتوب يوصل العميل كما هو.
+_EXHAUSTED_FALLBACK = (
+    "معذرة، صار عندي تعقيد بجلب المعلومة. عطيني رقم الطلب (مثل ORD-1001) أو "
+    "رقم هاتفك وأتابعلك مباشرة."
+)
+
 ToolFunc = Callable[[dict], Awaitable[dict]]
+
+
+def _extract_tool_call(text: str):
+    """يستخرج (استدعاء الأداة، النص المرئي قبله) من رد الموديل، أو (None, "").
+
+    يجرّب ثلاث صيغ بترتيب الصرامة: الصيغة القياسية بآخر النص، ثم الصيغة
+    الموسومة أينما وردت (حتى لو تبعها كلام)، ثم JSON عارٍ بمفتاح "tool".
+    التساهل هنا مقصود ومحدود: البديل عن قراءة استدعاء منحرف ليس «رفضه بأمان»
+    بل تسريبه نصاً خاماً للعميل أو دفع الموديل للاختراع."""
+    for pattern in (_TOOL_CALL_TAIL, _TOOL_CALL_ANYWHERE, _BARE_JSON):
+        match = pattern.search(text)
+        if not match:
+            continue
+        try:
+            call = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(call, dict) and call.get("tool"):
+            return call, text[: match.start()].strip()
+    return None, ""
 
 
 async def run_with_tools(
@@ -49,16 +93,16 @@ async def run_with_tools(
             result_holder=result_holder,
         )
 
-        if result_holder.get("stop_reason") != "[/TOOL_CALL]":
-            return text.strip()
+        call, visible_text = _extract_tool_call(text)
 
-        match = _TOOL_CALL_TAIL.search(text)
-        if not match:
-            return text.strip()
-
-        try:
-            call = json.loads(match.group(1))
-        except json.JSONDecodeError:
+        # ما بيه استدعاء أداة = رد نهائي للعميل. نفحص النص نفسه لا `stop_reason`
+        # وحده: الموديل أحياناً يكتب الاستدعاء بلا الوسم الختامي فما يُفعَّل الـ
+        # stop string، وكان الرد يُسلَّم للعميل بوسومه الخام.
+        if call is None:
+            if "[TOOL_CALL]" in text:
+                # استدعاء مشوَّه تعذّر تفكيكه — نحجب النص الخام ولا نسلّمه.
+                logger.warning("استدعاء أداة مشوَّه تعذّر تفكيكه: %r", text[:200])
+                return _EXHAUSTED_FALLBACK
             return text.strip()
 
         tool_name = call.get("tool")
@@ -72,7 +116,6 @@ async def run_with_tools(
             except Exception as exc:  # لا نكسر المحادثة إذا فشلت أداة خارجية
                 tool_result = {"error": str(exc)}
 
-        visible_text = text[: match.start()].strip()
         working_messages.append({"role": "assistant", "content": visible_text or "..."})
         working_messages.append({
             "role": "user",
@@ -82,4 +125,9 @@ async def run_with_tools(
             ),
         })
 
-    return text.strip()
+    # نفدت الجولات والموديل ما وصل لرد نهائي. الإرجاع السابق (`text.strip()`)
+    # كان يسلّم العميل آخر نص مولَّد — وهو بهذي النقطة بالذات استدعاء أداة
+    # (لأن كل جولة انتهت باستدعاء، وإلا رجعنا مبكراً). أي: النص الوحيد المضمون
+    # إنه **مو** رد للعميل هو بالضبط اللي كان يُرسَل له.
+    logger.warning("نفدت جولات الأدوات (%s) بلا رد نهائي", max_rounds)
+    return _EXHAUSTED_FALLBACK
