@@ -25,6 +25,22 @@ gemma_iraqi_merge_fixed.ipynb (v2.2)، مُطبَّقة هنا على كتالو
      مو نص ثابت بالبرومت)، الدرع يتكيف تلقائياً بدون أي تعديل كود مع أي
      منتج يُضاف لـ app/data/products.json أو يُستبدل بمصدر بيانات حقيقي.
 
+**مبدأ ملزم لأي درع يُضاف هنا: لا تبنِ الدرع بقيود كتالوج بعينه.**
+الدرع يقرأ الكتالوج وقت التشغيل، ما يحمل معرفة عن منتجات ولا ماركات ولا
+مواصفات صنف تجارة معيّن. صاحب المحل حر يضيف أي منتج ويبدّل تجارته كلها، والدرع
+لازم يفهمه فوراً بلا تعديل سطر بايثون واحد.
+
+التطبيق العملي لهذا المبدأ بالملف:
+  - `check_product_names` — أسماء المنتجات والماركات المسموحة تُشتق من نص
+    الكتالوج، ما اكو قائمة ماركات مكتوبة.
+  - `_catalog_spec_context` — كلمات المواصفات (اللي تخلي الرقم غير سعري)
+    تُستخرج من وصف المنتجات نفسها. القوائم المكتوبة (`_SPEC_PREFIXES`،
+    `_NON_PRICE_UNITS`) احتياط لا مصدر: بدونها كان كتالوج مكيفات يجعل «ضاغط
+    انفرتر بقوة 1.5 حصان» رقماً «مختلَقاً».
+
+يبقى مكتوباً بالكود ما يخص **اللغة** لا التجارة: كلمات التأكيد العراقية،
+صيغ النفي، أدوات التعريف، كلمات العملة. هذي ثابتة مهما تبدّل الكتالوج.
+
 مبدأ التصميم: **الدرع يمنع الاختلاق، مو الكلام.** كل توسعة أدناه (المرجع
 التراكمي، المجاميع الحسابية، النفي الصريح، الأرقام غير المالية) هدفها تقليل
 الإنذارات الكاذبة اللي كانت تقطع محادثة سليمة — بدون ما يمر ولا رقم مالي
@@ -201,6 +217,34 @@ def _stated_quantities(reply: str) -> set:
     return found
 
 
+def _catalog_spec_context(reference_text: str) -> tuple:
+    """يستخرج من الكتالوج نفسه الكلمات اللي تحيط بأرقام **غير سعرية**.
+
+    ترجع (كلمات تسبق رقماً، كلمات تتبع رقماً) كما وردت بوصف المنتجات.
+
+    ليش موجود: `_SPEC_PREFIXES` و`_NON_PRICE_UNITS` قوائم مكتوبة بالكود
+    ومربوطة بالإلكترونيات (ssd، رام، جيجا، انج). لو انبدل الكتالوج لمكيفات
+    صار «ضاغط انفرتر بقوة 1.5 حصان» رقماً «مختلَقاً» لأن «ضاغط» و«حصان» مو
+    بالقوائم — إنذار كاذب يقطع البيع، ونفس العلة اللي أشّر عليها المستخدم
+    بدرع الأسماء: **الدرع ما ينبغي يحمل معرفة عن صنف تجارة بعينه.**
+
+    الاشتقاق هنا يخلي أي مواصفة يكتبها صاحب المحل بوصف منتجه مفهومة تلقائياً،
+    والقوائم المكتوبة تبقى احتياطاً للمواصفات اللي ما ذكرها الوصف."""
+    ref_n = _normalize_digits(reference_text)
+    heads, tails = set(), set()
+    for match in re.finditer(r"\d[\d,\.]*", ref_n):
+        head = re.findall(r"[؀-ۿA-Za-z]+", ref_n[max(0, match.start() - 20):match.start()])
+        if head:
+            heads.add(head[-1].lower())
+        tail = re.findall(r"[؀-ۿA-Za-z]+", ref_n[match.end():match.end() + 20])
+        if tail:
+            tails.add(tail[0].lower())
+    # العملة ما تصير وحدة غير سعرية مهما وردت بالكتالوج — وإلا انفتح باب
+    # التهريب: «بسعر 900000 دينار» يمر لأن «دينار» صارت «وحدة مواصفة».
+    tails -= {c.lower() for c in _CURRENCY_WORDS}
+    return heads, tails
+
+
 def check_numbers(reply: str, reference_text: str) -> List[str]:
     """يرجع قائمة الأرقام المالية بـ `reply` غير الموجودة حرفياً بـ
     `reference_text` ولا مشتقة منه حسابياً (مجموع/مضاعف أسعار مذكورة).
@@ -222,6 +266,13 @@ def check_numbers(reply: str, reference_text: str) -> List[str]:
     reply_digits = {_strip_separators(n.rstrip(".,")) for n in _NUMBER_RE.findall(reply_n)}
     allowed |= _derivable_sums(allowed, reply_digits, _stated_quantities(reply_n))
 
+    # مواصفات هذا الكتالوج بالذات، مضافة للقوائم المكتوبة (اللي تبقى احتياطاً).
+    # بلا هذا كان الدرع مربوطاً بالإلكترونيات: كتالوج مكيفات يجعل «ضاغط
+    # انفرتر بقوة 1.5 حصان» رقماً «مختلَقاً».
+    catalog_heads, catalog_tails = _catalog_spec_context(reference_text)
+    spec_prefixes = tuple(_SPEC_PREFIXES) + tuple(catalog_heads)
+    non_price_units = tuple(_NON_PRICE_UNITS) + tuple(catalog_tails)
+
     bad = list(_spelled_prices(reply))
     for match in _NUMBER_RE.finditer(reply_n):
         clean = match.group().rstrip(".,")
@@ -240,7 +291,7 @@ def check_numbers(reply: str, reference_text: str) -> List[str]:
         if "," not in clean and "." not in clean and len(clean) <= 2:
             continue
         # الرقم مقترن بوحدة غير مالية؟ (نفحص ما بعده مباشرة بحدود ١٢ حرفاً)
-        if any(tail.startswith(u) for u in _NON_PRICE_UNITS):
+        if any(tail.lower().startswith(u) for u in non_price_units):
             continue
         # الرقم مسبوق بكلمة عنوان أو رقم طلب؟ (نفحص ما قبله بحدود ١٤ حرفاً).
         # مشروط بأن يكون رقماً قصيراً (≤٤ خانات، مثل «محلة 425») وغير متبوع
@@ -253,7 +304,7 @@ def check_numbers(reply: str, reference_text: str) -> List[str]:
             len(norm) <= 4
             and "," not in clean
             and not any(tail.startswith(c) for c in _CURRENCY_WORDS)
-            and any(head.lower().endswith(p) for p in _SPEC_PREFIXES)
+            and any(head.lower().endswith(p) for p in spec_prefixes)
         ):
             continue
         looks_like_address = (
