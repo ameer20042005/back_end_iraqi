@@ -51,7 +51,13 @@ STATUS_CASES = [
     ("تجهيز", "شنو الطلبات قيد التجهيز", "قيد التجهيز"),
     ("تسليم", "الطلبات تم التسليم", "تم التسليم"),
     ("مسلمة عامي", "الطلبات المسلمه", "تم التسليم"),
+    ("مكتملة — لقطة الإنتاج", "مكتمله", "تم التسليم"),
+    ("مكتملة بالتاء المربوطة", "الطلبات المكتملة", "تم التسليم"),
+    ("منجزة", "شنو الطلبات المنجزه", "تم التسليم"),
+    ("تم توصيلها", "الطلبات التي تم توصيلها", "تم التسليم"),
     ("ملغي", "شنو الطلبات الملغيه", "ملغي"),
+    ("مرتجعة", "الطلبات المرتجعه", "ملغي"),
+    ("بالمخزن", "الطلبات بالمخزن", "قيد التجهيز"),
     ("بلا حالة", "شلونكم اليوم", None),
 ]
 
@@ -62,12 +68,21 @@ STATUS_CASES = [
     ids=[c[0] for c in STATUS_CASES],
 )
 def test_extract_status(description, message, expected):
-    assert extract_status(message) == expected, description
+    assert asyncio.run(extract_status(message)) == expected, description
 
 
 def test_longest_alias_wins():
     """«قيد التوصيل» تحتوي «التوصيل» — لازم نطابق الأطول لا الأقصر."""
-    assert extract_status("الطلبات قيد التوصيل") == "قيد التوصيل"
+    assert asyncio.run(extract_status("الطلبات قيد التوصيل")) == "قيد التوصيل"
+
+
+def test_statuses_are_derived_from_data_not_hardcoded():
+    """الحالات تُقرأ من orders.json وقت التشغيل — حالة جديدة بالبيانات تشتغل
+    فوراً بلا تعديل كود (نفس مبدأ دروع المبيعات)."""
+    from app.features.support.router import _known_statuses
+
+    statuses = asyncio.run(_known_statuses())
+    assert set(statuses) == set(_BY_STATUS)
 
 
 # --------------------------------------------------------------------------
@@ -120,9 +135,12 @@ def test_status_query_includes_phone_for_contact():
     assert "07701234567" in answer and "07801119988" in answer
 
 
-def test_empty_status_says_so_instead_of_inventing():
-    """حالة بلا طلبات: نفي صريح، ممنوع اختراع قائمة."""
-    answer = _answer("شنو الطلبات المرتجعه؟")
+def test_unknown_status_never_invents_orders():
+    """حالة ما موجودة بالبيانات إطلاقاً: ممنوع اختراع قائمة.
+
+    ملاحظة: «المرتجعه» **مو** مثالاً صالحاً هنا — هي مرادف دارج لـ«ملغي»
+    وترجع ORD-1006 عن حق. نستعمل حالة ما تقابل أي شي بالبيانات."""
+    answer = _answer("شنو الطلبات المعلقه بانتظار الدفع؟")
     if answer is not None:
         for oid in _ALL_IDS:
             assert oid not in answer
@@ -152,3 +170,59 @@ def test_orders_by_phone_still_work():
 def test_general_question_still_reaches_model():
     """سؤال عام بلا علاقة بالطلبات يبقى يروح للموديل (None)."""
     assert _answer("عدكم توصيل للبصرة؟") is None
+
+
+# --------------------------------------------------------------------------
+# ٤. المتابعة، العدّ، والأحدث — حالات مرصودة بلقطة إنتاج
+# --------------------------------------------------------------------------
+
+
+def test_followup_resolves_status_from_history():
+    """«اعطني هذه الطلبات» بلا سياق ما تعني شي، ومعه تعني الحالة السابقة.
+
+    باللقطة: الموظف كتب «مكتمله» ثم وضّح ثم گال «اعطني هذه الطلبات» — وكل
+    مرة يرد البوت «أبحثلك هسه» بلا ما يبحث شي."""
+    history = [
+        {"role": "user", "content": "مكتمله"},
+        {"role": "assistant", "content": "..."},
+        {"role": "user", "content": "المكتمله تعني التي تم توصيلها"},
+        {"role": "assistant", "content": "..."},
+    ]
+    answer = asyncio.run(_deterministic_status_answer("اعطني هذه الطلبات", history))
+    assert answer is not None, "المتابعة لسه تروح للموديل"
+    assert "ORD-1002" in answer and "ORD-1004" in answer
+    assert "ORD-1001" not in answer
+
+
+def test_followup_without_history_still_reaches_model():
+    """بلا سياق ما نخمّن — «اعطني هذه الطلبات» لحالها تروح للموديل."""
+    assert _answer("اعطني هذه الطلبات") is None
+
+
+def test_count_question_answers_with_a_number():
+    """«كم طلب مكتمل؟» يريد رقماً، والقائمة وحدها تخلي الموظف يعد بنفسه."""
+    answer = _answer("كم طلب مكتمل؟")
+    assert answer is not None
+    assert "2" in answer.split("\n")[0]
+    # والتفصيل يبقى موجوداً حتى يشوف أي طلبات هي.
+    assert "ORD-1002" in answer and "ORD-1004" in answer
+
+
+def test_count_all_orders():
+    answer = _answer("كم طلب عدنا بالمجموع؟")
+    assert answer is not None and "6" in answer.split("\n")[0]
+
+
+def test_latest_order():
+    """«اخر طلب» — الأحدث وحده، مو القائمة كلها."""
+    answer = _answer("شنو اخر طلب؟")
+    assert answer is not None
+    assert "ORD-1006" in answer
+    assert "ORD-1001" not in answer
+
+
+def test_latest_order_with_status():
+    """«اخر طلب قيد التوصيل» — الأحدث ضمن تلك الحالة."""
+    answer = _answer("اخر طلب قيد التوصيل")
+    assert answer is not None
+    assert "ORD-1005" in answer and "ORD-1001" not in answer

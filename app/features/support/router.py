@@ -31,11 +31,36 @@ _ORDER_ID_RE = re.compile(r"ORD[\s\-_]*(\d+)", re.IGNORECASE)
 # ما تطابق orders.json (گال ORD-1002 و ORD-1003 «قيد التوصيل» بينما حالتهما
 # الحقيقية «تم التسليم» و«قيد التجهيز»). قائمة طلبات مخترَعة بميزة تتبع تشغيلي
 # أسوأ من لا جواب: الموظف يتصرف على أساسها.
-_STATUS_ALIASES = {
-    "قيد التوصيل": ("قيد التوصيل", "التوصيل", "بالطريق", "طالعه", "مشحونه", "قيد الشحن"),
-    "قيد التجهيز": ("قيد التجهيز", "التجهيز", "تجهيز", "قيد التحضير", "بالمخزن"),
-    "تم التسليم": ("تم التسليم", "التسليم", "مسلمه", "واصله", "وصلت", "منتهيه"),
-    "ملغي": ("ملغي", "ملغيه", "الملغيه", "الغيت", "مرفوضه"),
+# **الحالات تُشتق من orders.json وقت التشغيل، ما مكتوبة هنا.** أضف حالة جديدة
+# للبيانات (أو بدّل مزوّد الطلبات بـAPI حقيقي) وتشتغل فوراً بلا تعديل كود —
+# نفس المبدأ المطبَّق بدروع المبيعات (انظر app/guards.py).
+#
+# المكتوب أدناه **مرادفات لغوية فقط**: كيف يسمّي الموظف العراقي الحالةَ بكلامه
+# الدارج. هذي تخص اللغة لا البيانات، فتبقى ثابتة مهما تبدّلت الحالات. كل
+# مرادف يُربط بحالة حقيقية بالمطابقة النصية، فإذا ما كانت الحالة موجودة
+# بالبيانات ينسقط المرادف تلقائياً.
+_STATUS_SYNONYMS = {
+    # كلمة الموظف         : كلمة تدل على الحالة بنص الحالة نفسها
+    "بالطريق": "توصيل",
+    "طالعه": "توصيل",
+    "مشحونه": "توصيل",
+    "الشحن": "توصيل",
+    "بالمخزن": "تجهيز",
+    "التحضير": "تجهيز",
+    "مكتمله": "تسليم",
+    "مكتمل": "تسليم",
+    "مكتمة": "تسليم",
+    "منجزه": "تسليم",
+    "منجز": "تسليم",
+    "مسلمه": "تسليم",
+    "واصله": "تسليم",
+    "وصلت": "تسليم",
+    "منتهيه": "تسليم",
+    "تم توصيلها": "تسليم",
+    "توصلت": "تسليم",
+    "الغيت": "ملغي",
+    "مرفوضه": "ملغي",
+    "مرتجعه": "ملغي",
 }
 
 # أسئلة الجرد العام («كل الطلبات»، «كم طلب عدنا؟») — بلا حالة محددة.
@@ -133,19 +158,50 @@ def extract_phone(message: str) -> Optional[str]:
     return digits if len(digits) == 11 and digits.startswith("07") else None
 
 
-def extract_status(message: str) -> Optional[str]:
+async def _known_statuses() -> List[str]:
+    """الحالات الموجودة فعلاً بالبيانات — مشتقة، مو مكتوبة بالكود."""
+    orders = await order_status_provider.list_all()
+    seen = []
+    for order in orders:
+        status = str(order.get("status", "")).strip()
+        if status and status not in seen:
+            seen.append(status)
+    return seen
+
+
+async def extract_status(message: str) -> Optional[str]:
     """يستخرج حالة الطلب المقصودة من سؤال الموظف، أو None.
 
-    نطابق أطول اسم مستعار أولاً: «قيد التوصيل» تحتوي «التوصيل»، ولو طابقنا
-    الأقصر أولاً كان صح بالصدفة هنا وغلط بحالات ثانية."""
+    مصدر الحالات هو البيانات نفسها (`_known_statuses`)، فحالة جديدة تنضاف
+    لـorders.json تشتغل فوراً. المرادفات اللغوية (`_STATUS_SYNONYMS`) تُترجم
+    كلام الموظف الدارج («مكتمله») لكلمة موجودة بنص الحالة («تسليم») ثم تُطابق
+    على الحالات الحقيقية — فلو ما اكو حالة فيها «تسليم» ينسقط المرادف وحده.
+
+    نطابق الأطول أولاً: «قيد التوصيل» تحتوي «التوصيل»، ولو طابقنا الأقصر
+    أولاً كان صح بالصدفة هنا وغلط بحالات ثانية."""
     normalized = normalize(message)
+    statuses = await _known_statuses()
     best: Optional[tuple] = None
-    for canonical, aliases in _STATUS_ALIASES.items():
-        for alias in aliases:
-            alias_n = normalize(alias)
-            if alias_n in normalized and (best is None or len(alias_n) > best[0]):
-                best = (len(alias_n), canonical)
-    return best[1] if best else None
+
+    # (١) الحالة مذكورة كما هي بالبيانات، أو جزء دالّ منها.
+    for status in statuses:
+        status_n = normalize(status)
+        candidates = [status_n] + [w for w in status_n.split() if len(w) >= 4]
+        for cand in candidates:
+            if cand in normalized and (best is None or len(cand) > best[0]):
+                best = (len(cand), status)
+
+    if best:
+        return best[1]
+
+    # (٢) مرادف دارج → كلمة مفتاحية → الحالة الحقيقية اللي تحتويها.
+    for synonym, keyword in _STATUS_SYNONYMS.items():
+        if normalize(synonym) not in normalized:
+            continue
+        for status in statuses:
+            if keyword in normalize(status):
+                return status
+    return None
 
 
 def _format_order_line(order: dict) -> str:
@@ -170,20 +226,76 @@ def _format_order_list(orders: List[dict], heading: str) -> str:
     return f"{heading} ({len(orders)}):\n{lines}"
 
 
-async def _bulk_query_answer(message: str) -> Optional[str]:
+# متابعة تشير لجواب سابق بلا ما تسمّي الحالة («اعطني هذه الطلبات»، «اي هذول»).
+# بلا معالجتها كان الموظف يوضّح قصده فيسقط السؤال للموديل — وهو يرد «أبحثلك
+# هسه» بلا ما يبحث شي، لأنه ما عنده وصول للبيانات أصلاً (مرصود بلقطة إنتاج).
+_FOLLOWUP_WORDS = (
+    "هذه الطلبات", "هذي الطلبات", "هذول", "هاي الطلبات", "نفسها", "اياها",
+    "اللي گلتلك", "الي گلتلك", "نفس الطلبات", "هيه", "اي هذول",
+)
+
+# سؤال عدّ («كم طلب مكتمل؟») — الموظف يريد رقماً لا قائمة. نرجع الاثنين:
+# الرقم أولاً ثم التفصيل، حتى ما يضطر يعد بنفسه.
+_COUNT_WORDS = ("كم", "شكد", "عدد", "چم")
+
+# سؤال عن الأحدث («اخر طلب»). ترتيب orders.json هو ترتيب الإدخال، فالأخير
+# أحدثها — نفس ما راح يرجّعه ORDER BY created_at DESC بالنظام الحقيقي.
+_LATEST_WORDS = ("اخر طلب", "آخر طلب", "احدث طلب", "أحدث طلب", "اخر الطلبات", "آخر الطلبات")
+
+
+async def _bulk_query_answer(
+    message: str, history: Optional[List[dict]] = None
+) -> Optional[str]:
     """يجاوب أسئلة الموظف التشغيلية عن دفتر الطلبات — حتمياً من المصدر.
 
     البوت داخلي للشركة، فهذي استعلامات شغل مشروعة مو تسريب بيانات. تُحسم هنا
-    لا بالموديل لأن الموديل يخترع معرّفات وحالات (انظر _STATUS_ALIASES)."""
+    لا بالموديل لأن الموديل يخترع معرّفات وحالات (انظر _STATUS_SYNONYMS).
+
+    `history` تُستعمل لفهم المتابعات: الموظف يسأل «مكتمله» ثم يوضّح «المكتمله
+    تعني التي تم توصيلها» ثم يگول «اعطني هذه الطلبات» — الرسالة الأخيرة بلا
+    سياق ما تعني شي، ومعه تعني حالة التسليم."""
     normalized = normalize(message)
 
-    status = extract_status(message)
+    status = await extract_status(message)
+
+    # ما بالرسالة حالة صريحة؟ إذا كانت متابعة، ندوّر الحالة برسائل الموظف
+    # السابقة — الأحدث أولاً.
+    if not status and history and any(w in normalized for w in _FOLLOWUP_WORDS):
+        for past in reversed([m for m in history if m.get("role") == "user"]):
+            status = await extract_status(past.get("content", ""))
+            if status:
+                break
+
+    wants_count = any(w in normalized for w in _COUNT_WORDS)
+
+    # «اخر طلب» — الأحدث، بحالة معيّنة أو مطلقاً.
+    if any(w in normalized for w in _LATEST_WORDS):
+        orders = (
+            await order_status_provider.search_by_status(status)
+            if status
+            else await order_status_provider.list_all()
+        )
+        if not orders:
+            return f"ماكو طلبات {status} حالياً." if status else "ماكو طلبات مسجلة."
+        heading = f"آخر طلب {status}" if status else "آخر طلب"
+        return f"{heading}:\n• " + _format_order_line(orders[-1])
+
     if status:
         orders = await order_status_provider.search_by_status(status)
-        return _format_order_list(orders, f"الطلبات {status}")
+        heading = f"الطلبات {status}"
+        if wants_count:
+            # سؤال عدّ: الرقم أولاً — بس نلحقه بالتفصيل حتى يشوف أي طلبات هي.
+            return f"عدد الطلبات {status}: {len(orders)}.\n" + _format_order_list(
+                orders, "التفاصيل"
+            )
+        return _format_order_list(orders, heading)
 
     if any(w in normalized for w in _LIST_ALL_WORDS):
         orders = await order_status_provider.list_all()
+        if wants_count:
+            return f"عدد الطلبات الكلي: {len(orders)}.\n" + _format_order_list(
+                orders, "التفاصيل"
+            )
         return _format_order_list(orders, "كل الطلبات")
 
     # طلب أرقام هواتف بلا حالة محددة: نعطي كل الطلبات بأرقامها — القائمة
@@ -195,7 +307,9 @@ async def _bulk_query_answer(message: str) -> Optional[str]:
     return None
 
 
-async def _deterministic_status_answer(message: str) -> Optional[str]:
+async def _deterministic_status_answer(
+    message: str, history: Optional[List[dict]] = None
+) -> Optional[str]:
     """توجيه حتمي لطلبات التتبع: إذا الرسالة فيها رقم طلب أو هاتف، نستعلم
     من المصدر مباشرة ونبني الرد من البيانات الحقيقية — بدون تفويض القرار
     للموديل. السبب (مرصود بالاختبار الفعلي): الموديل الحالي لا يستدعي
@@ -219,12 +333,14 @@ async def _deterministic_status_answer(message: str) -> Optional[str]:
     # ما بيها معرّف محدد: يمكن استعلام تشغيلي عن دفتر الطلبات (حالة/جرد).
     # يجي **بعد** المعرّفات عمداً: «حالة ORD-1001» لازم ترجع ذاك الطلب بالذات،
     # مو قائمة كل الطلبات اللي بنفس حالته.
-    return await _bulk_query_answer(message)
+    return await _bulk_query_answer(message, history)
 
 
-async def _fallback_support_answer(message: str) -> str:
+async def _fallback_support_answer(
+    message: str, history: Optional[List[dict]] = None
+) -> str:
     """يُستخدم فقط إذا لم يكن الموديل متوفراً (محلياً بدون GPU)."""
-    deterministic = await _deterministic_status_answer(message)
+    deterministic = await _deterministic_status_answer(message, history)
     if deterministic:
         return "[وضع محلي بدون GPU] " + deterministic
     return "[وضع محلي بدون GPU] عطيني رقم الطلب أو رقم الهاتف حتى اكدر اكَولك وين وصل."
@@ -241,7 +357,7 @@ async def support_chat(req: SupportChatRequest):
     # طلبات التتبع (رقم طلب/هاتف بالرسالة) تُجاب حتمياً من المصدر مباشرة —
     # الموديل غير موثوق باستدعاء الأدوات ويخترع حالات طلب (انظر
     # _deterministic_status_answer). الموديل+الأدوات فقط للأسئلة العامة.
-    deterministic = await _deterministic_status_answer(req.message)
+    deterministic = await _deterministic_status_answer(req.message, history)
     if deterministic is not None:
         answer = deterministic
         engine_name = "deterministic"
@@ -252,7 +368,7 @@ async def support_chat(req: SupportChatRequest):
         })
         engine_name = "vllm"
     else:
-        answer = await _fallback_support_answer(req.message)
+        answer = await _fallback_support_answer(req.message, history)
         engine_name = "fallback"
 
     sessions.append(key, "user", req.message)
