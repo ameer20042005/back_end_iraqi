@@ -12,6 +12,11 @@
 # مضبوطة لهدفنا: أقصى عدد طلبات متزامنة على A40 48GB بردود قصيرة —
 #   --max-model-len قصير = KV cache يتسع لطلبات متزامنة أكثر
 #   --async-scheduling يحسّن الـ throughput (توصية الوصفة)
+#   --enable-prefix-caching أكبر مكسب سرعة بجهة الخادم عندنا: كل الطلبات
+#     تشترك بنفس البادئة الضخمة (system prompt الكامل من plane.md + مرجع
+#     المحافظات)، وبدونه تُعاد معالجة آلاف التوكنات المتطابقة بكل طلب. مع
+#     التفعيل تُحسب مرة وتُعاد من الكاش، فينزل زمن ما-قبل-التوليد (prefill)
+#     بشدة — وهو الجزء الغالب من زمن الاستجابة بردودنا القصيرة.
 #   --limit-mm-per-prompt: صورة وحدة (order_intake)، بلا صوت (الصوت عبر Whisper
 #     داخل FastAPI، ما يمر بـ vLLM)
 
@@ -85,6 +90,7 @@ _start_vllm() {
         --max-model-len "${MAX_MODEL_LEN}" \
         --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
         --async-scheduling \
+        --enable-prefix-caching \
         --limit-mm-per-prompt '{"image": 1, "audio": 0}' \
         > "${VLLM_LOG}" 2>&1 &
     VLLM_PID=$!

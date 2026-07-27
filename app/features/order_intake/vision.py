@@ -50,13 +50,19 @@ _IMAGE_INSTRUCTION = (
 
 def _downscale(image: "Image.Image") -> "Image.Image":
     """يصغّر الصورة لأقصى بُعد _MAX_IMAGE_DIM مع حفظ النسبة — أهم مكسب سرعة
-    بمسار الصور: توكنات الرؤية تتناسب مع مساحة الصورة."""
+    بمسار الصور: توكنات الرؤية تتناسب مع مساحة الصورة.
+
+    `reducing_gap` يخلي Pillow يسوي تصغيراً تقريبياً سريعاً أولاً (draft) ثم
+    LANCZOS على النتيجة الأصغر، بدل تمرير LANCZOS على الأصل كاملاً. صورة
+    12 ميجابكسل من كاميرا الهاتف كانت تكلّف مئات الميلي-ثانية بالتصغير وحده."""
     w, h = image.size
     longest = max(w, h)
     if longest <= _MAX_IMAGE_DIM:
         return image
     scale = _MAX_IMAGE_DIM / longest
-    return image.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    return image.resize(
+        (int(w * scale), int(h * scale)), Image.LANCZOS, reducing_gap=2.0
+    )
 
 
 class OrderImageReader(ABC):
@@ -82,7 +88,12 @@ class VllmOrderImageReader(OrderImageReader):
             raise NotImplementedError(
                 "محرك الموديل غير جاهز (طبيعي محلياً بدون GPU؛ يجب أن يكون جاهزاً على RunPod)."
             )
-        image = _downscale(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
+        raw = Image.open(io.BytesIO(image_bytes))
+        # `draft` يخلي فاكّ ترميز JPEG نفسه يقرأ الصورة بدقة أقل مباشرة (1/2،
+        # 1/4، 1/8) بدل فكّها كاملة ثم تصغيرها — أرخص مرحلة نقدر نحذفها بمسار
+        # الصور، وصور الهواتف كلها JPEG عملياً. لا أثر على الصيغ الأخرى.
+        raw.draft("RGB", (_MAX_IMAGE_DIM, _MAX_IMAGE_DIM))
+        image = _downscale(raw.convert("RGB"))
 
         # نحقن الصورة برسالة المستخدم الأخيرة (اللي تحمل تعليمة الاستخراج
         # النهائية) — الصورة أولاً ثم النص.

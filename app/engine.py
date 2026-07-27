@@ -49,9 +49,16 @@ _REQUEST_TIMEOUT = 120.0   # مهلة طلب توليد واحد (ثوانٍ)
 
 def _image_to_data_uri(image) -> str:
     """يحوّل صورة PIL إلى data URI (base64 JPEG) بصيغة OpenAI image_url —
-    خادم vLLM يستقبل الصور بهذه الصيغة عبر /v1/chat/completions."""
+    خادم vLLM يستقبل الصور بهذه الصيغة عبر /v1/chat/completions.
+
+    الصورة واصلة هنا مصغَّرة أصلاً (انظر _downscale بـ vision.py)، فـ quality
+    82 يقصّ حجم الـ base64 المنقول ~40% مقابل 90 بلا فرق مرئي على نص اللقطات.
+    و`convert` يُطبَّق فقط إذا لزم — الصورة أصلاً RGB بمسارنا، والاستدعاء
+    غير المشروط كان ينسخ الصورة كاملة بلا سبب."""
     buf = io.BytesIO()
-    image.convert("RGB").save(buf, format="JPEG", quality=90)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    image.save(buf, format="JPEG", quality=82, optimize=False)
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 

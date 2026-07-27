@@ -33,8 +33,18 @@ _asr_pipeline = None
 # Whisper يعالج 30 ثانية بالمرة — بدون تقطيع يُقصّ أي ملف أطول بصمت.
 # الرسائل الصوتية بالواتساب توصل لدقائق، فالتقطيع ضروري لا تحسين.
 _CHUNK_LENGTH_S = 30
-# تراكب بين القطع حتى لا تنقطع كلمة على الحدّ فتضيع.
-_CHUNK_OVERLAP_S = 5
+# تراكب بين القطع حتى لا تنقطع كلمة على الحدّ فتضيع. transformers يقبل
+# (يسار، يمين) — تمريره كرقم واحد يجعل التراكب 1/6 من القطعة على الجهتين
+# (5 ثوانٍ لكل جهة)، أي إعادة معالجة 10 ثوانٍ زائدة بكل قطعة. الزوج الصريح
+# يقلّل الهدر للنصف مع بقاء الحماية من قطع الكلمة على الحدّ.
+_CHUNK_OVERLAP_S = (3, 2)
+# القطع مستقلة عن بعضها، فالـ GPU يعالجها **دفعة واحدة** بدل واحدة-واحدة.
+# هذا أكبر مكسب سرعة بمسار الصوت: رسالة دقيقتين = 4 قطع كانت تتسلسل، صارت
+# استدلالاً واحداً. 8 آمنة على A40 بموديل small بنصف الدقة.
+_GPU_BATCH_SIZE = 8
+
+# على الـ CPU الدفعات ما تنفع (ماكو توازي حقيقي) وتزيد استهلاك الذاكرة فقط.
+_CPU_BATCH_SIZE = 1
 
 
 def _get_pipeline():
@@ -58,11 +68,39 @@ def _get_pipeline():
             "device": device,
             "chunk_length_s": _CHUNK_LENGTH_S,
             "stride_length_s": _CHUNK_OVERLAP_S,
+            "batch_size": _GPU_BATCH_SIZE if device == 0 else _CPU_BATCH_SIZE,
         }
         if torch_dtype is not None:
             kwargs["torch_dtype"] = torch_dtype
         _asr_pipeline = pipeline("automatic-speech-recognition", **kwargs)
     return _asr_pipeline
+
+
+def warmup() -> bool:
+    """يحمّل الموديل (ويشغّله على صمت قصير) عند إقلاع الخادم بدل أول طلب حقيقي.
+
+    بدون هذا، أول رسالة صوتية يدفع صاحبها ثمن تحميل الأوزان **ونسخ نواة CUDA
+    الأولى** — عشرات الثواني تظهر للمستخدم كأنها بطء بالتحويل نفسه، بينما
+    الطلبات اللاحقة أسرع بمرّات. يرجع True إن جهز الموديل فعلاً."""
+    if not _TRANSFORMERS_AVAILABLE:
+        return False
+    try:
+        import numpy as np
+
+        pipe = _get_pipeline()
+        # ثانية صمت بـ 16kHz (معدل Whisper) — تكفي لتنفيذ مسار الاستدلال كاملاً
+        # وتجهيز النواة، بلا تحميل ملف من القرص.
+        pipe(
+            {"raw": np.zeros(16000, dtype="float32"), "sampling_rate": 16000},
+            generate_kwargs={"language": "arabic", "task": "transcribe"},
+        )
+        logger.info("✅ موديل تحويل الصوت جاهز (تحميل مسبق مكتمل)")
+        return True
+    except Exception:
+        # الإحماء تحسين لا شرط تشغيل — الفشل هنا ما يمنع إقلاع الخادم،
+        # والتحميل الكسول بأول طلب يبقى المسار البديل.
+        logger.warning("تعذّر التحميل المسبق لموديل الصوت — سيُحمَّل عند أول طلب", exc_info=True)
+        return False
 
 
 def transcribe(audio_bytes: bytes) -> Optional[str]:

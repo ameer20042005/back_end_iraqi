@@ -3,6 +3,7 @@
 كل ميزة براوترها الخاص تحت app/features/*/router.py — هذا الملف فقط ينشئ
 التطبيق، يشغّل دورة حياة المحرك (lifespan)، ويجمع كل الراوترات."""
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from pathlib import Path
@@ -10,9 +11,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.engine import llm_engine
 from app.features.order_intake.router import router as order_intake_router
+from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
 from app.features.support.router import router as support_router
 
@@ -32,8 +35,14 @@ async def lifespan(app: FastAPI):
     # محلياً بدون خادم vLLM يبقى llm_engine.ready == False وكل الميزات
     # ترجع لوضع fallback (بدون توليد نموذج).
     await llm_engine.start()
+    # موديل الصوت (Whisper) يعيش بعملية FastAPI نفسها، وتحميله كان يصير عند
+    # **أول رسالة صوتية** — فيدفع أول زبون عشرات الثواني تحميلاً تظهر كأنها
+    # بطء بالتحويل. نحمّله بالخلفية من الآن: بخيط منفصل حتى لا يجمّد الـ event
+    # loop، وكمَهمّة حتى لا يتأخر إقلاع الخادم (باقي المسارات تشتغل فوراً).
+    warmup_task = asyncio.create_task(run_in_threadpool(warmup_transcriber))
     yield
     # يوقف فاحص الجاهزية ويغلق عميل HTTP.
+    warmup_task.cancel()
     await llm_engine.shutdown()
 
 
