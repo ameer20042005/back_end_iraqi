@@ -29,6 +29,20 @@ _NOT_A_PRODUCT = {
 }
 
 
+def _new_order_id() -> str:
+    """معرّف طلب بصيغة النظام ORD-####.
+
+    كان `str(uuid.uuid4())` — معرّف تقني بـ36 خانة يظهر للزبون بواجهة الشات
+    («طلب مؤكَّد — 316f2f31-8764-4d31-...»). صيغة النظام الفعلية هي ORD-####
+    (انظر app/data/orders.json)، وهي اللي يعرف يقراها الزبون ويلگاها الدعم
+    لما يستعلم عنها. الجزء العشوائي يبقى: ٦ خانات من uuid4 حتى يبقى المعرّف
+    فريداً بلا عدّاد مشترك بين العمليات.
+
+    ملاحظة للربط الحقيقي: لو صار نظام الطلبات الخارجي هو اللي يولّد المعرّف،
+    استبدل هذا بالمعرّف الراجع منه بدل ما تولّد واحداً محلياً."""
+    return f"ORD-{uuid.uuid4().hex[:6].upper()}"
+
+
 def _resolve_product(repo: ProductRepository, name: str) -> Optional[dict]:
     matches = repo.search(name, top_k=1)
     return matches[0] if matches else None
@@ -113,7 +127,7 @@ async def resolve_order(
     note = note or "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
 
     confirmation = OrderConfirmation(
-        order_id=str(uuid.uuid4()),
+        order_id=_new_order_id(),
         created_at=datetime.now(timezone.utc).isoformat(),
         customer_name=extraction.customer_name,
         customer_phone=extraction.customer_phone,
