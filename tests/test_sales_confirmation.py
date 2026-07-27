@@ -96,7 +96,7 @@ def test_invented_price_still_blocked():
 # ٣. صيغة معرّف الطلب
 # --------------------------------------------------------------------------
 
-_ORDER_ID_RE = re.compile(r"^ORD-[0-9A-F]{6}$")
+_ORDER_ID_RE = re.compile(r"^ORD-\d{9}$")
 
 
 def test_order_id_uses_system_format():
@@ -106,7 +106,7 @@ def test_order_id_uses_system_format():
 
 def test_order_id_is_short_enough_to_read():
     """الزبون لازم يگدر يقراه ويعيد كتابته للدعم."""
-    assert len(_new_order_id()) <= 12
+    assert len(_new_order_id()) <= 14
 
 
 def test_order_ids_are_unique():
@@ -115,8 +115,13 @@ def test_order_ids_are_unique():
 
 def test_order_id_is_findable_by_support():
     """معرّف المبيعات لازم يمسكه مستخرِج الدعم — وإلا الزبون يعطي رقم طلبه
-    لبوت الدعم فما يلگاه."""
+    لبوت الدعم فما يلگاه.
+
+    نفحص ٢٠٠ معرّفاً لا واحداً: الصيغة السداسية عشرية السابقة كانت تنجح أو
+    تفشل حسب ظهور حرف بالعشوائي، فمرّ العطل باختبار واحد."""
     from app.features.support.router import extract_order_id
 
-    order_id = _new_order_id()
-    assert extract_order_id(f"وين وصل طلبي {order_id}؟") is not None
+    for _ in range(200):
+        order_id = _new_order_id()
+        extracted = extract_order_id(f"وين وصل طلبي {order_id}؟")
+        assert extracted == order_id, f"الدعم ما لگه: {order_id}"

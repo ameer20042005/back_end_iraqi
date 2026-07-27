@@ -30,7 +30,7 @@ from app.features.sales.prompts import (
     build_sales_prompt,
 )
 from app.features.sales.service import resolve_order
-from app.guards import check_numbers, check_topics
+from app.guards import redact_bad_numbers
 from app.order_extraction import correct_location, state_code_for
 from app.order_schema import (
     OrderConfirmation,
@@ -218,15 +218,6 @@ def _order_complete_by_content(history: List[dict], user_message: str, answer: s
         return False
     return any(p in answer for p in _ORDER_DONE_PHRASES)
 
-# رد بديل حتمي عندما يتدخل درع المواضيع (app/guards.py: check_topics) — الموديل
-# ادّعى معلومة عن موضوع (ضمان/تركيب/تقسيط...) غير مغطّى بمعلومات المنتج
-# المسترجَعة، فنستبدل الرد بإحالة صريحة بدل ترك هلوسة توصل للعميل.
-SAFE_TOPIC_REPLY = (
-    "عذراً حبيبي، هذي النقطة تحديداً أحب أتأكد منها قبل ما أگلك شي، "
-    "خليني أتحقق وأرجعلك بيها فوراً."
-)
-
-
 class SalesChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
@@ -247,28 +238,6 @@ def _fallback_sales_answer(message: str, rag_products: List[dict]) -> str:
         top = rag_products[0]
         return f"[وضع محلي بدون GPU] عندنا {top['name']} بسعر {top['price']} {top.get('currency', '')}."
     return f"[وضع محلي بدون GPU] ما لكيت منتج مطابق لـ: {message}"
-
-
-def _safe_price_answer(rag_products: List[dict]) -> str:
-    """رد بديل حتمي يُستخدم عندما يكتشف حارس الأرقام سعراً مختلَقاً برد
-    الموديل — مبني حصراً من أسعار الكتالوج الحقيقية، فلا يصل أي رقم مختلَق
-    للعميل أبداً."""
-    if rag_products:
-        lines = "، ".join(
-            f"{p['name']} بـ{p['price']:,} {p.get('currency', 'IQD')}" for p in rag_products[:3]
-        )
-        return (
-            "معليش حبيبي، حبيت أدقّقلك السعر حتى ما أغلط وياك — "
-            f"اللي أگدر أأكده إلك هسه: {lines}."
-        )
-    # ماكو أي منتج معروف بهذي الجلسة. الرد القديم كان يرفض التوفّر («ماكو
-    # عدنا») وهذا غلط فادح بسياق تثبيت طلب أو إعطاء عنوان — العميل يعطي
-    # بياناته فيجيه رفض. الرد المحايد يصلح لكل السياقات: نأجّل الرقم بس، ولا
-    # ندّعي نفي توفّر ما نعرفه.
-    return (
-        "عذراً حبيبي، خليني أتأكدلك من التفاصيل والسعر بالضبط وأرجعلك بيها "
-        "فوراً حتى ما أگلك رقم غلط."
-    )
 
 
 def _fallback_order_ready(message: str) -> bool:
@@ -385,21 +354,12 @@ async def sales_chat(req: SalesChatRequest):
     # الاستدلال بالنوتبوك: المواضيع أولاً لأنها تفهم السياق، الأرقام ثانياً).
     if engine_name == "vllm":
         reference_text = products_context_block(known_products)
-        reason = check_topics(answer, req.message, reference_text)
-        if reason:
+        answer, redacted = redact_bad_numbers(answer, reference_text)
+        if redacted:
             logger.warning(
-                "درع المواضيع تدخّل برد المبيعات: %s (session=%s) — الرد الأصلي: %r",
-                reason, session_id, answer[:300],
+                "أرقام مختلَقة برد المبيعات نُقّحت: %s (session=%s) — الرد بعد التنقيح: %r",
+                redacted, session_id, answer[:300],
             )
-            answer = SAFE_TOPIC_REPLY
-        else:
-            bad_numbers = check_numbers(answer, reference_text)
-            if bad_numbers:
-                logger.warning(
-                    "أرقام مختلَقة برد المبيعات أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
-                    bad_numbers, session_id, answer[:300],
-                )
-                answer = _safe_price_answer(known_products)
 
     # شبكة أمان تحت العلامة: الموديل ينسى [ORDER_READY] ويختم بكلام طبيعي
     # («خوش، تم الطلب») فتضيع الطلبات المكتملة — انظر _order_complete_by_content.
@@ -471,21 +431,12 @@ async def sales_chat_stream(req: SalesChatRequest):
             engine_name = "vllm"
             answer = "".join(collected)
             reference_text = products_context_block(known_products)
-            reason = check_topics(answer, req.message, reference_text)
-            if reason:
+            answer, redacted = redact_bad_numbers(answer, reference_text)
+            if redacted:
                 logger.warning(
-                    "درع المواضيع تدخّل برد المبيعات (stream): %s (session=%s) — الرد الأصلي: %r",
-                    reason, session_id, answer[:300],
+                    "أرقام مختلَقة برد المبيعات (stream) نُقّحت: %s (session=%s) — الرد بعد التنقيح: %r",
+                    redacted, session_id, answer[:300],
                 )
-                answer = SAFE_TOPIC_REPLY
-            else:
-                bad_numbers = check_numbers(answer, reference_text)
-                if bad_numbers:
-                    logger.warning(
-                        "أرقام مختلَقة برد المبيعات (stream) أُلغيت واستُبدل الرد: %s (session=%s) — الرد الأصلي: %r",
-                        bad_numbers, session_id, answer[:300],
-                    )
-                    answer = _safe_price_answer(known_products)
             # نفس شبكة الأمان بمسار البث (انظر _order_complete_by_content).
             if not order_ready and _order_complete_by_content(
                 history, req.message, answer

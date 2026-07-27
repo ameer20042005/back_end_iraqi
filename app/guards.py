@@ -7,7 +7,17 @@ gemma_iraqi_merge_fixed.ipynb (v2.2)، مُطبَّقة هنا على كتالو
      نص مرجعي (سياق منتجات RAG). كان موجوداً هنا أصلاً وهو مربوط فعلياً
      بـ app/features/sales/router.py (يستبدل الرد، مو تسجيل فقط).
 
-  2) check_topics   — درع المواضيع: يُبنى من نفس نص الكتالوج وقت التشغيل.
+  2) check_topics   — **متقاعد من مسار الإنتاج** (2026-07-27). يبقى بالملف
+     ومغطّى بالاختبارات لأنه مرجع سلوكي ونقطة رجوع لو انقلبت الحسبة، لكن
+     app/features/sales/router.py ما عاد يستدعيه.
+
+     ليش تقاعد: كان أكثر درع يعطي إنذارات كاذبة وأقلهم فايدة عند الفشل —
+     ادّعاء «عدنا ضمان سنتين» غلط يُصحَّح بمكالمة، بينما سعر غلط يكلّف نقود.
+     الفرق أن الأول كان يقطع محادثة سليمة بمعدل أعلى بكثير مما يمنع ضرراً.
+     البديل ببيانات التدريب (النفي الصريح والأفعال المصرّفة) موثّق بـ
+     TRAINING_GAPS.md §5.
+
+     التوصيف الأصلي: يُبنى من نفس نص الكتالوج وقت التشغيل.
      الموضوع (ضمان/تركيب/توصيل/تقسيط...) موجود بنص المنتجات المسترجَعة؟
      الرد مسموح. غير موجود؟ الرد لازم يحيل ("أتأكدلك") أو ينفي صراحة
      ("ماعدنا") وإلا يُعتبر هلوسة.
@@ -21,9 +31,13 @@ gemma_iraqi_merge_fixed.ipynb (v2.2)، مُطبَّقة هنا على كتالو
 واحد غير مشتق من الكتالوج.
 
 الاستخدام (انظر app/features/sales/router.py):
-    from app.guards import check_numbers, check_topics
-    bad_numbers = check_numbers(answer, reference_text)
-    reason = check_topics(answer, user_message, reference_text)
+    from app.guards import redact_bad_numbers
+    answer, redacted = redact_bad_numbers(answer, reference_text)
+
+`check_numbers` تبقى الفحص الخام (ترجع قائمة الأرقام المشبوهة)، و
+`redact_bad_numbers` هي **العقوبة المعتمدة بالإنتاج**: تمسح الرقم المشبوه
+وتخلي باقي الرد. العقوبة القديمة (مسح الرد كله واستبداله برد تهرب) كانت تقطع
+عملية بيع كاملة عند أي إنذار كاذب — انظر redact_bad_numbers.
 """
 
 import re
@@ -253,6 +267,95 @@ def check_numbers(reply: str, reference_text: str) -> List[str]:
             continue
         bad.append(clean)
     return bad
+
+
+# ============================================================
+# العقوبة المخفَّفة — تنقيح الرقم بدل مسح الرد
+# ============================================================
+
+# الرقم المشبوه يُستبدل بهذا التحفّظ داخل الجملة. الصيغة قصيرة عمداً حتى تنقرأ
+# طبيعية بوسط الكلام العراقي («عدد 1 بـ[أتأكدلك من السعر] دينار»).
+_REDACTION = "أتأكدلك من السعر"
+
+# رقم متبوع بعملة أو بعلامة نسبة: نمسحها وياه. بلا هذا كانت تبقى معلّقة بعد
+# التنقيح («أنطيك أتأكدلك من السعر% خصم»).
+_CURRENCY_TAIL_RE = re.compile(r"^\s*(دينار|دولار|IQD|iqd|USD|\$|%|بالمية|بالمئة)")
+
+# خريطة عكسية: لاتيني → عربي-هندي، حتى نلگه الرقم بصيغته الأصلية بالرد.
+_TO_ARABIC_DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+
+
+def _original_forms(needle: str) -> List[str]:
+    """كل الصيغ اللي ممكن يكون الرقم مكتوباً بيها بالرد الأصلي.
+
+    `check_numbers` تفحص نصاً مطبَّعاً (أرقام لاتينية، فواصل هواتف مدموجة)،
+    فالرقم الراجع منها قد ما يطابق حرفياً ما كتبه الموديل. بلا هذي الصيغ كان
+    سعر مختلَق مكتوب «٦٠٠٠٠٠» يفلت من التنقيح كلياً — تسريب صامت أسوأ من
+    الإنذار الكاذب اللي نعالجه."""
+    forms = [needle, needle.translate(_TO_ARABIC_DIGITS)]
+    # بلا فواصل الآلاف وبيها: «600,000» بالرد قد تجي «600000» بالفحص والعكس.
+    stripped = needle.replace(",", "")
+    if stripped != needle:
+        forms.append(stripped)
+        forms.append(stripped.translate(_TO_ARABIC_DIGITS))
+    elif len(stripped) > 3 and stripped.isdigit():
+        grouped = f"{int(stripped):,}"
+        forms.append(grouped)
+        forms.append(grouped.translate(_TO_ARABIC_DIGITS))
+
+    # الصيغة المختصرة: الفحص يوسّع «900 الف» لـ«900000» قبل المقارنة، فالرقم
+    # الراجع ما يطابق أي نص بالرد. بلا هذا كان السعر المختلَق يفلت بصمت —
+    # وهذا أسوأ من الإنذار الكاذب اللي نعالجه أصلاً.
+    if stripped.isdigit():
+        for word, factor in _SCALE_WORDS.items():
+            if factor > 1 and int(stripped) % factor == 0:
+                short = str(int(stripped) // factor)
+                forms.append(f"{short} {word}")
+                forms.append(f"{short.translate(_TO_ARABIC_DIGITS)} {word}")
+    return forms
+
+
+def redact_bad_numbers(reply: str, reference_text: str) -> tuple:
+    """يمسح الأرقام المشبوهة من الرد ويترك باقيه سليماً.
+
+    يرجع (الرد المنقَّح، قائمة الأرقام الممسوحة).
+
+    ليش موجود: العقوبة القديمة كانت **مسح الرد كله** واستبداله برد تهرب ثابت.
+    بلقطة إنتاج حقيقية، سعة التخزين «SSD 512» انقرأت سعراً مختلَقاً فانمسح
+    ملخّص الطلب كامل — والزبون گال «نعم اكد» ثلاث مرات بلا ما ينثبت طلبه.
+    الكلفة كانت أكبر من الفايدة: إنذار كاذب واحد يقطع عملية بيع كاملة.
+
+    التنقيح يحافظ على المبدأ (ما يمر ولا رقم مختلَق للعميل) بلا ما يقطع
+    المحادثة: الاسم والهاتف والعنوان وباقي الملخّص كلها تبقى، والرقم وحده
+    ينستبدل بتحفّظ صريح.
+
+    ملاحظة على الحدود: نمسح على النص **الأصلي** لا المطبَّع — الرد يوصل
+    العميل كما كتبه الموديل عدا الأرقام المشبوهة. لذلك نطابق كل رقم بصيغته
+    الأصلية (بأرقام عربية-هندية إن كُتب بيها)."""
+    bad = check_numbers(reply, reference_text)
+    if not bad:
+        return reply, []
+
+    # الأرقام الراجعة من check_numbers بصيغتها المطبَّعة (لاتينية). نبني خريطة
+    # من الصيغة المطبَّعة للأصلية حتى نمسح ما كتبه الموديل فعلاً.
+    redacted = reply
+    removed = []
+    # الأطول أولاً: «600,000» تحتوي «600»، ولو مسحنا القصير أولاً انكسر الطويل.
+    for token in sorted(bad, key=len, reverse=True):
+        # النسبة المئوية ترجع بلاحقة «%» مضافة من الفحص — نشيلها للمطابقة.
+        needle = token[:-1] if token.endswith("%") else token
+        for candidate in _original_forms(needle):
+            if not candidate or candidate not in redacted:
+                continue
+            start = redacted.index(candidate)
+            end = start + len(candidate)
+            tail_match = _CURRENCY_TAIL_RE.match(redacted[end:])
+            if tail_match:
+                end += tail_match.end()
+            redacted = redacted[:start] + _REDACTION + redacted[end:]
+            removed.append(token)
+            break
+    return redacted, removed
 
 
 # ============================================================
