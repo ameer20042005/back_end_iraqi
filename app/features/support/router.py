@@ -3,7 +3,7 @@
 
 import re
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -23,32 +23,32 @@ router = APIRouter(prefix="/support", tags=["support"])
 _SESSION_PREFIX = "support:"
 _ORDER_ID_RE = re.compile(r"ORD[\s\-_]*(\d+)", re.IGNORECASE)
 
-# استعلامات جماعية عن دفتر الطلبات («شنو الطلبات قيد التوصيل؟»، «كم طلب
-# عدكم؟») — سؤال عن طلبات **غير** المتحدث، بلا أي معرّف يخصّه. هذي ما تُفوَّض
-# للموديل أبداً: مرصود بالاختبار الفعلي إنه يخترع معرّفات طلبات ويسند لها حالات
-# ما تطابق `orders.json` (گال ORD-1002 و ORD-1003 «قيد التوصيل» بينما الأولى
-# «تم التسليم» والثانية «قيد التجهيز»). دفتر الطلبات كله بيانات عملاء آخرين،
-# فالرد الصحيح رفض مهذّب يطلب معرّف المتحدث نفسه.
-_BULK_QUERY_WORDS = (
-    "الطلبات", "طلبات", "كل الطلبات", "جميع الطلبات", "قائمه الطلبات",
-    "لائحه الطلبات", "الزباين", "الزبائن", "العملاء", "العمله",
-)
-# طلب صريح لبيانات اتصال — حتى لو مقترن بمعرّف طلب. رقم الهاتف بسجل الطلب
-# بيانات شخصية، والدعم ما يقرأها للسائل: هو أصلاً صاحب الرقم إذا الطلب طلبه.
-_CONTACT_REQUEST_WORDS = (
-    "ارقام الهواتف", "ارقام الهاتف", "رقم الهاتف", "ارقام هواتف", "الارقام",
-    "رقم الموبايل", "ارقام الموبايل", "رقم التلفون", "ارقام التلفون",
-    "عناوين", "العناوين", "عنوان الزبون", "معلومات الزبون", "بيانات الزبون",
+# حالات الطلب المعروفة بالنظام، وكل صيغة يكتبها بيها الموظف. البوت **داخلي
+# للموظفين**، فسؤال «شنو الطلبات قيد التوصيل؟» استعلام تشغيلي مشروع يُجاب من
+# المصدر مباشرة — مو طلب بيانات زبون غريب.
+#
+# ليش حتمي مو للموديل: الموديل مرصود إنه يخترع معرّفات طلبات ويسند لها حالات
+# ما تطابق orders.json (گال ORD-1002 و ORD-1003 «قيد التوصيل» بينما حالتهما
+# الحقيقية «تم التسليم» و«قيد التجهيز»). قائمة طلبات مخترَعة بميزة تتبع تشغيلي
+# أسوأ من لا جواب: الموظف يتصرف على أساسها.
+_STATUS_ALIASES = {
+    "قيد التوصيل": ("قيد التوصيل", "التوصيل", "بالطريق", "طالعه", "مشحونه", "قيد الشحن"),
+    "قيد التجهيز": ("قيد التجهيز", "التجهيز", "تجهيز", "قيد التحضير", "بالمخزن"),
+    "تم التسليم": ("تم التسليم", "التسليم", "مسلمه", "واصله", "وصلت", "منتهيه"),
+    "ملغي": ("ملغي", "ملغيه", "الملغيه", "الغيت", "مرفوضه"),
+}
+
+# أسئلة الجرد العام («كل الطلبات»، «كم طلب عدنا؟») — بلا حالة محددة.
+_LIST_ALL_WORDS = (
+    "كل الطلبات", "جميع الطلبات", "كافه الطلبات", "قائمه الطلبات",
+    "لائحه الطلبات", "كم طلب", "عدد الطلبات", "الطلبات كلها",
 )
 
-_BULK_REFUSAL = (
-    "معذرة، ما أگدر أعطي معلومات عن طلبات زباين آخرين — هذي بيانات خاصة. "
-    "إذا تريد تعرف حالة طلبك إنته، عطيني رقم الطلب (مثل ORD-1001) أو رقم "
-    "هاتفك وأتابعلك."
-)
-_CONTACT_REFUSAL = (
-    "معذرة، ما أگدر أنطي أرقام هواتف ولا بيانات اتصال — هذي معلومات خاصة "
-    "بأصحابها. أگدر أساعدك بحالة طلبك إذا تنطيني رقم الطلب أو رقم هاتفك."
+# طلب صريح لبيانات الاتصال — مشروع هنا: الموظف يحتاج رقم الزبون حتى يتصل بيه.
+_CONTACT_REQUEST_WORDS = (
+    "ارقام الهواتف", "ارقام الهاتف", "رقم الهاتف", "ارقام هواتف",
+    "رقم الموبايل", "ارقام الموبايل", "رقم التلفون", "ارقام التلفون",
+    "الهواتف", "هواتف",
 )
 
 # أرقام الهواتف العراقية: 07XXXXXXXXX (11 خانة). الزبون يكتبها بصيغ كثيرة —
@@ -72,15 +72,26 @@ class SupportChatResponse(BaseModel):
 
 
 async def _get_order_status_tool(args: dict) -> dict:
+    """أداة الموديل. تدعم أربعة استعلامات — البوت داخلي فكل البيانات متاحة.
+
+    الاستعلام بالحالة والجرد كانا ناقصين، وهذا هو السبب الجذري لهلوسة الموديل:
+    كان مأموراً «لا تجاوب من عندك» بينما الأداة ترفض كل صيغة يسألها بالحالة،
+    فما بقي أمامه إلا الاختراع."""
     order_id = args.get("order_id")
     phone = args.get("phone")
+    status = args.get("status")
     if order_id:
         order = await order_status_provider.get_by_order_id(str(order_id))
         return order or {"error": "ماكو طلب بهذا الرقم"}
     if phone:
         orders = await order_status_provider.search_by_phone(str(phone))
         return {"orders": orders} if orders else {"error": "ماكو طلبات بهذا الرقم"}
-    return {"error": "لازم تزودني برقم الطلب أو رقم الهاتف"}
+    if status:
+        orders = await order_status_provider.search_by_status(str(status))
+        return {"orders": orders} if orders else {"error": f"ماكو طلبات بحالة {status}"}
+    if args.get("all"):
+        return {"orders": await order_status_provider.list_all()}
+    return {"error": "لازم تزودني برقم الطلب أو رقم الهاتف أو الحالة"}
 
 
 def _format_order_reply(order: dict) -> str:
@@ -122,20 +133,65 @@ def extract_phone(message: str) -> Optional[str]:
     return digits if len(digits) == 11 and digits.startswith("07") else None
 
 
-def _privacy_refusal(message: str) -> Optional[str]:
-    """يرجع رد رفض جاهزاً إذا الرسالة تطلب بيانات ما تخصّ المتحدث.
+def extract_status(message: str) -> Optional[str]:
+    """يستخرج حالة الطلب المقصودة من سؤال الموظف، أو None.
 
-    حالتان، وكلاهما لازم يُحسم هنا لا بالموديل:
-      1. طلب بيانات اتصال (أرقام هواتف/عناوين) — يُرفض دائماً، حتى لو الرسالة
-         فيها رقم طلب صحيح، لأن الجواب تسريب بيانات شخصية بأي حال.
-      2. استعلام جماعي عن الطلبات بلا معرّف يخصّ المتحدث — يُرفض ويُطلب معرّف.
-         وجود معرّف بالرسالة يعني السؤال عن طلب المتحدث نفسه، فيمر عادي."""
+    نطابق أطول اسم مستعار أولاً: «قيد التوصيل» تحتوي «التوصيل»، ولو طابقنا
+    الأقصر أولاً كان صح بالصدفة هنا وغلط بحالات ثانية."""
     normalized = normalize(message)
+    best: Optional[tuple] = None
+    for canonical, aliases in _STATUS_ALIASES.items():
+        for alias in aliases:
+            alias_n = normalize(alias)
+            if alias_n in normalized and (best is None or len(alias_n) > best[0]):
+                best = (len(alias_n), canonical)
+    return best[1] if best else None
+
+
+def _format_order_line(order: dict) -> str:
+    """سطر طلب واحد بقائمة — يشمل رقم هاتف الزبون لأن البوت داخلي والموظف
+    يحتاجه حتى يتصل بيه."""
+    items = "، ".join(
+        f"{it['product_name']} ×{it.get('quantity', 1)}" for it in order.get("items", [])
+    )
+    line = f"{order['order_id']} — {items}" if items else str(order["order_id"])
+    line += f" | الهاتف {order['phone']}"
+    if order.get("eta"):
+        line += f" | الوصول {order['eta']}"
+    return line
+
+
+def _format_order_list(orders: List[dict], heading: str) -> str:
+    """قائمة طلبات مبنية حتمياً من المصدر — كل معرّف وحالة بيها من
+    orders.json حرفياً، ما بيها ولا رقم من عند الموديل."""
+    if not orders:
+        return f"ماكو {heading} حالياً."
+    lines = "\n".join("• " + _format_order_line(o) for o in orders)
+    return f"{heading} ({len(orders)}):\n{lines}"
+
+
+async def _bulk_query_answer(message: str) -> Optional[str]:
+    """يجاوب أسئلة الموظف التشغيلية عن دفتر الطلبات — حتمياً من المصدر.
+
+    البوت داخلي للشركة، فهذي استعلامات شغل مشروعة مو تسريب بيانات. تُحسم هنا
+    لا بالموديل لأن الموديل يخترع معرّفات وحالات (انظر _STATUS_ALIASES)."""
+    normalized = normalize(message)
+
+    status = extract_status(message)
+    if status:
+        orders = await order_status_provider.search_by_status(status)
+        return _format_order_list(orders, f"الطلبات {status}")
+
+    if any(w in normalized for w in _LIST_ALL_WORDS):
+        orders = await order_status_provider.list_all()
+        return _format_order_list(orders, "كل الطلبات")
+
+    # طلب أرقام هواتف بلا حالة محددة: نعطي كل الطلبات بأرقامها — القائمة
+    # أصلاً تحمل الهاتف بكل سطر.
     if any(w in normalized for w in _CONTACT_REQUEST_WORDS):
-        return _CONTACT_REFUSAL
-    has_identifier = extract_order_id(message) or extract_phone(message)
-    if not has_identifier and any(w in normalized for w in _BULK_QUERY_WORDS):
-        return _BULK_REFUSAL
+        orders = await order_status_provider.list_all()
+        return _format_order_list(orders, "أرقام هواتف الطلبات")
+
     return None
 
 
@@ -146,10 +202,6 @@ async def _deterministic_status_answer(message: str) -> Optional[str]:
     [TOOL_CALL] بموثوقية ويخترع حالات طلب من خياله («قيد التجهيز يوصل خلال
     يوم» لطلب حالته الحقيقية «قيد التوصيل خلال يومين») — hallucination خطير
     بميزة دعم. يرجع None إذا الرسالة ما فيها معرّف، فتذهب لمسار الموديل+الأدوات."""
-    refusal = _privacy_refusal(message)
-    if refusal:
-        return refusal
-
     order_id = extract_order_id(message)
     if order_id:
         order = await order_status_provider.get_by_order_id(order_id)
@@ -164,7 +216,10 @@ async def _deterministic_status_answer(message: str) -> Optional[str]:
             return "هلا بيك، هذي طلباتك: " + " | ".join(_format_order_reply(o) for o in orders)
         return "والله ماكو طلبات مسجلة بهذا الرقم — تأكد من الرقم وگلي."
 
-    return None
+    # ما بيها معرّف محدد: يمكن استعلام تشغيلي عن دفتر الطلبات (حالة/جرد).
+    # يجي **بعد** المعرّفات عمداً: «حالة ORD-1001» لازم ترجع ذاك الطلب بالذات،
+    # مو قائمة كل الطلبات اللي بنفس حالته.
+    return await _bulk_query_answer(message)
 
 
 async def _fallback_support_answer(message: str) -> str:

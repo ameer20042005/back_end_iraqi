@@ -44,6 +44,7 @@ from collections import defaultdict
 from typing import Dict, List, Optional
 
 from app.order_schema import OrderConfirmation
+from app.text_norm import normalize
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_ORDERS_PATH = os.path.join(BASE_DIR, "data", "orders.json")
@@ -61,6 +62,18 @@ class OrderStatusProvider(ABC):
     @abstractmethod
     async def search_by_phone(self, phone: str) -> List[dict]:
         """يرجع كل الطلبات المرتبطة برقم هاتف."""
+
+    @abstractmethod
+    async def search_by_status(self, status: str) -> List[dict]:
+        """يرجع كل الطلبات بحالة معينة («قيد التوصيل»، «تم التسليم»...).
+
+        هذي عملية داخلية للموظفين (تتبع تشغيلي)، مو استعلام زبون — البوت
+        داخلي بحت. بدونها كان أي سؤال بالحالة يرجع خطأ مهما صيغته، والموديل
+        المأمور «لا تجاوب من عندك» ما يبقى أمامه إلا الاختراع."""
+
+    @abstractmethod
+    async def list_all(self) -> List[dict]:
+        """يرجع كل الطلبات (لأسئلة الجرد: «كم طلب عدنا؟»)."""
 
 
 class StaticOrderStatusProvider(OrderStatusProvider):
@@ -80,6 +93,7 @@ class StaticOrderStatusProvider(OrderStatusProvider):
         self.orders: List[dict] = []
         self._by_order_id: Dict[str, dict] = {}
         self._by_phone: Dict[str, List[dict]] = defaultdict(list)
+        self._by_status: Dict[str, List[dict]] = defaultdict(list)
         self._load(orders_path)
 
     def _load(self, path: str) -> None:
@@ -91,12 +105,34 @@ class StaticOrderStatusProvider(OrderStatusProvider):
         for order in self.orders:
             self._by_order_id[str(order["order_id"]).upper()] = order
             self._by_phone[str(order["phone"])].append(order)
+            # الحالة تُفهرَس مطبَّعة: الموظف يكتب «قيد التوصيل» أو «التوصيل»
+            # أو «قيد التوصيل.» — كلها لازم توصل لنفس الدلو. التطبيع من
+            # الطبقة ١ حتى يبقى تعريف واحد بالمشروع (app/text_norm.py).
+            self._by_status[normalize(str(order["status"]))].append(order)
 
     async def get_by_order_id(self, order_id: str) -> Optional[dict]:
         return self._by_order_id.get(str(order_id).upper())
 
     async def search_by_phone(self, phone: str) -> List[dict]:
         return list(self._by_phone.get(str(phone), []))
+
+    async def search_by_status(self, status: str) -> List[dict]:
+        """مطابقة مطبَّعة، ثم مطابقة جزئية احتياطاً («التوصيل» ↔ «قيد التوصيل»).
+
+        الجزئية مقيّدة باحتواء أحد الطرفين للآخر — مو تشابهاً فضفاضاً: المطلوب
+        نمسك اختصار الموظف، مو نخلط «تم التسليم» بـ«قيد التوصيل»."""
+        key = normalize(status)
+        exact = self._by_status.get(key)
+        if exact:
+            return list(exact)
+        matched: List[dict] = []
+        for indexed_status, orders in self._by_status.items():
+            if key in indexed_status or indexed_status in key:
+                matched.extend(orders)
+        return matched
+
+    async def list_all(self) -> List[dict]:
+        return list(self.orders)
 
 
 order_status_provider: OrderStatusProvider = StaticOrderStatusProvider()
