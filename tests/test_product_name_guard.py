@@ -21,9 +21,29 @@ IdeaPad 15). الزبون سأل «عندكم لابتوبات؟» فرد الو
 
 import pytest
 
-from app.features.sales.router import _catalog_offer_reply, _full_catalog_text
 from app.guards import check_product_names, contradicts_availability
-from app.products import product_repository
+
+# كتالوج اختبار ثابت ومستقل عن أي مصدر بيانات حقيقي (app/products.py الآن
+# يستعلم باك اند السستم لحظياً، بلا كتالوج محلي) — نفس المنتجات اللي كانت
+# بـ app/data/products.json سابقاً، لأن الحالات أدناه مبنية عليها حرفياً.
+_TEST_CATALOG = [
+    {"name": "لابتوب لينوفو IdeaPad 15", "tags": ["لابتوب", "كمبيوتر", "لينوفو"],
+     "description": "لابتوب خفيف للاستخدام اليومي، رام 8 جيجا، تخزين 512 SSD."},
+    {"name": "حقيبة لابتوب مبطنة", "tags": ["حقيبة", "اكسسوار", "لابتوب"],
+     "description": "حقيبة ظهر مبطنة تحمي اللابتوب لين 15.6 انج."},
+    {"name": "ماوس لاسلكي لوجيتك", "tags": ["ماوس", "لاسلكي", "اكسسوار"],
+     "description": "ماوس لاسلكي بطارية تدوم طويلاً، مناسب للمكتب والألعاب الخفيفة."},
+    {"name": "سماعة بلوتوث JBL", "tags": ["سماعة", "بلوتوث", "صوت"],
+     "description": "سماعة بلوتوث صوت نقي وبطارية تدوم 10 ساعات."},
+]
+
+
+def _full_catalog_text() -> str:
+    return " ".join(
+        f"{p['name']} {p.get('description', '')} {' '.join(p.get('tags', []))}"
+        for p in _TEST_CATALOG
+    )
+
 
 _CATALOG = _full_catalog_text()
 
@@ -107,34 +127,7 @@ def test_honest_denial_with_real_alternative_survives():
 
 
 # --------------------------------------------------------------------------
-# ٣. الرد البديل مبني من الكتالوج الحقيقي
-# --------------------------------------------------------------------------
-
-
-def test_replacement_reply_uses_only_real_products():
-    """الرد البديل ما يجوز يحمل أي ماركة مخترعة — وإلا استبدلنا هلوسة بهلوسة."""
-    products = product_repository.search("لابتوب", top_k=5)
-    reply = _catalog_offer_reply(products)
-    assert check_product_names(reply, _CATALOG) == []
-    assert "لابتوب لينوفو IdeaPad 15" in reply
-
-
-def test_replacement_reply_never_denies_what_we_have():
-    """الرد البديل يعرض المتوفر، ما ينفي — النفي كان نصف العطل الأصلي."""
-    products = product_repository.search("لابتوب", top_k=5)
-    reply = _catalog_offer_reply(products)
-    for denial in ("ما عدنا", "ماعدنا", "ماكو"):
-        assert denial not in reply
-
-
-def test_replacement_reply_with_no_products_is_still_safe():
-    reply = _catalog_offer_reply([])
-    assert check_product_names(reply, _CATALOG) == []
-    assert reply.strip()
-
-
-# --------------------------------------------------------------------------
-# ٤. الدرع مشتق من الكتالوج — يتكيّف بلا تعديل كود
+# ٣. الدرع مشتق من الكتالوج — يتكيّف بلا تعديل كود
 # --------------------------------------------------------------------------
 
 

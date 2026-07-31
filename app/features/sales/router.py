@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """وكيل المبيعات: POST /sales/chat و /sales/chat/stream.
 
-عندما يكتمل الطلب — يخرج الوكيل [ORDER_READY]، أو يُكتشف الاكتمال من محتوى
-المحادثة عند نسيان العلامة (_order_complete_by_content) — نشغّل تلقائياً جولة
-توليد ثانية ببرومت plane.md نفسه لاستخراج JSON، ونحسب الأسعار/المجموع من
-الكتالوج الحقيقي بدل الثقة بأرقام الموديل.
+الرد مقيَّد بمخطط app.tool_loop.TOOL_LOOP_SCHEMA: الموديل يطلب أداة
+search_products صراحةً متى احتاج بيانات منتج، ويعلن اكتمال الطلب بحقل
+order_ready (بدل حقن كتالوج RAG تلقائي وعلامة [ORDER_READY] النصية).
+
+عندما يكتمل الطلب (order_ready=true) — نشغّل تلقائياً جولة توليد ثانية
+ببرومت plane.md نفسه لاستخراج JSON، ونحسب الأسعار/المجموع من الكتالوج
+الحقيقي بدل الثقة بأرقام الموديل.
 
 صيغة الطلب موحّدة مع /orders/create حرفياً (مخطط plane.md عبر
 app/order_extraction.py)، فما تختلف حسب مصدر الطلب.
@@ -14,27 +17,18 @@ import json
 import logging
 import re
 import uuid
+from functools import partial
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import sessions
-from app.config import settings
-from app.context_blocks import products_context_block
-from app.engine import llm_engine
+from app.auth import require_sales_api_key
 from app.features.order_intake.prompts import build_order_intake_prompt
-from app.features.sales.prompts import (
-    ORDER_READY_MARKER,
-    build_sales_prompt,
-)
+from app.features.sales.prompts import build_sales_prompt
 from app.features.sales.service import resolve_order
-from app.guards import (
-    check_product_names,
-    contradicts_availability,
-    redact_bad_numbers,
-)
 from app.order_extraction import correct_location, state_code_for
 from app.order_schema import (
     OrderConfirmation,
@@ -43,9 +37,11 @@ from app.order_schema import (
     PlaneOrderExtraction,
     parse_plane_extraction,
 )
-from app.products import product_repository
+from app.engine import llm_engine
 from app.rag import search_locations
 from app.rag import search as search_words
+from app.tool_loop import build_schema, run_with_tools
+from app.tools.products import search_products_tool
 
 logger = logging.getLogger(__name__)
 
@@ -53,25 +49,15 @@ router = APIRouter(prefix="/sales", tags=["sales"])
 
 _SESSION_PREFIX = "sales:"
 
-_PURCHASE_KEYWORDS = ["اشتريها", "اشتريه", "خلص اشتري", "احجزلي", "ابيها", "أبيها", "موافق", "زبطت", "خذلي"]
-
-# تأكيد العميل النهائي بعد ملخّص الطلب («نعم ثبت»، «اي اكيد»).
-_CONFIRM_KEYWORDS = [
-    "ثبت", "ثبتها", "ثبته", "اي اكيد", "اي أكيد", "اكيد", "أكيد", "نعم",
-    "موافق", "زبطت", "تمام", "اي زين", "اوكي", "اوك", "خلص",
-]
-# إقرار الوكيل إن الطلب انثبت فعلاً بنفس الرد («تم الطلب»، «سجلتلك الطلب»).
-_ORDER_DONE_PHRASES = [
-    "تم الطلب", "تم تثبيت", "ثبتلك الطلب", "سجلتلك الطلب", "تم تسجيل",
-    "طلبك تم", "انثبت الطلب", "تم حجز", "حجزتلك",
-]
 _PHONE_IN_TEXT_RE = re.compile(r"07\d{9}")
 
 # اسم شخص معقول: حروف عربية أو لاتينية فقط، بلا أرقام ولا رموز.
 # اللاتينية مقبولة لأن قسم من الزبائن يكتب اسمه «Ameer Wisam».
 _NAME_RE = re.compile(r"^[؀-ۿa-zA-Z\s]{3,60}$")
 # كلمات تنفي أن الرسالة القصيرة اسم — تأكيد أو طلب لا تعريف بالنفس.
-_NOT_A_NAME = set(_CONFIRM_KEYWORDS) | {
+_NOT_A_NAME = {
+    "ثبت", "ثبتها", "ثبته", "اي اكيد", "اي أكيد", "اكيد", "أكيد", "نعم",
+    "موافق", "زبطت", "تمام", "اي زين", "اوكي", "اوك", "خلص",
     "احجز", "احجزلي", "اريد", "ابي", "شكرا", "هلو", "مرحبا", "السلام",
     "عفوا", "عفواً", "منو", "شنو", "شلون", "بكم", "سعر", "كافي", "زين",
 }
@@ -92,6 +78,13 @@ _FIELD_QUESTIONS = {
     "location": "زين حبيبي، أشگد محافظتك والمنطقة/الحي حتى نظبّط التوصيل؟",
 }
 _FIELD_ORDER = ("product", "name", "phone", "location")
+
+# مخطط رد المبيعات: نفس أساس tool_loop + order_ready (بدل علامة [ORDER_READY]
+# النصية) — الموديل يعلن اكتمال الطلب صراحةً بحقل مقيَّد guided decoding.
+_SALES_SCHEMA = build_schema(
+    extra_properties={"order_ready": {"type": "boolean"}},
+    extra_required=["order_ready"],
+)
 
 
 def _user_messages(history: List[dict], user_message: str) -> List[str]:
@@ -153,12 +146,11 @@ def _missing_order_fields(
 
     ليش موجود: قاعدة «لا تثبّت طلب قبل الاسم والهاتف والعنوان» كانت مكتوبة
     بالـ system prompt فقط (app/features/sales/prompts.py) — أي رجاءً للموديل
-    لا قيداً عليه. موديل 4B تجاهلها بالإنتاج وثبّت طلباً بعد الاسم وحده،
-    واخترع عنواناً («بغداد، الحارثية») ما ذكره العميل أبداً. الفحص هنا يفرض
-    التسلسل فعلياً: ما دام حقل ناقص، ما اكو تثبيت مهما كتب الموديل.
+    لا قيداً عليه. الفحص هنا يفرض التسلسل فعلياً: ما دام حقل ناقص، ما اكو
+    تثبيت مهما رجّع الموديل order_ready=true.
 
     المصدر رسائل العميل حصراً — لو فحصنا المحادثة كاملة لصارت هلوسة الوكيل
-    نفسها دليل اكتمال، وهذا بالضبط اللي انكسر."""
+    نفسها دليل اكتمال."""
     texts = _user_messages(history, user_message)
     blob = " ".join(texts)
     missing = []
@@ -203,57 +195,6 @@ def _remember_user_location(session_key: str, user_message: str) -> None:
     sessions.remember_location(session_key, city=city, district=district)
 
 
-def _order_complete_by_content(history: List[dict], user_message: str, answer: str) -> bool:
-    """كشف احتياطي لاكتمال الطلب من محتوى المحادثة نفسها.
-
-    ليش موجود: إصدار الطلب كان معلّقاً حصراً على أن يكتب الموديل سطر
-    [ORDER_READY] حرفياً. موديل 4B مضبوط على اللهجة العراقية ينسى العلامة
-    التقنية بسهولة ويختم بكلام طبيعي («خوش، تم الطلب») — فتكتمل المحادثة
-    كلها وما يصدر أي JSON، وهذا اللي صار بالإنتاج فعلاً.
-
-    الشرط هنا متحفّظ عمداً حتى ما يصدر طلب ناقص: لازم يجتمع (١) هاتف عراقي
-    بالمحادثة، (٢) تأكيد صريح من العميل بهذي الرسالة، (٣) إقرار من الوكيل
-    إن الطلب انثبت. العلامة تبقى المسار الأساسي وهذا شبكة أمان تحتها.
-    """
-    conversation = " ".join(m.get("content", "") for m in history) + " " + user_message
-    if not _PHONE_IN_TEXT_RE.search(conversation):
-        return False
-    if not any(k in user_message for k in _CONFIRM_KEYWORDS):
-        return False
-    return any(p in answer for p in _ORDER_DONE_PHRASES)
-
-def _full_catalog_text() -> str:
-    """نص الكتالوج **كله** — مرجع درع أسماء المنتجات.
-
-    ليش الكتالوج كامل لا المنتجات المسترجَعة: الاسترجاع يبني على رسالة العميل
-    الأخيرة، فيرجع لابتوبات لسؤال عن لابتوب. لو قسنا عليه وحده، صار ذكر
-    «ماوس لوجيتك» — وهو منتج حقيقي عدنا — «اختراعاً» لأنه مو بنتائج هذا الدور.
-    الماركة تُقاس على ما نملكه فعلاً، مو على ما استُرجع صدفةً."""
-    return " ".join(
-        f"{p['name']} {p.get('description', '')} {' '.join(p.get('tags', []))}"
-        for p in product_repository.all_products()
-    )
-
-
-def _catalog_offer_reply(rag_products: List[dict]) -> str:
-    """رد بديل حتمي مبني من الكتالوج الحقيقي وحده — يُستخدم لما يخترع الموديل
-    منتجاً مو عدنا (انظر check_product_names).
-
-    ما نرجع رد تهرب هنا: الزبون سأل سؤال توفّر ويستاهل جواباً. نعرض اللي
-    نملكه فعلاً بأسمائه وأسعاره الحرفية من الكتالوج، وإذا ماكو شي مطابق
-    ننفي بصراحة."""
-    if not rag_products:
-        return (
-            "عذراً حبيبي، ما لگيت شي مطابق لطلبك بالمتوفر عدنا هسه. "
-            "گلي شنو تحتاج بالضبط وأشوفلك."
-        )
-    lines = "، ".join(
-        f"{p['name']} بـ{p['price']:,} {p.get('currency', 'IQD')}"
-        for p in rag_products[:3]
-    )
-    return f"هلا بيك، اللي متوفر عدنا هسه: {lines}. تحب أفصّلك على أي واحد؟"
-
-
 class SalesChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
@@ -265,28 +206,21 @@ class SalesChatResponse(BaseModel):
     session_id: str
     answer: str
     order: Optional[OrderConfirmation] = None
-    sources: dict
     engine: str
 
 
-def _fallback_sales_answer(message: str, rag_products: List[dict]) -> str:
-    if rag_products:
-        top = rag_products[0]
-        return f"[وضع محلي بدون GPU] عندنا {top['name']} بسعر {top['price']} {top.get('currency', '')}."
-    return f"[وضع محلي بدون GPU] ما لكيت منتج مطابق لـ: {message}"
-
-
-def _fallback_order_ready(message: str) -> bool:
-    return any(kw in message for kw in _PURCHASE_KEYWORDS)
+def _fallback_sales_answer(message: str) -> str:
+    """يُستخدم فقط إذا لم يكن الموديل متوفراً. بلا موديل ماكو من يستدعي
+    أداة search_products (استعلام حي على باك اند السستم)، فما عدنا مصدر
+    بيانات نجاوب منه — نطلب من العميل ينتظر بدل اختلاق رد."""
+    return "[وضع محلي بدون GPU] الخدمة غير متوفرة مؤقتاً، جرّب بعد شوي."
 
 
 def _fallback_extraction(history: List[dict], session_key: str) -> OrderExtraction:
     """استخراج بدائي حتمي عند فشل استخراج الموديل.
 
-    كان يبني الطلب من آخر رسالة عميل وحدها، وآخر رسالة بأي تثبيت هي كلمة
-    التأكيد («نعم») — فيطلع طلب اسم منتجه «نعم» بلا اسم ولا هاتف. نبني هنا
-    من كل ما نعرفه بالجلسة يقيناً بدل رسالة وحدة: المنتج من منتجات الجلسة،
-    والهاتف بـ regex، والموقع من ذاكرة الجلسة."""
+    يبني من كل ما نعرفه بالجلسة يقيناً بدل رسالة وحدة: المنتج من منتجات
+    الجلسة، والهاتف بـ regex، والموقع من ذاكرة الجلسة."""
     user_texts = [m["content"] for m in history if m.get("role") == "user"]
     blob = " ".join(user_texts)
     phone = _PHONE_IN_TEXT_RE.search(blob)
@@ -304,11 +238,14 @@ def _fallback_extraction(history: List[dict], session_key: str) -> OrderExtracti
     )
 
 
-async def _maybe_build_order(session_key: str, rag_words: List[dict]) -> Optional[OrderConfirmation]:
+async def _maybe_build_order(session_key: str, api_key: str) -> Optional[OrderConfirmation]:
     """يبني الطلب النهائي من المحادثة بمخطط plane.md — نفس مخطط
     /orders/create حرفياً، حتى يطلع الطلب بصيغة وحدة مهما كان مصدره
-    (محادثة مبيعات، أو رسالة/صوت/صورة خام). كان هذا المسار يستعمل مخططاً
-    مختلفاً (customer_name/items) فيرجع للعميل شكل JSON ثاني."""
+    (محادثة مبيعات، أو رسالة/صوت/صورة خام).
+
+    rag_words هنا مرجع لهجة عراقية للاستخراج (شرح كلمات دارجة) — منفصل عن
+    استرجاع المنتجات المحذوف من مسار الرد، ويبقى لأنه يحسّن دقة استخراج
+    الحقول من كلام العميل الخام."""
     history = sessions.get(session_key)
     if llm_engine.ready:
         # كلام العميل وحده، بلا أسطر «الوكيل:». ليش: مستخرج plane.md يعطي
@@ -318,6 +255,7 @@ async def _maybe_build_order(session_key: str, rag_words: List[dict]) -> Optiona
         conversation = "\n".join(
             m["content"] for m in history if m.get("role") == "user"
         )
+        rag_words = search_words(conversation)
         rag_locations = search_locations(conversation)
         extraction_messages = build_order_intake_prompt(
             conversation, rag_words, rag_locations
@@ -352,76 +290,41 @@ async def _maybe_build_order(session_key: str, rag_words: List[dict]) -> Optiona
                 extraction.customer_name = _customer_name(history)
     else:
         extraction = _fallback_extraction(history, session_key)
-    return await resolve_order(extraction)
+    return await resolve_order(extraction, api_key)
 
 
-@router.post("/chat", response_model=SalesChatResponse)
-async def sales_chat(req: SalesChatRequest):
-    session_id = req.session_id or str(uuid.uuid4())
-    key = _SESSION_PREFIX + session_id
-    history = sessions.get(key)
-    rag_words = search_words(req.message, top_k=settings.rag_top_k)
-    rag_products = product_repository.search(req.message, top_k=5)
-    sessions.remember_products(key, rag_products)
-    # مرجع الدروع = منتجات الجلسة كلها لا هذا الدور وحده (انظر
-    # sessions.remember_products): آخر رسالة بأي طلب هي بيانات العميل بلا اسم
-    # منتج، فالاسترجاع يرجع فارغاً ويُحجب سعر ذُكر قبل دورين بغير حق.
-    known_products = sessions.known_products(key)
-    messages = build_sales_prompt(history, req.message, rag_words, rag_products)
+async def _run_sales_turn(
+    key: str, req: SalesChatRequest, history: List[dict], api_key: str
+) -> tuple:
+    """يولّد رد المبيعات عبر حلقة الأدوات (search_products) ويرجع
+    (answer, order_ready, engine_name)."""
+    messages = build_sales_prompt(history, req.message)
 
-    if llm_engine.ready:
-        prompt = llm_engine.render_prompt(messages)
-        result_holder: dict = {}
-        answer = await llm_engine.generate_full(
-            prompt,
-            max_tokens=req.max_tokens,
-            temperature=req.temperature,
-            stop=[ORDER_READY_MARKER],
-            result_holder=result_holder,
-        )
-        order_ready = result_holder.get("stop_reason") == ORDER_READY_MARKER
-        engine_name = "vllm"
-    else:
-        answer = _fallback_sales_answer(req.message, rag_products)
-        order_ready = _fallback_order_ready(req.message)
-        engine_name = "fallback"
+    if not llm_engine.ready:
+        return _fallback_sales_answer(req.message), False, "fallback"
 
-    # الدروع ثنائية الاتجاه — إلغاء فعلي مو تسجيل فقط (نفس تسلسل خلية
-    # الاستدلال بالنوتبوك: المواضيع أولاً لأنها تفهم السياق، الأرقام ثانياً).
-    if engine_name == "vllm":
-        reference_text = products_context_block(known_products)
-        # درع الأسماء أولاً: منتج مخترع يبطل الرد كله، فما ينفع ننقّح أرقامه
-        # ونسلّمه — الرقم المنقَّح بجملة تعرض منتجاً ما نملكه يبقى كذبة.
-        invented = check_product_names(answer, _full_catalog_text())
-        contradiction = contradicts_availability(answer, _full_catalog_text())
-        if invented or contradiction:
-            logger.warning(
-                "منتج مخترَع برد المبيعات — ماركات: %s، تناقض توفّر: %s "
-                "(session=%s) — الرد الأصلي: %r",
-                invented, contradiction, session_id, answer[:300],
-            )
-            answer = _catalog_offer_reply(known_products)
-        answer, redacted = redact_bad_numbers(answer, reference_text)
-        if redacted:
-            logger.warning(
-                "أرقام مختلَقة برد المبيعات نُقّحت: %s (session=%s) — الرد بعد التنقيح: %r",
-                redacted, session_id, answer[:300],
-            )
+    tools = {"search_products": partial(search_products_tool, api_key=api_key)}
+    data = await run_with_tools(
+        messages,
+        tools=tools,
+        max_tokens=req.max_tokens,
+        temperature=req.temperature,
+        schema=_SALES_SCHEMA,
+    )
+    return data["final_answer"], bool(data.get("order_ready")), "vllm"
 
-    # شبكة أمان تحت العلامة: الموديل ينسى [ORDER_READY] ويختم بكلام طبيعي
-    # («خوش، تم الطلب») فتضيع الطلبات المكتملة — انظر _order_complete_by_content.
-    if not order_ready and engine_name == "vllm" and _order_complete_by_content(
-        history, req.message, answer
-    ):
-        logger.info(
-            "الطلب اكتمل بالمحتوى بدون علامة %s (session=%s)", ORDER_READY_MARKER, session_id
-        )
-        order_ready = True
+
+async def _complete_sales_turn(
+    key: str, session_id: str, req: SalesChatRequest, history: List[dict], api_key: str
+) -> tuple:
+    """يشغّل دور المبيعات كاملاً (توليد + بوابة الاكتمال + حفظ الجلسة + بناء
+    الطلب) — مشترك بين /chat و /chat/stream حتى لا يتكرر منطق البوابة."""
+    answer, order_ready, engine_name = await _run_sales_turn(key, req, history, api_key)
 
     _remember_user_location(key, req.message)
 
-    # بوابة الاكتمال: تسبق كل شي وتغلب العلامة نفسها — الموديل يثبّت طلباً
-    # ناقصاً ويخترع الفراغات. انظر _missing_order_fields.
+    # بوابة الاكتمال: تسبق كل شي وتغلب قرار الموديل نفسه — الموديل يثبّت
+    # طلباً ناقصاً ويخترع الفراغات. انظر _missing_order_fields.
     if order_ready:
         missing = _missing_order_fields(history, req.message, key)
         if missing:
@@ -435,104 +338,47 @@ async def sales_chat(req: SalesChatRequest):
     sessions.append(key, "user", req.message)
     sessions.append(key, "assistant", answer)
 
-    order = await _maybe_build_order(key, rag_words) if order_ready else None
+    order = await _maybe_build_order(key, api_key) if order_ready else None
+    return answer, order, engine_name
+
+
+@router.post("/chat", response_model=SalesChatResponse)
+async def sales_chat(req: SalesChatRequest, api_key: str = Depends(require_sales_api_key)):
+    session_id = req.session_id or str(uuid.uuid4())
+    key = _SESSION_PREFIX + session_id
+    history = sessions.get(key)
+
+    answer, order, engine_name = await _complete_sales_turn(
+        key, session_id, req, history, api_key
+    )
 
     return SalesChatResponse(
         session_id=session_id,
         answer=answer,
         order=order,
-        sources={"words": rag_words, "products": rag_products},
         engine=engine_name,
     )
 
 
 @router.post("/chat/stream")
-async def sales_chat_stream(req: SalesChatRequest):
+async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(require_sales_api_key)):
+    """نفس منطق /chat، مبثوث كقطعة واحدة (مو توكن-بتوكن): الرد مقيَّد
+    بمخطط JSON صارم (guided_json) فلازم يكتمل كاملاً قبل ما يصير صالحاً
+    للتحليل أصلاً — البث الجزئي لبنية JSON غير مفيد للعميل. الردود قصيرة
+    أصلاً فالتأخير مقبول (نفس تبرير النسخة السابقة)."""
     session_id = req.session_id or str(uuid.uuid4())
     key = _SESSION_PREFIX + session_id
     history = sessions.get(key)
-    rag_words = search_words(req.message, top_k=settings.rag_top_k)
-    rag_products = product_repository.search(req.message, top_k=5)
-    sessions.remember_products(key, rag_products)
-    known_products = sessions.known_products(key)
-    messages = build_sales_prompt(history, req.message, rag_words, rag_products)
 
     async def event_source():
-        # نجمّع الرد كاملاً قبل بثّه (مو delta بـ delta) عمداً: حارس الأرقام
-        # لازم يفحص الرد كاملاً قبل ما يوصل أي جزء منه للعميل — رقم مختلَق
-        # مبثوث حياً ما ينسحب. الردود قصيرة أصلاً (64 توكن) فالتأخير مقبول.
-        collected = []
-        order_ready = False
-        if llm_engine.ready:
-            prompt = llm_engine.render_prompt(messages)
-            result_holder: dict = {}
-            async for delta in llm_engine.generate_stream(
-                prompt,
-                max_tokens=req.max_tokens,
-                temperature=req.temperature,
-                stop=[ORDER_READY_MARKER],
-                result_holder=result_holder,
-            ):
-                collected.append(delta)
-            order_ready = result_holder.get("stop_reason") == ORDER_READY_MARKER
-            engine_name = "vllm"
-            answer = "".join(collected)
-            reference_text = products_context_block(known_products)
-            # نفس ترتيب مسار /chat — انظر التعليق هناك.
-            invented = check_product_names(answer, _full_catalog_text())
-            contradiction = contradicts_availability(answer, _full_catalog_text())
-            if invented or contradiction:
-                logger.warning(
-                    "منتج مخترَع برد المبيعات (stream) — ماركات: %s، تناقض توفّر: %s "
-                    "(session=%s) — الرد الأصلي: %r",
-                    invented, contradiction, session_id, answer[:300],
-                )
-                answer = _catalog_offer_reply(known_products)
-            answer, redacted = redact_bad_numbers(answer, reference_text)
-            if redacted:
-                logger.warning(
-                    "أرقام مختلَقة برد المبيعات (stream) نُقّحت: %s (session=%s) — الرد بعد التنقيح: %r",
-                    redacted, session_id, answer[:300],
-                )
-            # نفس شبكة الأمان بمسار البث (انظر _order_complete_by_content).
-            if not order_ready and _order_complete_by_content(
-                history, req.message, answer
-            ):
-                logger.info(
-                    "الطلب اكتمل بالمحتوى بدون علامة %s (stream, session=%s)",
-                    ORDER_READY_MARKER, session_id,
-                )
-                order_ready = True
-        else:
-            answer = _fallback_sales_answer(req.message, rag_products)
-            order_ready = _fallback_order_ready(req.message)
-            engine_name = "fallback"
-
-        _remember_user_location(key, req.message)
-
-        # نفس بوابة الاكتمال بمسار البث — انظر _missing_order_fields.
-        if order_ready:
-            missing = _missing_order_fields(history, req.message, key)
-            if missing:
-                logger.warning(
-                    "تثبيت طلب ناقص أُلغي (stream) — حقول ناقصة: %s (session=%s) — الرد الأصلي: %r",
-                    missing, session_id, answer[:300],
-                )
-                order_ready = False
-                answer = _FIELD_QUESTIONS[missing[0]]
-
+        answer, order, _ = await _complete_sales_turn(
+            key, session_id, req, history, api_key
+        )
         yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
-
-        sessions.append(key, "user", req.message)
-        sessions.append(key, "assistant", answer)
-
-        order = await _maybe_build_order(key, rag_words) if order_ready else None
-
         yield "data: " + json.dumps(
             {
                 "done": True,
                 "session_id": session_id,
-                "sources": {"words": rag_words, "products": rag_products},
                 "order": order.model_dump() if order else None,
             },
             ensure_ascii=False,

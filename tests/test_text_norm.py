@@ -72,14 +72,6 @@ def test_definite_article_prefixes_are_stripped(description, query, expected_tok
     assert expected_token in tokenize(query), description
 
 
-def test_prefixed_query_retrieves_the_product():
-    """الفحص من طرف لطرف: السؤال ببادئة لازم يرجّع المنتج فعلاً."""
-    from app.products import product_repository
-
-    hits = product_repository.search("زين واللابتوب؟", top_k=3)
-    assert any("لابتوب" in h["name"] for h in hits)
-
-
 def test_index_and_query_share_one_normalizer():
     """`app.rag.retriever.normalize` لازم تكون هي نفسها دالة الطبقة ١ حرفياً —
     أي نسخة محلية بالمسترجع تكسر البحث بصمت."""

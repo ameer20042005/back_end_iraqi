@@ -1,21 +1,27 @@
 # -*- coding: utf-8 -*-
 """يحوّل OrderExtraction (خام من الموديل) إلى OrderConfirmation موثوق.
 
-**الكتالوج مساعد لا شرط**: النظام يستقبل طلبات لأي منتج، حتى لو ما كان
-موجوداً بـ app/products.py. الصنف المطابق يأخذ سعره من الكتالوج (لا نثق
-بأرقام الموديل)، وغير المطابق يُقبل كما ورد باسمه وكميته — والسعر المرجعي
-حينها هو quoted_price المذكور برسالة الزبون.
+**لا كتالوج محلي نطابق عليه أسعار المنتجات**: الباك اند (الذكاء) لا يخزّن
+ولا يفهرس أي بيانات منتج. الموديل نفسه يستدعي أداة search_products أثناء
+المحادثة (انظر app/tools/products.py) فيشوف السعر الحقيقي لحظياً، ويذكره
+بمخطط الاستخراج (plane.md → PlaneOrderExtraction.price → quoted_price) —
+هذا هو المصدر الوحيد لسعر/مجموع الطلب هنا. لا نعيد حساب أي رقم، فقط نثق
+بما استخرجه الموديل من محادثة رأت الأسعار الحقيقية فعلاً.
+
+هذا فرق جوهري عن التصميم القديم (كان يطابق اسم كل صنف بكتالوج محلي ويحسب
+subtotal/total بنفسه بدل الثقة بأرقام الموديل) — الثقة انتقلت من "كتالوج
+محلي ثابت" إلى "نتيجة استعلام حي رآها الموديل بنفس المحادثة"، وحارس الأرقام
+(app/guards.py) يبقى خط الدفاع ضد أي رقم لم يُذكر فعلياً بالمحادثة.
 """
 
 import logging
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 from app.order_gateway import order_submitter
 from app.order_schema import OrderConfirmation, OrderExtraction, ResolvedOrderItem
-from app.products import ProductRepository, product_repository
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +39,9 @@ def _new_order_id() -> str:
     """معرّف طلب بصيغة النظام ORD-####.
 
     كان `str(uuid.uuid4())` — معرّف تقني بـ36 خانة يظهر للزبون بواجهة الشات
-    («طلب مؤكَّد — 316f2f31-8764-4d31-...»). صيغة النظام الفعلية هي ORD-####
-    (انظر app/data/orders.json)، وهي اللي يعرف يقراها الزبون ويلگاها الدعم
-    لما يستعلم عنها. الجزء العشوائي يبقى: ٦ خانات من uuid4 حتى يبقى المعرّف
-    فريداً بلا عدّاد مشترك بين العمليات.
+    («طلب مؤكَّد — 316f2f31-8764-4d31-...»). صيغة النظام الفعلية هي ORD-####،
+    وهي اللي يعرف يقراها الزبون ويلگاها الدعم لما يستعلم عنها. الجزء العشوائي
+    يبقى: ٦ خانات من uuid4 حتى يبقى المعرّف فريداً بلا عدّاد مشترك بين العمليات.
 
     **أرقام فقط** لا خانات سداسية عشرية: مستخرِج الدعم
     (`app/features/support/router.py: _ORDER_ID_RE`) يقرأ `ORD-` متبوعاً بأرقام،
@@ -46,11 +51,6 @@ def _new_order_id() -> str:
     ملاحظة للربط الحقيقي: لو صار نظام الطلبات الخارجي هو اللي يولّد المعرّف،
     استبدل هذا بالمعرّف الراجع منه بدل ما تولّد واحداً محلياً."""
     return f"ORD-{uuid.uuid4().int % 1_000_000_000:09d}"
-
-
-def _resolve_product(repo: ProductRepository, name: str) -> Optional[dict]:
-    matches = repo.search(name, top_k=1)
-    return matches[0] if matches else None
 
 
 def _submission_blockers(order: OrderConfirmation) -> List[str]:
@@ -78,58 +78,31 @@ def _submission_blockers(order: OrderConfirmation) -> List[str]:
     return blockers
 
 
-async def resolve_order(
-    extraction: OrderExtraction,
-    repo: ProductRepository = product_repository,
-) -> OrderConfirmation:
-    resolved_items = []
-    subtotal = 0.0
-    matched_count = 0
-    currency = None
+def _parse_quoted_price(quoted_price: str) -> float:
+    """يحوّل quoted_price النصي (رقم فقط حسب قاعدة plane.md §3) لرقم عشري،
+    أو 0.0 إذا ما انحلّل. لا تقريب ولا تخمين — مرجع الرقم الوحيد هو ما كتبه
+    الموديل بنفس صيغة plane.md (أرقام لا فواصل ولا عملة)."""
+    try:
+        return float(quoted_price)
+    except (TypeError, ValueError):
+        return 0.0
 
-    for item in extraction.items:
-        product = _resolve_product(repo, item.product_name)
-        if product:
-            line_total = product["price"] * item.quantity
-            subtotal += line_total
-            matched_count += 1
-            currency = currency or product.get("currency")
-            resolved_items.append(ResolvedOrderItem(
-                product_id=str(product["id"]),
-                product_name=product["name"],
-                quantity=item.quantity,
-                unit_price=product["price"],
-                currency=product.get("currency"),
-                line_total=line_total,
-                matched=True,
-            ))
-        else:
-            # منتج خارج الكتالوج — طلب صالح تماماً، نمرره باسمه كما ورد
-            # بدون سعر (المرجع السعري هو quoted_price من رسالة الزبون).
-            resolved_items.append(ResolvedOrderItem(
-                product_name=item.product_name,
-                quantity=item.quantity,
-                matched=False,
-            ))
 
-    suggested_product = None
-    if extraction.suggested_product_name:
-        match = _resolve_product(repo, extraction.suggested_product_name)
-        if match:
-            suggested_product = {
-                "id": str(match["id"]),
-                "name": match["name"],
-                "price": match["price"],
-                "currency": match.get("currency"),
-            }
+async def resolve_order(extraction: OrderExtraction, api_key: str) -> OrderConfirmation:
+    resolved_items = [
+        ResolvedOrderItem(
+            product_name=item.product_name,
+            quantity=item.quantity,
+        )
+        for item in extraction.items
+    ]
 
-    # مخطط الاستخراج يمنع الأرقام برسالة التأكيد (الأسعار تُحسب هنا من
-    # الكتالوج فقط) — لو الموديل خالف وذكر رقماً، نتجاهل رسالته كلها ونستخدم
-    # الرسالة الافتراضية بدل تمرير رقم مختلَق للعميل.
-    note = extraction.confirmation_note
-    if note and re.search(r"\d", note):
-        note = None
-    note = note or "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
+    # المجموع مصدره الوحيد quoted_price — ما استخرجه الموديل من محادثة رأت
+    # الأسعار الحقيقية فعلاً عبر أداة search_products. بلا quoted_price ماكو
+    # مجموع نثق فيه (None لا 0.0 — الصفر يُقرأ "الطلب مجاني").
+    total = _parse_quoted_price(extraction.quoted_price) if extraction.quoted_price else None
+
+    note = extraction.confirmation_note or "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
 
     confirmation = OrderConfirmation(
         order_id=_new_order_id(),
@@ -142,13 +115,8 @@ async def resolve_order(
         customer_district=extraction.customer_district,
         state_code=extraction.state_code,
         items=resolved_items,
-        suggested_product=suggested_product,
-        # بدون أي صنف مطابق بالكتالوج ماكو سعر نحسبه — نرجع None لا 0.0،
-        # لأن الصفر يُقرأ "الطلب مجاني" بدل "السعر غير معروف" (المرجع حينها
-        # quoted_price).
-        subtotal=subtotal if matched_count else None,
-        total=subtotal if matched_count else None,
-        currency=currency,
+        subtotal=total,
+        total=total,
         quoted_price=extraction.quoted_price,
         notes=extraction.notes,
         confirmation_message=note,
@@ -163,11 +131,11 @@ async def resolve_order(
         )
         return confirmation
 
-    # يرسل الطلب المؤكَّد لنظام إدارة الطلبات الخارجي (Mock حالياً — انظر
-    # app/order_gateway.py). لا نفشل تسليم الرد للعميل لو تعذّر الإرسال؛ الطلب
-    # يبقى موجوداً بالرد على أي حال ويمكن إعادة محاولة إرساله لاحقاً.
+    # يرسل الطلب المؤكَّد لنظام إدارة الطلبات الخارجي. لا نفشل تسليم الرد
+    # للعميل لو تعذّر الإرسال؛ الطلب يبقى موجوداً بالرد على أي حال ويمكن
+    # إعادة محاولة إرساله لاحقاً.
     try:
-        await order_submitter.submit(confirmation)
+        await order_submitter.submit(confirmation, api_key)
     except Exception:
         logger.exception("فشل إرسال الطلب لنظام الطلبات (order_id=%s)", confirmation.order_id)
 

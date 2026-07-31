@@ -1,45 +1,62 @@
 # -*- coding: utf-8 -*-
-"""حلقة استدعاء أدوات نصّية عامة، مشتركة بين أي ميزة تحتاج الموديل يستدعي أداة
-(بحث ويب، تتبع طلب...) أثناء توليد رده.
+"""حلقة استدعاء أدوات عامة، مشتركة بين أي ميزة تحتاج الموديل يستدعي أداة
+(بحث منتجات، تتبع طلب...) أثناء توليد رده.
 
-لا نعتمد على tool-calling الأصلي لأي محرك (غير مؤكّد الدعم لموديل حديث جداً مثل
-Gemma 4) — بدلاً منه نطلب من الموديل (عبر system prompt) إخراج كتلة نصية
-بالشكل:
+البروتوكول: guided_json (structured outputs بجهة vLLM — انظر app/engine.py)
+يقيّد كل رد من الموديل بمخطط JSON صارم واحد:
 
-    [TOOL_CALL]{"tool": "اسم_الأداة", "args": {...}}[/TOOL_CALL]
+    {
+      "action": "tool_call" | "final_answer",
+      "tool_call": {"tool": "اسم_الأداة", "args": {...}},
+      "final_answer": "..."
+    }
 
-ونمرر "[/TOOL_CALL]" كـ stop string حتى يتوقف التوليد هناك بالضبط
-ولا يصل أي جزء من طلب الأداة للعميل مباشرة. النمط نفسه المستخدم أصلاً لعلامة
-[ORDER_READY] بميزة المبيعات، معمَّم هنا لأي عدد من الأدوات.
+الموديل يقرر بنفسه: يحتاج بيانات؟ يرجع action="tool_call" باسم الأداة
+ومعاملاتها، الباك اند ينفّذها (استعلام حقيقي من البيانات) ويعيد النتيجة
+كرسالة جديدة، والموديل يحلّلها بجولة توليد ثانية حتى يوصل action="final_answer".
+هذا يستبدل بروتوكول [TOOL_CALL]{...}[/TOOL_CALL] النصي القديم: guided decoding
+يضمن JSON صالحاً فعلياً (مقيَّد وقت التوليد نفسه) بدل تحليل نص حر عرضة
+للانحراف عن الصيغة.
 """
 
 import json
 import logging
-import re
 from typing import Awaitable, Callable, Dict, List, Optional
 
 from app.engine import llm_engine
 
 logger = logging.getLogger(__name__)
 
-# الصيغة المتوقَّعة: [TOOL_CALL] بآخر النص (الـ stop string يقطع التوليد عنده).
-_TOOL_CALL_TAIL = re.compile(r"\[TOOL_CALL\]\s*(\{.*\})\s*$", re.DOTALL)
+# مخطط الرد الأساسي لكل الميزات اللي تستعمل حلقة الأدوات. ميزة تحتاج حقولاً
+# إضافية بردها النهائي (مثل order_ready بالمبيعات) تمررها بـ
+# `extra_properties`/`extra_required` بدل تفرّع مخطط منفصل.
+_BASE_PROPERTIES = {
+    "action": {"type": "string", "enum": ["tool_call", "final_answer"]},
+    "tool_call": {
+        "type": "object",
+        "properties": {
+            "tool": {"type": "string"},
+            "args": {"type": "object"},
+        },
+        "required": ["tool"],
+    },
+    "final_answer": {"type": "string"},
+}
 
-# صيغ منحرفة يخرجها الموديل فعلياً حين ما يلتزم حرفياً بالتعليمات. كل واحدة
-# كانت تُسقِط الاستدعاء بصمت فيتسرّب نص خام («[TOOL_CALL]{...}») للعميل، أو
-# أسوأ: يقرر الموديل يجاوب من خياله لأن الأداة «ما ردّت عليه».
-# ملاحظة على `\{.*\}`: جشع عمداً حتى يبلع الأقواس المتداخلة بـ args.
-_TOOL_CALL_ANYWHERE = re.compile(
-    r"\[TOOL_CALL\]\s*(\{.*\})\s*(?:\[/TOOL_CALL\])?", re.DOTALL
-)
-# بلا وسوم إطلاقاً: JSON عارٍ فيه مفتاح "tool" — الموديل «يتذكّر» البنية
-# وينسى الوسوم، وهي أكثر الانحرافات شيوعاً بالنماذج غير المدرَّبة على النمط.
-# القوس الأخير جشع (`.*\}`) عمداً: `args` كائن متداخل، وأي صيغة غير جشعة
-# تتوقف عند أول `}` داخلي فتنتج JSON مبتوراً لا يُفكَّك.
-_BARE_JSON = re.compile(r'(\{[^{}]*"tool"\s*:\s*"[^"]+".*\})', re.DOTALL)
 
-# رد احتياطي حين تنفد الجولات بلا إجابة نهائية. بديله السابق كان إرجاع آخر نص
-# مولَّد — أي غالباً استدعاء أداة نصف مكتوب يوصل العميل كما هو.
+def build_schema(extra_properties: Optional[dict] = None, extra_required: Optional[List[str]] = None) -> dict:
+    """يبني مخطط guided_json لحلقة الأدوات، بحقول إضافية اختيارية فوق
+    action/tool_call/final_answer الأساسية."""
+    return {
+        "type": "object",
+        "properties": {**_BASE_PROPERTIES, **(extra_properties or {})},
+        "required": ["action"] + (extra_required or []),
+    }
+
+
+TOOL_LOOP_SCHEMA = build_schema()
+
+# رد احتياطي حين تنفد الجولات بلا إجابة نهائية.
 _EXHAUSTED_FALLBACK = (
     "معذرة، صار عندي تعقيد بجلب المعلومة. عطيني رقم الطلب (مثل ORD-1001) أو "
     "رقم هاتفك وأتابعلك مباشرة."
@@ -48,24 +65,17 @@ _EXHAUSTED_FALLBACK = (
 ToolFunc = Callable[[dict], Awaitable[dict]]
 
 
-def _extract_tool_call(text: str):
-    """يستخرج (استدعاء الأداة، النص المرئي قبله) من رد الموديل، أو (None, "").
-
-    يجرّب ثلاث صيغ بترتيب الصرامة: الصيغة القياسية بآخر النص، ثم الصيغة
-    الموسومة أينما وردت (حتى لو تبعها كلام)، ثم JSON عارٍ بمفتاح "tool".
-    التساهل هنا مقصود ومحدود: البديل عن قراءة استدعاء منحرف ليس «رفضه بأمان»
-    بل تسريبه نصاً خاماً للعميل أو دفع الموديل للاختراع."""
-    for pattern in (_TOOL_CALL_TAIL, _TOOL_CALL_ANYWHERE, _BARE_JSON):
-        match = pattern.search(text)
-        if not match:
-            continue
-        try:
-            call = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            continue
-        if isinstance(call, dict) and call.get("tool"):
-            return call, text[: match.start()].strip()
-    return None, ""
+def _parse_action(text: str) -> Optional[dict]:
+    """يفكّك رد الموديل المقيَّد بـ TOOL_LOOP_SCHEMA. guided_json يضمن JSON
+    صالحاً نحوياً، لكن نبقى متحفّظين على شكل الحقول (قد تُفقد قيمة رغم
+    صلاحية الـ JSON إذا انحرف الموديل عن enum بطريقة ما)."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict) or "action" not in data:
+        return None
+    return data
 
 
 async def run_with_tools(
@@ -73,38 +83,35 @@ async def run_with_tools(
     tools: Dict[str, ToolFunc],
     max_tokens: Optional[int] = None,
     temperature: Optional[float] = None,
-    extra_stop: Optional[List[str]] = None,
     max_rounds: int = 3,
-) -> str:
-    """يولّد رداً؛ إذا طلب الموديل أداة يجهّز نتيجتها ويعيد التوليد، حتى رد
-    نهائي بدون طلب أداة أو بلوغ `max_rounds` (تفادي حلقة لا نهائية)."""
-    stop = ["[/TOOL_CALL]"] + (extra_stop or [])
+    schema: Optional[dict] = None,
+) -> dict:
+    """يولّد رداً مقيَّداً بـ `schema` (افتراضياً TOOL_LOOP_SCHEMA)؛ إذا طلب
+    الموديل أداة ينفّذها ويعيد التوليد بنتيجتها، حتى رد نهائي أو بلوغ
+    `max_rounds`. يرجع دائماً dict فيه على الأقل "final_answer" — الحقول
+    الإضافية (مثل order_ready) تصل كما رجّعها الموديل بردّه الأخير."""
     working_messages = list(messages)
-    text = ""
+    guided_json = schema or TOOL_LOOP_SCHEMA
 
     for _ in range(max_rounds):
         prompt = llm_engine.render_prompt(working_messages)
-        result_holder: dict = {}
         text = await llm_engine.generate_full(
             prompt,
             max_tokens=max_tokens,
             temperature=temperature,
-            stop=stop,
-            result_holder=result_holder,
+            guided_json=guided_json,
         )
 
-        call, visible_text = _extract_tool_call(text)
+        data = _parse_action(text)
+        if data is None:
+            logger.warning("رد الموديل ما طابق مخطط tool_call/final_answer: %r", text[:200])
+            return {"final_answer": _EXHAUSTED_FALLBACK}
 
-        # ما بيه استدعاء أداة = رد نهائي للعميل. نفحص النص نفسه لا `stop_reason`
-        # وحده: الموديل أحياناً يكتب الاستدعاء بلا الوسم الختامي فما يُفعَّل الـ
-        # stop string، وكان الرد يُسلَّم للعميل بوسومه الخام.
-        if call is None:
-            if "[TOOL_CALL]" in text:
-                # استدعاء مشوَّه تعذّر تفكيكه — نحجب النص الخام ولا نسلّمه.
-                logger.warning("استدعاء أداة مشوَّه تعذّر تفكيكه: %r", text[:200])
-                return _EXHAUSTED_FALLBACK
-            return text.strip()
+        if data.get("action") == "final_answer":
+            data["final_answer"] = (data.get("final_answer") or "").strip() or _EXHAUSTED_FALLBACK
+            return data
 
+        call = data.get("tool_call") or {}
         tool_name = call.get("tool")
         args = call.get("args") or {}
         tool_func = tools.get(tool_name)
@@ -116,18 +123,18 @@ async def run_with_tools(
             except Exception as exc:  # لا نكسر المحادثة إذا فشلت أداة خارجية
                 tool_result = {"error": str(exc)}
 
-        working_messages.append({"role": "assistant", "content": visible_text or "..."})
+        working_messages.append({
+            "role": "assistant",
+            "content": json.dumps(data, ensure_ascii=False),
+        })
         working_messages.append({
             "role": "user",
             "content": (
                 f"[نتيجة الأداة {tool_name}]: {json.dumps(tool_result, ensure_ascii=False)}\n"
-                "تابع ردك للعميل بالاعتماد على هذه النتيجة."
+                "تابع ردك بالاعتماد على هذه النتيجة — أرجع action=final_answer إذا "
+                "اكتملت المعلومة، أو tool_call ثانية إذا تحتاج معلومة إضافية."
             ),
         })
 
-    # نفدت الجولات والموديل ما وصل لرد نهائي. الإرجاع السابق (`text.strip()`)
-    # كان يسلّم العميل آخر نص مولَّد — وهو بهذي النقطة بالذات استدعاء أداة
-    # (لأن كل جولة انتهت باستدعاء، وإلا رجعنا مبكراً). أي: النص الوحيد المضمون
-    # إنه **مو** رد للعميل هو بالضبط اللي كان يُرسَل له.
     logger.warning("نفدت جولات الأدوات (%s) بلا رد نهائي", max_rounds)
-    return _EXHAUSTED_FALLBACK
+    return {"final_answer": _EXHAUSTED_FALLBACK}

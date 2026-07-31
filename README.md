@@ -59,16 +59,18 @@ docker push <username>/back-end-iraqi:latest
 
 > توثيق كامل لكل نقطة (أمثلة طلبات/استجابات، شكل بث SSE، أخطاء) في [API.md](API.md).
 
-| النقطة | الوصف |
-|---|---|
-| `GET /health` | فحص الصحة |
-| `GET /gpu` | معلومات GPU/CUDA وحالة محرك الموديل |
-| `POST /sales/chat` | وكيل مبيعات — رد كامل، يرجع `order` مملوءاً تلقائياً عند تثبيت الطلب |
-| `POST /sales/chat/stream` | وكيل مبيعات — بث SSE، حدث `done` النهائي يحمل `order` |
-| `POST /support/chat` | دعم عملاء — تتبع طلب برقم الطلب/الهاتف، أو سؤال عام (أداة بحث ويب) |
-| `POST /orders/create` | إنشاء طلب من `text` أو `audio` (multipart) — يرجع JSON طلب مباشرة بدون محادثة |
-| `GET /docs` | واجهة Swagger التفاعلية |
-| `GET /test` | لوحة اختبار API تفاعلية (HTML/CSS/JS ثابتة، بدون تبعيات) — انظر [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md#لوحة-اختبار-api-test-console) |
+كل خدمة محمية بمفتاح API خاص بها (هيدر `X-API-Key`، مستقل تماماً بين الخدمات) — تفاصيل المفاتيح والأمثلة في [API.md § المصادقة](API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة).
+
+| النقطة | الوصف | يحتاج مفتاح |
+|---|---|---|
+| `GET /health` | فحص الصحة | لا |
+| `GET /gpu` | معلومات GPU/CUDA وحالة محرك الموديل | لا |
+| `POST /sales/chat` | وكيل مبيعات — رد كامل، يرجع `order` مملوءاً تلقائياً عند تثبيت الطلب | `sales_api_key` |
+| `POST /sales/chat/stream` | وكيل مبيعات — بث SSE (رد كامل بقطعة واحدة)، حدث `done` النهائي يحمل `order` | `sales_api_key` |
+| `POST /support/chat` | دعم عملاء — تتبع طلب برقم الطلب/الهاتف عبر أداة `get_order_status` | `support_api_key` |
+| `POST /orders/create` | إنشاء طلب من `text` أو `audio` (multipart) — يرجع JSON طلب مباشرة بدون محادثة | `orders_api_key` |
+| `GET /docs` | واجهة Swagger التفاعلية | لا |
+| `GET /test` | لوحة اختبار API تفاعلية (HTML/CSS/JS ثابتة، بدون تبعيات) — خانات مفاتيح API معبّأة مسبقاً بالشريط الجانبي — انظر [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md#لوحة-اختبار-api-test-console) |
 
 جسم الطلب لـ `/sales/chat`, `/sales/chat/stream`, `/support/chat`:
 
@@ -91,24 +93,28 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 |---|---|
 | `app/config.py` | إعدادات مشتركة عبر متغيرات بيئة (موديل، RAG، أدوات) — **بدون أي سر مكتوب بالكود** |
 | `app/engine.py` | عميل vLLM: يتصل بخادم vLLM OpenAI-متوافق منفصل (منفذ 8001) عبر `/v1/chat/completions`، مع دعم `stop`/`result_holder`/`guided_json`/صور — vLLM يدير continuous batching وPagedAttention داخلياً |
-| `app/tool_loop.py` | حلقة استدعاء أدوات عامة (`[TOOL_CALL]{...}[/TOOL_CALL]`) — مستخدمة حالياً من `support`، قابلة للربط بأي ميزة أخرى |
-| `app/context_blocks.py` | صياغة نتائج RAG (لهجة/منتجات) كمقاطع نصية تُدمَج بأي system prompt |
+| `app/tool_loop.py` | حلقة استدعاء أدوات عامة بمخطط JSON صارم (`action: tool_call \| final_answer`) — مستخدمة من `sales` (`search_products`) و`support` (`get_order_status`) |
+| `app/tools/products.py` | أداة `search_products` — تستدعيها المبيعات عبر tool_call بدل حقن كتالوج تلقائي |
+| `app/context_blocks.py` | صياغة نتائج RAG (لهجة/مواقع) كمقاطع نصية — تُستخدم فقط باستخراج الطلب (`plane.md`)، لا برد المبيعات/الدعم المباشر |
 | `app/sessions.py` | ذاكرة محادثة بالذاكرة (in-memory)، مفاتيحها مسبوقة باسم الميزة (`sales:...`, `support:...`) |
-| `app/rag/` | بحث BM25 محلي لمصطلحات اللهجة العراقية (منسوخ من `iraqi_words_finetuning/rag`) |
-| `app/products.py` | كتالوج المنتجات: `ProductRepository` (واجهة) + `StaticProductRepository` (JSON محلي حالياً — استبدلها بقاعدتك) |
-| `app/order_schema.py` | `OrderExtraction` (خام من الموديل) / `OrderConfirmation` (بعد حساب الأسعار من الكتالوج) / `parse_order_extraction()` |
-| `app/order_gateway.py` | بوابة نظام إدارة الطلبات الخارجي: **إخراج** (`OrderStatusProvider` — تتبع حالة، تستخدمه `support`) و**إدخال** (`OrderSubmitter` — تثبيت طلب جديد، تستخدمه `sales`/`order_intake` بعد حساب الأسعار) |
-| `app/tools/web_search.py` | أداة بحث ويب عامة عبر DuckDuckGo (`ddgs`) — بدون أي API key |
+| `app/rag/` | بحث BM25 محلي للهجة العراقية والمواقع الجغرافية — يُستدعى فقط عند استخراج الطلب النهائي، لا بكل رد |
+| `app/products.py` | كتالوج المنتجات: `ProductRepository` (واجهة) + `HttpProductRepository` (استعلام حي على باك اند السستم، بلا أي بيانات محلية). يُستعلَم عنه عبر أداة `search_products` |
+| `app/order_schema.py` | `OrderExtraction` (خام من الموديل) / `OrderConfirmation` (المجموع مصدره `quoted_price` الذي يستخرجه الموديل من نتيجة `search_products` بنفس المحادثة) / `parse_order_extraction()` |
+| `app/order_gateway.py` | بوابة نظام إدارة الطلبات: **إخراج** (`HttpOrderStatusProvider` — أداة `get_order_status` بالدعم) و**إدخال** (`HttpOrderSubmitter` — تثبيت طلب جديد، تستخدمه `sales`/`order_intake`)، كلاهما استعلام HTTP حي بلا تخزين محلي |
+| `app/auth.py` | حماية كل خدمة بمفتاح API مستقل (`require_sales_api_key`/`require_support_api_key`/`require_orders_api_key`) — هيدر `X-API-Key` |
+| `app/system_backend.py` | معالجة موحّدة لأخطاء الاتصال بباك اند السستم (`SystemBackendUnavailable`) — رسالة عربية واضحة بدل 500 عارية |
 
-## نقاط توصيل مؤجَّلة (Mock الآن، استبدلها لاحقاً)
+## باك اند السستم — استعلام حي، بلا أي بيانات محلية
 
-كل مصدر بيانات خارجي مفصول لواجهة **إخراج** (نستعلم منها) وواجهة **إدخال** (نرسل لها) — بدون مصادقة حسب توضيحك:
+لا يوجد أي كتالوج منتجات أو سجل طلبات مخزّن بهذا المستودع (`app/data/` غير موجود عمداً) — كل بيانات المنتجات والطلبات تُستعلَم **لحظياً** من نظام خارجي ("باك اند السستم")، تُعالَج، ولا تُحفظ محلياً بأي شكل:
 
-- **كتالوج المنتجات** (`app/products.py`) — إخراج فقط حالياً: `StaticProductRepository` فوق `app/data/products.json` (بيانات تجريبية). لربط قاعدة بياناتك الحقيقية، أنشئ صنفاً يطبّق `ProductRepository` (`search()`/`get_by_id()`) وبدّل السطر الأخير `product_repository = ...` — بدون تغيير أي راوتر.
+- **كتالوج المنتجات** (`app/products.py`) — `HttpProductRepository.search()` يرسل الاستعلام النصي (`query`) حرفياً لباك اند السستم عبر `GET /products/search` ويرجع نتيجته كما هي؛ البحث/الترتيب الدلالي مسؤولية باك اند السستم بالكامل، لا فهرسة محلية هنا. تستدعيها أداة `search_products` (`app/tools/products.py`) اللي يطلبها النموذج بنفسه عبر `tool_call` وقت المحادثة (انظر § آلية "الوكيل يقرر").
 - **نظام إدارة الطلبات** (`app/order_gateway.py`):
-  - **إخراج** — `OrderStatusProvider.get_by_order_id()`/`.search_by_phone()`: حالياً `StaticOrderStatusProvider` فوق `app/data/orders.json` (بيانات تجريبية بملف، مو بالكود — شكل السجل هناك هو عقد البيانات المتوقع من النظام الحقيقي). تستخدمه ميزة `support` لتتبع الطلبات.
-  - **إدخال** — `OrderSubmitter.submit()`: حالياً `MockOrderSubmitter` يحتفظ بالطلبات بالذاكرة فقط. تستدعيه `sales/service.py` تلقائياً بعد كل طلب مؤكَّد لإرساله للنظام الخارجي.
-  - لربط API حقيقي: أعطني رابط كل عملية (استعلام بمعرّف الطلب، بحث برقم الهاتف، تثبيت طلب جديد) وشكل الاستجابة، وأطبّق صنفين (`HttpOrderStatusProvider`, `HttpOrderSubmitter`) وأبدّل السطرين الأخيرين — بدون تغيير أي راوتر.
+  - **إخراج** — `HttpOrderStatusProvider.get_by_order_id()`/`.search_by_phone()`/`.search_by_status()`/`.list_all()`: كل استدعاء طلب HTTP حقيقي لباك اند السستم. تستخدمه ميزة `support` (مباشرة بالمسار الحتمي، وعبر أداة `get_order_status` بمسار الموديل).
+  - **إدخال** — `HttpOrderSubmitter.submit()`: يرسل الطلب المؤكَّد لباك اند السستم عبر `POST /orders`. تستدعيه `sales/service.py` تلقائياً بعد كل طلب مؤكَّد.
+- **رابط باك اند السستم**: `SYSTEM_BACKEND_BASE_URL` بـ`app/config.py` (افتراضياً `http://127.0.0.1:9000`) — رابط ومسارات باك اند السستم الفعلية غير معروفة بعد؛ عدّل القيمة والمسارات بـ`app/products.py`/`app/order_gateway.py` عند توفرها، بدون تغيير أي راوتر.
+- **فشل الاتصال بباك اند السستم** (`SystemBackendUnavailable`، انظر `app/system_backend.py`) يُلتقط ويُرجَع كرسالة عربية واضحة للعميل، لا كخطأ 500 عارٍ.
+- **الحماية**: كل نقطة تستهلك هذي البيانات محمية بمفتاح API مستقل (`sales_api_key`/`support_api_key`/`orders_api_key`) — انظر [API.md § المصادقة](API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة).
 - **قراءة الطلب من صورة** (`app/features/order_intake/vision.py`): الصورة تُمرَّر **مباشرة** مع برومت `plane.md` وguided JSON فيخرج الطلب **باستدعاء واحد** — سابقاً كانت خطوتين (وصف نصي حر ثم استخراج منه)، وكانت تُضيّع أرقام الهواتف والأسعار وتفكّك العروض المركّبة، بضِعف زمن الاستجابة. الصور تُصغَّر لأقصى بُعد 896px قبل الإرسال (أهم مكسب سرعة — توكنات الرؤية تتناسب مع المساحة). يستخدم **نفس محرك الموديل** المستخدَم بباقي الميزات (Gemma 4 يدعم صور أصلاً عبر `multi_modal_data` — انظر `app/engine.py`) — **ماكو نسخة ثانية من الموديل ولا استهلاك VRAM إضافي**. محلياً بدون GPU ترجع `501` واضحة.
 
 ## محرك الاستدلال — خادم vLLM منفصل
@@ -118,23 +124,31 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 دعم معمارية `Gemma4ForConditionalGeneration` وصل لـ vLLM عبر [PR #44429](https://github.com/vllm-project/vllm/pull/44429) — متوفر حالياً فقط بالصورة المثبَّتة `vllm/vllm-openai:gemma4-unified` (انظر [Dockerfile](Dockerfile)) أو nightly wheel، ولم يصدر بعد بإصدار مستقر. (هذا حلّ الباغ القديم [#44788](https://github.com/vllm-project/vllm/issues/44788) الذي فرض علينا سابقاً محرك transformers + micro-batching يدوي — حُذف ذلك المسار بالكامل.)
 
 - **قالب المحادثة بجهة الخادم**: `/v1/chat/completions` يستقبل `messages` مباشرة وvLLM يطبّق chat template الموديل الفعلي — `render_prompt()` صارت تمريراً مباشراً.
-- **إيقاف نصي مخصص**: `stop` (مثل `[ORDER_READY]`, `[/TOOL_CALL]`) مدعوم أصلياً بـ vLLM، ونقرأ `stop_reason` من الاستجابة لمعرفة أي علامة أوقفت التوليد.
-- **Structured outputs**: استخراج JSON (`guided_json`) عبر `response_format: json_schema` — vLLM يقيّد التوليد بالمخطط فعلياً (guided decoding)، مو مجرد تلميح بالبرومبت.
+- **Structured outputs**: كل رد (سواء استخراج طلب أو حلقة أدوات) عبر `guided_json` → `response_format: json_schema` — vLLM يقيّد التوليد بالمخطط فعلياً (guided decoding)، مو مجرد تلميح بالبرومبت.
 - **صور**: تُرسل كـ `image_url` (data URI base64) بنفس الطلب — نفس الموديل، ماكو نسخة ثانية.
 - **حتمي دائماً**: `temperature=0.0` بكل الطلبات (وصفة النوتبوك المعتمدة — أي sampling أنتج انهيار مخرجات بالتجربة).
-- **RAG**: `app/rag/` (لهجة) + `app/products.py` (منتجات) يقلّصان السياق المُمرَّر للموديل بدل حقن البيانات كاملة.
+- **RAG محدود لاستخراج الطلب فقط**: `app/rag/` (لهجة + مواقع) يُستدعى فقط عند بناء الطلب النهائي (`plane.md`) لتصحيح المحافظة/المنطقة — لا يُحقن بردود المبيعات/الدعم المباشرة، والموديل يطلب بيانات منتج بنفسه عبر أداة `search_products`.
 - **فاحص جاهزية**: `app/engine.py` يفحص خادم vLLM دورياً — الميزات تشتغل فوراً بوضع fallback وتتحول تلقائياً لوضع الموديل أول ما يكمل vLLM تحميل الأوزان (ويرجعن لـ fallback لو سقط الخادم).
 
 محلياً بدون خادم vLLM (`llm_engine.ready == False`) ترجع كل الميزات تلقائياً لوضع fallback (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod عبر [start.sh](start.sh) (يشغّل الخادمين سوية).
 
 ### آلية "الوكيل يقرر" و"استدعاء الأدوات"
 
-بدل الاعتماد على tool-calling الأصلي لأي محرك (غير مؤكّد الدعم لموديل حديث جداً مثل Gemma 4)، نستخدم نمطاً نصياً بسيطاً:
+بدل الاعتماد على tool-calling الأصلي لأي محرك (غير مؤكّد الدعم لموديل حديث جداً مثل Gemma 4)، كل رد من الموديل بميزتَي `sales`/`support` مقيَّد بمخطط JSON صارم واحد (guided_json، انظر `app/tool_loop.py`):
 
-- **[ORDER_READY]** (`app/features/sales/prompts.py`): الوكيل يختم رده بهذا السطر متى ما قرر إن العميل جاهز للشراء. يُمرَّر كـ `stop` فما يوصل للعميل، ونتحقق منه عبر `stop_reason` (`app/engine.py`) بدل البحث بالنص.
-- **[TOOL_CALL]{...}[/TOOL_CALL]** (`app/tool_loop.py`): نفس الفكرة معمَّمة لأي أداة (تتبع طلب، بحث ويب) — الموديل يطلب الأداة بنص محدد، الخادم ينفّذها ويعيد التوليد بجولة إضافية.
+```json
+{
+  "action": "tool_call | final_answer",
+  "tool_call": {"tool": "اسم_الأداة", "args": {"...": "..."}},
+  "final_answer": "..."
+}
+```
 
-**متانة البروتوكول النصي** (`_extract_tool_call`): الموديل ما يلتزم بالصيغة حرفياً (النمط غير موجود ببيانات التدريب — انظر [TRAINING_DATA_PROMPT.md](TRAINING_DATA_PROMPT.md)), فالمستخرِج يقبل ثلاث صيغ بترتيب الصرامة: الصيغة القياسية بآخر النص، ثم الصيغة الموسومة أينما وردت (حتى لو تبعها كلام فما انطلق الـ stop string)، ثم JSON عارٍ بمفتاح `"tool"`. وإذا تعذّر التفكيك أو نفدت الجولات، يُرجَع رد احتياطي آمن بدل تسريب النص الخام للعميل. التغطية بـ `tests/test_tool_loop.py`.
+- الموديل يقرر بنفسه: يحتاج بيانات؟ يرجع `action="tool_call"` باسم الأداة ومعاملاتها. الباك اند ينفّذها (استعلام حقيقي من البيانات) ويعيد النتيجة برسالة جديدة، والموديل يحلّلها بجولة توليد ثانية حتى يرجع `action="final_answer"`.
+- **المبيعات** (`app/features/sales/router.py`): أداة `search_products` (بدل حقن كتالوج RAG تلقائي بكل رسالة)، وحقل إضافي `order_ready: bool` بالمخطط (بدل علامة `[ORDER_READY]` النصية القديمة) — الموديل يعلن اكتمال الطلب صراحةً بحقل مقيَّد guided decoding، وتغلبه بوابة `_missing_order_fields` الحتمية إذا كانت بيانات التواصل ناقصة.
+- **الدعم** (`app/features/support/router.py`): أداة `get_order_status` وحدها (`web_search` حُذفت).
+
+guided decoding يضمن JSON صالحاً فعلياً وقت التوليد نفسه — بدل تحليل نص حر (`[TOOL_CALL]{...}[/TOOL_CALL]`) عرضة للانحراف عن الصيغة. التغطية بـ `tests/test_tool_loop.py`.
 
 **استعلامات الموظفين التشغيلية** (`app/features/support/router.py`): بوت الدعم **داخلي للموظفين**، فكل بيانات الطلبات متاحة إلهم. الاستعلام بالحالة («شنو الطلبات قيد التوصيل؟») والجرد العام وأرقام الهواتف — كلها تُجاب حتمياً من `orders.json` مباشرة، لا بالموديل: الموديل مرصود إنه يخترع معرّفات ويسند لها حالات غلط. الاستعلام بالحالة يجي **بعد** فحص المعرّفات عمداً، حتى «حالة ORD-1001» ترجع ذاك الطلب بالذات. التغطية بـ `tests/test_support_queries.py`.
 
@@ -150,8 +164,10 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 | `MAX_MODEL_LEN` | `4096` | أقصى طول سياق — أقصر = KV cache يتسع لطلبات متزامنة أكثر |
 | `RAG_TOP_K` | `5` | عدد وثائق RAG المسترجَعة لكل سؤال |
 | `WHISPER_MODEL` | `ayoubkirouane/whisper-small-ar` | موديل تحويل الصوت لنص العربي (`app/features/order_intake/transcribe.py`) |
+| `SYSTEM_BACKEND_BASE_URL` | `http://127.0.0.1:9000` | رابط باك اند السستم (بيانات المنتجات/الطلبات الحقيقية) — انظر § باك اند السستم أعلاه |
+| `SALES_API_KEY` / `SUPPORT_API_KEY` / `ORDERS_API_KEY` | ثابتة بـ `app/config.py` (انظر تحذير أدناه) | مفاتيح X-API-Key لكل خدمة — انظر [API.md § المصادقة](API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة) |
 
-**تحذير أمني**: لا تكتب أي قيمة من الجدول أعلاه مباشرة بأي ملف `.py` — فقط عبر `.env` (مستثنى من git) أو Environment Variables بإعدادات RunPod. `app/config.py` يقرأها تلقائياً.
+**تحذير أمني**: القاعدة العامة لا تكتب أي قيمة سرّية مباشرة بأي ملف `.py` — فقط عبر `.env` (مستثنى من git) أو Environment Variables بإعدادات RunPod، و`app/config.py` يقرأها تلقائياً. **الاستثناء الوحيد المتعمَّد**: مفاتيح `sales_api_key`/`support_api_key`/`orders_api_key` مكتوبة كقيمة ثابتة مباشرة بـ`app/config.py` (بطلب صريح — تفادياً لضبط `.env` بكل بيئة تشغيل)، وهذا يعني أنها **مرئية لأي شخص يصل لهذا المستودع**. لو تحتاج مفاتيح فعلاً سرّية (مثلاً نشر علني على GitHub)، عرّف نفس الأسماء (`SALES_API_KEY`, `SUPPORT_API_KEY`, `ORDERS_API_KEY`) بـ`.env` — تتجاوز الثابتة بالكود تلقائياً.
 
 ## تنزيل الموديل والمحوّل تلقائياً
 

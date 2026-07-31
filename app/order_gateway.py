@@ -1,53 +1,30 @@
 # -*- coding: utf-8 -*-
-"""بوابة نظام إدارة الطلبات الخارجي — واجهتان منفصلتان لكل اتجاه بيانات:
+"""بوابة نظام إدارة الطلبات — استعلام/إرسال حقيقي لحظي، بلا أي تخزين محلي.
 
+واجهتان منفصلتان لكل اتجاه بيانات:
 - **إخراج (Outbound)** — `OrderStatusProvider`: نستعلم منه (تتبع حالة طلب
   برقم الطلب أو الهاتف). يستخدمها `app/features/support/`.
 - **إدخال (Inbound)** — `OrderSubmitter`: نرسل له طلباً جديداً بعد ما تحسبه
-  `app/features/sales/service.py` (أو `order_intake`). بدونها، الطلبات
-  المؤكَّدة كانت تُرجَع بالـ API response بس وما توصل أي نظام خارجي فعلي.
+  `app/features/sales/service.py` (أو `order_intake`).
 
-نفس نمط app/products.py: واجهات مجرّدة + تطبيقات محلية الآن، تُستبدل لاحقاً
-بعميل API حقيقي بدون تغيير أي كود مستدعي — لا مصادقة مطلوبة (API مخصص لمهمة
-تتبع/تثبيت الطلبات فقط، حسب توضيح المستخدم)، فقط:
+**لا تخزين محلي بأي شكل**: كل استدعاء يذهب فوراً لباك اند السستم عبر HTTP،
+مصادقاً بمفتاح API (انظر app/auth.py)، والنتيجة تُعالَج وتُرجَع للمتصل بلا
+أي احتفاظ بها هنا. البيانات تصل لحظياً وقت الاستدعاء فقط.
 
-    class HttpOrderStatusProvider(OrderStatusProvider):
-        def __init__(self, base_url: str): ...
-        async def get_by_order_id(self, order_id): ...
-        async def search_by_phone(self, phone): ...
-
-    class HttpOrderSubmitter(OrderSubmitter):
-        def __init__(self, base_url: str): ...
-        async def submit(self, order): ...
-
-مصدر البيانات الآن:
-- الطلبات (إخراج) — `app/data/orders.json`، يقرأها `StaticOrderStatusProvider`.
-  شكل السجل بذاك الملف هو **عقد البيانات** المتوقع من النظام الحقيقي:
-  order_id, phone, status, items[{product_name, quantity}], eta.
-
-  ملاحظة مقصودة: أسماء المنتجات بالطلبات **مستقلة** عن كتالوج
-  `app/data/products.json` — بعض الأصناف بالطلبات التجريبية ما موجودة
-  بالكتالوج، وهذا هو السلوك الصحيح: الطلب سجل تاريخي يحمل اسم المنتج وقت
-  الشراء، وقد يكون الصنف انسحب من العرض بعدين. لذلك `_format_order_reply`
-  تقرأ `product_name` من سجل الطلب مباشرة ولا تستشير الكتالوج أبداً.
-- الإرسال (إدخال) — بالذاكرة فقط (`MockOrderSubmitter`)، بلا ملف: الطلبات
-  المُرسَلة مخرجات مو بيانات تجريبية نحرّرها بيد.
-
-TODO: استبدل التطبيقين أدناه بعميل API حقيقي عند توفر تفاصيل الاتصال (رابط كل
-عملية بالضبط، وشكل الاستجابة).
+TODO: رابط ومسارات باك اند السستم الفعلية غير معروفة بعد — `SYSTEM_BACKEND_BASE_URL`
+(app/config.py) ومسارات `search`/`_headers` أدناه أفضل تخمين موثَّق. عدّلها
+فقط عند توفر التفاصيل الحقيقية؛ الواجهة (OrderStatusProvider/OrderSubmitter)
+والمستدعين (support/sales) لا يتغيّرون.
 """
 
-import json
-import os
 from abc import ABC, abstractmethod
-from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import List, Optional
 
+import httpx
+
+from app.config import settings
 from app.order_schema import OrderConfirmation
-from app.text_norm import normalize
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_ORDERS_PATH = os.path.join(BASE_DIR, "data", "orders.json")
+from app.system_backend import request as backend_request
 
 # ---------------------------------------------------------------------------
 # إخراج (Outbound) — استعلام حالة طلب
@@ -56,86 +33,62 @@ DEFAULT_ORDERS_PATH = os.path.join(BASE_DIR, "data", "orders.json")
 
 class OrderStatusProvider(ABC):
     @abstractmethod
-    async def get_by_order_id(self, order_id: str) -> Optional[dict]:
+    async def get_by_order_id(self, order_id: str, api_key: str) -> Optional[dict]:
         """يرجع حالة طلب واحد بمعرّفه، أو None إذا غير موجود."""
 
     @abstractmethod
-    async def search_by_phone(self, phone: str) -> List[dict]:
+    async def search_by_phone(self, phone: str, api_key: str) -> List[dict]:
         """يرجع كل الطلبات المرتبطة برقم هاتف."""
 
     @abstractmethod
-    async def search_by_status(self, status: str) -> List[dict]:
+    async def search_by_status(self, status: str, api_key: str) -> List[dict]:
         """يرجع كل الطلبات بحالة معينة («قيد التوصيل»، «تم التسليم»...).
 
         هذي عملية داخلية للموظفين (تتبع تشغيلي)، مو استعلام زبون — البوت
-        داخلي بحت. بدونها كان أي سؤال بالحالة يرجع خطأ مهما صيغته، والموديل
-        المأمور «لا تجاوب من عندك» ما يبقى أمامه إلا الاختراع."""
+        داخلي بحت."""
 
     @abstractmethod
-    async def list_all(self) -> List[dict]:
+    async def list_all(self, api_key: str) -> List[dict]:
         """يرجع كل الطلبات (لأسئلة الجرد: «كم طلب عدنا؟»)."""
 
 
-class StaticOrderStatusProvider(OrderStatusProvider):
-    """طلبات تجريبية من ملف JSON محلي (app/data/orders.json) — نفس نمط
-    `StaticProductRepository` بـ app/products.py.
+class HttpOrderStatusProvider(OrderStatusProvider):
+    """عميل HTTP رفيع لباك اند السستم — بلا أي تخزين أو فهرسة محلية."""
 
-    البيانات بملف بيانات مو بالكود عمداً: تعديل الطلبات التجريبية أو توسعتها
-    ما يحتاج لمس أي بايثون، وشكل السجل هنا هو نفسه العقد اللي لازم يرجّعه
-    الـ API الحقيقي — فاستبداله لاحقاً بـ`HttpOrderStatusProvider` يصير تبديل
-    مصدر فقط، بلا تغيير بالراوتر ولا بصيغة الرد.
+    def __init__(self, base_url: str = "", timeout: float = 15.0):
+        self._base_url = base_url or settings.system_backend_base_url
+        self._timeout = timeout
 
-    الفهرسة بالذاكرة (order_id، phone) بدل المسح الخطي: نفس شكل الاستعلام
-    اللي راح ينفّذه الباك اند الحقيقي (WHERE order_id = ... / WHERE phone = ...).
-    """
+    def _headers(self, api_key: str) -> dict:
+        return {"X-API-Key": api_key}
 
-    def __init__(self, orders_path: str = DEFAULT_ORDERS_PATH):
-        self.orders: List[dict] = []
-        self._by_order_id: Dict[str, dict] = {}
-        self._by_phone: Dict[str, List[dict]] = defaultdict(list)
-        self._by_status: Dict[str, List[dict]] = defaultdict(list)
-        self._load(orders_path)
+    async def _get(self, path: str, api_key: str, params: Optional[dict] = None) -> Optional[dict]:
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
+            resp = await backend_request(
+                client, "GET", path, params=params, headers=self._headers(api_key)
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
 
-    def _load(self, path: str) -> None:
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"ملف الطلبات غير موجود: {path}")
-        with open(path, encoding="utf-8") as f:
-            self.orders = json.load(f)
+    async def get_by_order_id(self, order_id: str, api_key: str) -> Optional[dict]:
+        return await self._get(f"/orders/{order_id}", api_key)
 
-        for order in self.orders:
-            self._by_order_id[str(order["order_id"]).upper()] = order
-            self._by_phone[str(order["phone"])].append(order)
-            # الحالة تُفهرَس مطبَّعة: الموظف يكتب «قيد التوصيل» أو «التوصيل»
-            # أو «قيد التوصيل.» — كلها لازم توصل لنفس الدلو. التطبيع من
-            # الطبقة ١ حتى يبقى تعريف واحد بالمشروع (app/text_norm.py).
-            self._by_status[normalize(str(order["status"]))].append(order)
+    async def search_by_phone(self, phone: str, api_key: str) -> List[dict]:
+        data = await self._get("/orders/search", api_key, params={"phone": phone})
+        return (data or {}).get("orders", [])
 
-    async def get_by_order_id(self, order_id: str) -> Optional[dict]:
-        return self._by_order_id.get(str(order_id).upper())
+    async def search_by_status(self, status: str, api_key: str) -> List[dict]:
+        data = await self._get("/orders/search", api_key, params={"status": status})
+        return (data or {}).get("orders", [])
 
-    async def search_by_phone(self, phone: str) -> List[dict]:
-        return list(self._by_phone.get(str(phone), []))
-
-    async def search_by_status(self, status: str) -> List[dict]:
-        """مطابقة مطبَّعة، ثم مطابقة جزئية احتياطاً («التوصيل» ↔ «قيد التوصيل»).
-
-        الجزئية مقيّدة باحتواء أحد الطرفين للآخر — مو تشابهاً فضفاضاً: المطلوب
-        نمسك اختصار الموظف، مو نخلط «تم التسليم» بـ«قيد التوصيل»."""
-        key = normalize(status)
-        exact = self._by_status.get(key)
-        if exact:
-            return list(exact)
-        matched: List[dict] = []
-        for indexed_status, orders in self._by_status.items():
-            if key in indexed_status or indexed_status in key:
-                matched.extend(orders)
-        return matched
-
-    async def list_all(self) -> List[dict]:
-        return list(self.orders)
+    async def list_all(self, api_key: str) -> List[dict]:
+        data = await self._get("/orders", api_key)
+        return (data or {}).get("orders", [])
 
 
-order_status_provider: OrderStatusProvider = StaticOrderStatusProvider()
+order_status_provider: OrderStatusProvider = HttpOrderStatusProvider()
 
 
 # ---------------------------------------------------------------------------
@@ -145,20 +98,24 @@ order_status_provider: OrderStatusProvider = StaticOrderStatusProvider()
 
 class OrderSubmitter(ABC):
     @abstractmethod
-    async def submit(self, order: OrderConfirmation) -> bool:
+    async def submit(self, order: OrderConfirmation, api_key: str) -> bool:
         """يرسل طلباً مؤكَّداً للنظام الخارجي. يرجع True لو نجح الإرسال."""
 
 
-class MockOrderSubmitter(OrderSubmitter):
-    """لا يرسل لأي نظام حقيقي بعد — يحتفظ بالطلبات بالذاكرة فقط لأغراض
-    الاختبار المحلي، حتى تتوفر تفاصيل الـ API الحقيقي."""
+class HttpOrderSubmitter(OrderSubmitter):
+    def __init__(self, base_url: str = "", timeout: float = 15.0):
+        self._base_url = base_url or settings.system_backend_base_url
+        self._timeout = timeout
 
-    def __init__(self):
-        self.submitted: List[OrderConfirmation] = []
+    async def submit(self, order: OrderConfirmation, api_key: str) -> bool:
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
+            resp = await backend_request(
+                client, "POST", "/orders",
+                json=order.model_dump(),
+                headers={"X-API-Key": api_key},
+            )
+            resp.raise_for_status()
+            return True
 
-    async def submit(self, order: OrderConfirmation) -> bool:
-        self.submitted.append(order)
-        return True
 
-
-order_submitter: OrderSubmitter = MockOrderSubmitter()
+order_submitter: OrderSubmitter = HttpOrderSubmitter()

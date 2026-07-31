@@ -15,9 +15,22 @@ import pytest
 
 from app.context_blocks import products_context_block
 from app.guards import check_numbers, check_topics
-from app.products import product_repository
 
-REFERENCE = products_context_block(product_repository.products)
+# كتالوج اختبار ثابت ومستقل عن أي مصدر بيانات حقيقي (app/products.py الآن
+# يستعلم باك اند السستم لحظياً، بلا كتالوج محلي) — القيم هنا مرجع الحالات
+# أدناه فقط، وتطابق ما كان بـ app/data/products.json سابقاً.
+_TEST_CATALOG = [
+    {"name": "لابتوب لينوفو IdeaPad 15", "price": 750000, "currency": "IQD",
+     "description": "لابتوب خفيف للاستخدام اليومي، رام 8 جيجا، تخزين 512 SSD."},
+    {"name": "حقيبة لابتوب مبطنة", "price": 25000, "currency": "IQD",
+     "description": "حقيبة ظهر مبطنة تحمي اللابتوب لين 15.6 انج."},
+    {"name": "ماوس لاسلكي لوجيتك", "price": 15000, "currency": "IQD",
+     "description": "ماوس لاسلكي بطارية تدوم طويلاً، مناسب للمكتب والألعاب الخفيفة."},
+    {"name": "سماعة بلوتوث JBL", "price": 45000, "currency": "IQD",
+     "description": "سماعة بلوتوث صوت نقي وبطارية تدوم 10 ساعات."},
+]
+
+REFERENCE = products_context_block(_TEST_CATALOG)
 
 CASES = [
     # ---------- أسعار مشروعة ----------

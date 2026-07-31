@@ -3,20 +3,20 @@
 
 import re
 import uuid
+from functools import partial
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app import sessions
-from app.config import settings
+from app.auth import require_support_api_key
 from app.engine import llm_engine
 from app.features.support.prompts import build_support_prompt
 from app.order_gateway import order_status_provider
-from app.rag import search as search_words
+from app.system_backend import SystemBackendUnavailable
 from app.text_norm import normalize
 from app.tool_loop import run_with_tools
-from app.tools.web_search import web_search_tool
 
 router = APIRouter(prefix="/support", tags=["support"])
 
@@ -96,26 +96,30 @@ class SupportChatResponse(BaseModel):
     engine: str
 
 
-async def _get_order_status_tool(args: dict) -> dict:
+async def _get_order_status_tool(args: dict, api_key: str) -> dict:
     """أداة الموديل. تدعم أربعة استعلامات — البوت داخلي فكل البيانات متاحة.
 
     الاستعلام بالحالة والجرد كانا ناقصين، وهذا هو السبب الجذري لهلوسة الموديل:
     كان مأموراً «لا تجاوب من عندك» بينما الأداة ترفض كل صيغة يسألها بالحالة،
-    فما بقي أمامه إلا الاختراع."""
+    فما بقي أمامه إلا الاختراع.
+
+    `api_key` تُربط بالدالة عبر functools.partial وقت التسجيل بـ
+    run_with_tools (انظر support_chat أدناه)، فما تمر بـ args التي يرسلها
+    النموذج — نفس مبدأ search_products_tool بالمبيعات."""
     order_id = args.get("order_id")
     phone = args.get("phone")
     status = args.get("status")
     if order_id:
-        order = await order_status_provider.get_by_order_id(str(order_id))
+        order = await order_status_provider.get_by_order_id(str(order_id), api_key)
         return order or {"error": "ماكو طلب بهذا الرقم"}
     if phone:
-        orders = await order_status_provider.search_by_phone(str(phone))
+        orders = await order_status_provider.search_by_phone(str(phone), api_key)
         return {"orders": orders} if orders else {"error": "ماكو طلبات بهذا الرقم"}
     if status:
-        orders = await order_status_provider.search_by_status(str(status))
+        orders = await order_status_provider.search_by_status(str(status), api_key)
         return {"orders": orders} if orders else {"error": f"ماكو طلبات بحالة {status}"}
     if args.get("all"):
-        return {"orders": await order_status_provider.list_all()}
+        return {"orders": await order_status_provider.list_all(api_key)}
     return {"error": "لازم تزودني برقم الطلب أو رقم الهاتف أو الحالة"}
 
 
@@ -158,9 +162,10 @@ def extract_phone(message: str) -> Optional[str]:
     return digits if len(digits) == 11 and digits.startswith("07") else None
 
 
-async def _known_statuses() -> List[str]:
-    """الحالات الموجودة فعلاً بالبيانات — مشتقة، مو مكتوبة بالكود."""
-    orders = await order_status_provider.list_all()
+async def _known_statuses(api_key: str) -> List[str]:
+    """الحالات الموجودة فعلاً بالبيانات — مشتقة من استعلام حي، مو مكتوبة
+    بالكود ولا محفوظة محلياً."""
+    orders = await order_status_provider.list_all(api_key)
     seen = []
     for order in orders:
         status = str(order.get("status", "")).strip()
@@ -169,18 +174,19 @@ async def _known_statuses() -> List[str]:
     return seen
 
 
-async def extract_status(message: str) -> Optional[str]:
+async def extract_status(message: str, api_key: str) -> Optional[str]:
     """يستخرج حالة الطلب المقصودة من سؤال الموظف، أو None.
 
-    مصدر الحالات هو البيانات نفسها (`_known_statuses`)، فحالة جديدة تنضاف
-    لـorders.json تشتغل فوراً. المرادفات اللغوية (`_STATUS_SYNONYMS`) تُترجم
-    كلام الموظف الدارج («مكتمله») لكلمة موجودة بنص الحالة («تسليم») ثم تُطابق
-    على الحالات الحقيقية — فلو ما اكو حالة فيها «تسليم» ينسقط المرادف وحده.
+    مصدر الحالات هو استعلام حي (`_known_statuses`) — أي حالة موجودة فعلياً
+    بباك اند السستم تُطابَق فوراً. المرادفات اللغوية (`_STATUS_SYNONYMS`)
+    تُترجم كلام الموظف الدارج («مكتمله») لكلمة موجودة بنص الحالة («تسليم»)
+    ثم تُطابق على الحالات الحقيقية — فلو ما اكو حالة فيها «تسليم» ينسقط
+    المرادف وحده.
 
     نطابق الأطول أولاً: «قيد التوصيل» تحتوي «التوصيل»، ولو طابقنا الأقصر
     أولاً كان صح بالصدفة هنا وغلط بحالات ثانية."""
     normalized = normalize(message)
-    statuses = await _known_statuses()
+    statuses = await _known_statuses(api_key)
     best: Optional[tuple] = None
 
     # (١) الحالة مذكورة كما هي بالبيانات، أو جزء دالّ منها.
@@ -244,9 +250,9 @@ _LATEST_WORDS = ("اخر طلب", "آخر طلب", "احدث طلب", "أحدث 
 
 
 async def _bulk_query_answer(
-    message: str, history: Optional[List[dict]] = None
+    message: str, api_key: str, history: Optional[List[dict]] = None
 ) -> Optional[str]:
-    """يجاوب أسئلة الموظف التشغيلية عن دفتر الطلبات — حتمياً من المصدر.
+    """يجاوب أسئلة الموظف التشغيلية عن دفتر الطلبات — باستعلام حي مباشر.
 
     البوت داخلي للشركة، فهذي استعلامات شغل مشروعة مو تسريب بيانات. تُحسم هنا
     لا بالموديل لأن الموديل يخترع معرّفات وحالات (انظر _STATUS_SYNONYMS).
@@ -256,13 +262,13 @@ async def _bulk_query_answer(
     سياق ما تعني شي، ومعه تعني حالة التسليم."""
     normalized = normalize(message)
 
-    status = await extract_status(message)
+    status = await extract_status(message, api_key)
 
     # ما بالرسالة حالة صريحة؟ إذا كانت متابعة، ندوّر الحالة برسائل الموظف
     # السابقة — الأحدث أولاً.
     if not status and history and any(w in normalized for w in _FOLLOWUP_WORDS):
         for past in reversed([m for m in history if m.get("role") == "user"]):
-            status = await extract_status(past.get("content", ""))
+            status = await extract_status(past.get("content", ""), api_key)
             if status:
                 break
 
@@ -271,9 +277,9 @@ async def _bulk_query_answer(
     # «اخر طلب» — الأحدث، بحالة معيّنة أو مطلقاً.
     if any(w in normalized for w in _LATEST_WORDS):
         orders = (
-            await order_status_provider.search_by_status(status)
+            await order_status_provider.search_by_status(status, api_key)
             if status
-            else await order_status_provider.list_all()
+            else await order_status_provider.list_all(api_key)
         )
         if not orders:
             return f"ماكو طلبات {status} حالياً." if status else "ماكو طلبات مسجلة."
@@ -281,7 +287,7 @@ async def _bulk_query_answer(
         return f"{heading}:\n• " + _format_order_line(orders[-1])
 
     if status:
-        orders = await order_status_provider.search_by_status(status)
+        orders = await order_status_provider.search_by_status(status, api_key)
         heading = f"الطلبات {status}"
         if wants_count:
             # سؤال عدّ: الرقم أولاً — بس نلحقه بالتفصيل حتى يشوف أي طلبات هي.
@@ -291,7 +297,7 @@ async def _bulk_query_answer(
         return _format_order_list(orders, heading)
 
     if any(w in normalized for w in _LIST_ALL_WORDS):
-        orders = await order_status_provider.list_all()
+        orders = await order_status_provider.list_all(api_key)
         if wants_count:
             return f"عدد الطلبات الكلي: {len(orders)}.\n" + _format_order_list(
                 orders, "التفاصيل"
@@ -301,31 +307,32 @@ async def _bulk_query_answer(
     # طلب أرقام هواتف بلا حالة محددة: نعطي كل الطلبات بأرقامها — القائمة
     # أصلاً تحمل الهاتف بكل سطر.
     if any(w in normalized for w in _CONTACT_REQUEST_WORDS):
-        orders = await order_status_provider.list_all()
+        orders = await order_status_provider.list_all(api_key)
         return _format_order_list(orders, "أرقام هواتف الطلبات")
 
     return None
 
 
 async def _deterministic_status_answer(
-    message: str, history: Optional[List[dict]] = None
+    message: str, api_key: str, history: Optional[List[dict]] = None
 ) -> Optional[str]:
     """توجيه حتمي لطلبات التتبع: إذا الرسالة فيها رقم طلب أو هاتف، نستعلم
-    من المصدر مباشرة ونبني الرد من البيانات الحقيقية — بدون تفويض القرار
-    للموديل. السبب (مرصود بالاختبار الفعلي): الموديل الحالي لا يستدعي
-    [TOOL_CALL] بموثوقية ويخترع حالات طلب من خياله («قيد التجهيز يوصل خلال
-    يوم» لطلب حالته الحقيقية «قيد التوصيل خلال يومين») — hallucination خطير
-    بميزة دعم. يرجع None إذا الرسالة ما فيها معرّف، فتذهب لمسار الموديل+الأدوات."""
+    من المصدر مباشرة (استدعاء حي، بلا تخزين محلي) ونبني الرد من البيانات
+    الحقيقية — بدون تفويض القرار للموديل. السبب (مرصود بالاختبار الفعلي):
+    الموديل الحالي لا يستدعي الأداة بموثوقية ويخترع حالات طلب من خياله
+    («قيد التجهيز يوصل خلال يوم» لطلب حالته الحقيقية «قيد التوصيل خلال
+    يومين») — hallucination خطير بميزة دعم. يرجع None إذا الرسالة ما فيها
+    معرّف، فتذهب لمسار الموديل+الأدوات."""
     order_id = extract_order_id(message)
     if order_id:
-        order = await order_status_provider.get_by_order_id(order_id)
+        order = await order_status_provider.get_by_order_id(order_id, api_key)
         if order:
             return _format_order_reply(order)
         return "والله ماكو طلب بهذا الرقم عدنا — دقّق الرقم وگلي مرة ثانية."
 
     phone = extract_phone(message)
     if phone:
-        orders = await order_status_provider.search_by_phone(phone)
+        orders = await order_status_provider.search_by_phone(phone, api_key)
         if orders:
             return "هلا بيك، هذي طلباتك: " + " | ".join(_format_order_reply(o) for o in orders)
         return "والله ماكو طلبات مسجلة بهذا الرقم — تأكد من الرقم وگلي."
@@ -333,42 +340,47 @@ async def _deterministic_status_answer(
     # ما بيها معرّف محدد: يمكن استعلام تشغيلي عن دفتر الطلبات (حالة/جرد).
     # يجي **بعد** المعرّفات عمداً: «حالة ORD-1001» لازم ترجع ذاك الطلب بالذات،
     # مو قائمة كل الطلبات اللي بنفس حالته.
-    return await _bulk_query_answer(message, history)
+    return await _bulk_query_answer(message, api_key, history)
 
 
 async def _fallback_support_answer(
-    message: str, history: Optional[List[dict]] = None
+    message: str, api_key: str, history: Optional[List[dict]] = None
 ) -> str:
     """يُستخدم فقط إذا لم يكن الموديل متوفراً (محلياً بدون GPU)."""
-    deterministic = await _deterministic_status_answer(message, history)
+    deterministic = await _deterministic_status_answer(message, api_key, history)
     if deterministic:
         return "[وضع محلي بدون GPU] " + deterministic
     return "[وضع محلي بدون GPU] عطيني رقم الطلب أو رقم الهاتف حتى اكدر اكَولك وين وصل."
 
 
 @router.post("/chat", response_model=SupportChatResponse)
-async def support_chat(req: SupportChatRequest):
+async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_support_api_key)):
     session_id = req.session_id or str(uuid.uuid4())
     key = _SESSION_PREFIX + session_id
     history = sessions.get(key)
-    rag_words = search_words(req.message, top_k=settings.rag_top_k)
-    messages = build_support_prompt(history, req.message, rag_words)
+    messages = build_support_prompt(history, req.message)
 
     # طلبات التتبع (رقم طلب/هاتف بالرسالة) تُجاب حتمياً من المصدر مباشرة —
     # الموديل غير موثوق باستدعاء الأدوات ويخترع حالات طلب (انظر
-    # _deterministic_status_answer). الموديل+الأدوات فقط للأسئلة العامة.
-    deterministic = await _deterministic_status_answer(req.message, history)
+    # _deterministic_status_answer). الموديل+الأداة فقط للأسئلة العامة.
+    #
+    # هذا المسار يستدعي order_status_provider مباشرة (خارج run_with_tools،
+    # اللي يلتقط استثناءات الأدوات بنفسه) — فباك اند السستم غير المتاح هنا
+    # لازم يُلتقط صراحةً بدل ما يطلع 500 عارية للعميل.
+    try:
+        deterministic = await _deterministic_status_answer(req.message, api_key, history)
+    except SystemBackendUnavailable:
+        deterministic = "معذرة، تعذّر الوصول لبيانات الطلبات حالياً — جرّب بعد شوي."
     if deterministic is not None:
         answer = deterministic
         engine_name = "deterministic"
     elif llm_engine.ready:
-        answer = await run_with_tools(messages, tools={
-            "get_order_status": _get_order_status_tool,
-            "web_search": web_search_tool,
-        })
+        tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key)}
+        data = await run_with_tools(messages, tools=tools)
+        answer = data["final_answer"]
         engine_name = "vllm"
     else:
-        answer = await _fallback_support_answer(req.message, history)
+        answer = await _fallback_support_answer(req.message, api_key, history)
         engine_name = "fallback"
 
     sessions.append(key, "user", req.message)

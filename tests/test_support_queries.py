@@ -2,7 +2,7 @@
 """استعلامات الموظفين التشغيلية ببوت الدعم (app/features/support/router.py).
 
 الخلفية (عطل مرصود بلقطة شاشة حقيقية): سؤال «الطلبات القيد التوصيل» رجّع
-ORD-1002 و ORD-1003 بينما حالتهما بـ orders.json «تم التسليم» و«قيد التجهيز».
+ORD-1002 و ORD-1003 بينما حالتهما «تم التسليم» و«قيد التجهيز».
 الطلبات الصحيحة قيد التوصيل هي ORD-1001 و ORD-1005.
 
 السبب الجذري: أداة `get_order_status` ما كانت تقبل إلا order_id/phone، فأي
@@ -10,22 +10,83 @@ ORD-1002 و ORD-1003 بينما حالتهما بـ orders.json «تم التس�
 وبلا مخرج، ما بقى أمامه إلا الاختراع.
 
 البوت **داخلي للموظفين**، فهذي الاستعلامات مشروعة: الإصلاح إننا نجاوبها
-حتمياً من المصدر، مو نرفضها. كل معرّف وحالة ورقم بالرد لازم يكون من
-orders.json حرفياً.
+حتمياً من المصدر، مو نرفضها. كل معرّف وحالة ورقم بالرد لازم يكون من مصدر
+البيانات حرفياً.
 
-التشغيل:  python -m pytest tests/test_support_privacy.py -v
+order_status_provider الحقيقي (HttpOrderStatusProvider) يستعلم باك اند
+السستم عبر HTTP لحظياً — نستبدله هنا بمزوّد وهمي بالذاكرة (monkeypatch)
+يحمل نفس بيانات app/data/orders.json التجريبية الأصلية، حتى نفحص منطق
+استخراج الحالة/المتابعة/العدّ بلا الحاجة لخادم حقيقي.
+
+التشغيل:  python -m pytest tests/test_support_queries.py -v
 """
 
 import asyncio
+from collections import defaultdict
 
 import pytest
 
+from app.features.support import router as support_router
 from app.features.support.router import (
     _deterministic_status_answer,
     extract_status,
 )
+from app.text_norm import normalize
 
-# الحقيقة الأرضية من app/data/orders.json — أي انحراف عنها هلوسة.
+_API_KEY = "test-key"
+
+_ORDERS = [
+    {"order_id": "ORD-1001", "phone": "07701234567", "status": "قيد التوصيل",
+     "items": [{"product_name": "لابتوب لينوفو IdeaPad 15", "quantity": 1}], "eta": "خلال يومين"},
+    {"order_id": "ORD-1002", "phone": "07709876543", "status": "تم التسليم",
+     "items": [{"product_name": "سماعة بلوتوث JBL", "quantity": 2}], "eta": None},
+    {"order_id": "ORD-1003", "phone": "07512223344", "status": "قيد التجهيز",
+     "items": [{"product_name": "حقيبة لابتوب مبطنة", "quantity": 1}], "eta": "خلال ثلاثة أيام"},
+    {"order_id": "ORD-1004", "phone": "07512223344", "status": "تم التسليم",
+     "items": [{"product_name": "ماوس لاسلكي لوجيتك", "quantity": 1}], "eta": None},
+    {"order_id": "ORD-1005", "phone": "07801119988", "status": "قيد التوصيل",
+     "items": [{"product_name": "شاحن سريع 65 واط", "quantity": 3}], "eta": "اليوم"},
+    {"order_id": "ORD-1006", "phone": "07905554433", "status": "ملغي",
+     "items": [{"product_name": "كيبورد ميكانيكي", "quantity": 1}], "eta": None},
+]
+
+
+class _FakeOrderStatusProvider:
+    """مزوّد استعلام وهمي بالذاكرة — نفس عقد OrderStatusProvider، يحمل بيانات
+    ثابتة مطابقة لـ app/data/orders.json التجريبية القديمة حرفياً."""
+
+    def __init__(self, orders):
+        self.orders = orders
+        self._by_id = {o["order_id"].upper(): o for o in orders}
+        self._by_phone = defaultdict(list)
+        for o in orders:
+            self._by_phone[o["phone"]].append(o)
+
+    async def get_by_order_id(self, order_id, api_key):
+        return self._by_id.get(str(order_id).upper())
+
+    async def search_by_phone(self, phone, api_key):
+        return list(self._by_phone.get(str(phone), []))
+
+    async def search_by_status(self, status, api_key):
+        key = normalize(status)
+        exact = [o for o in self.orders if normalize(o["status"]) == key]
+        if exact:
+            return exact
+        return [o for o in self.orders if key in normalize(o["status"]) or normalize(o["status"]) in key]
+
+    async def list_all(self, api_key):
+        return list(self.orders)
+
+
+@pytest.fixture(autouse=True)
+def fake_provider(monkeypatch):
+    fake = _FakeOrderStatusProvider(_ORDERS)
+    monkeypatch.setattr(support_router, "order_status_provider", fake)
+    return fake
+
+
+# الحقيقة الأرضية من _ORDERS أعلاه — أي انحراف عنها هلوسة.
 _BY_STATUS = {
     "قيد التوصيل": ["ORD-1001", "ORD-1005"],
     "قيد التجهيز": ["ORD-1003"],
@@ -35,8 +96,8 @@ _BY_STATUS = {
 _ALL_IDS = ["ORD-1001", "ORD-1002", "ORD-1003", "ORD-1004", "ORD-1005", "ORD-1006"]
 
 
-def _answer(message):
-    return asyncio.run(_deterministic_status_answer(message))
+def _answer(message, history=None):
+    return asyncio.run(_deterministic_status_answer(message, _API_KEY, history))
 
 
 # --------------------------------------------------------------------------
@@ -68,20 +129,20 @@ STATUS_CASES = [
     ids=[c[0] for c in STATUS_CASES],
 )
 def test_extract_status(description, message, expected):
-    assert asyncio.run(extract_status(message)) == expected, description
+    assert asyncio.run(extract_status(message, _API_KEY)) == expected, description
 
 
 def test_longest_alias_wins():
     """«قيد التوصيل» تحتوي «التوصيل» — لازم نطابق الأطول لا الأقصر."""
-    assert asyncio.run(extract_status("الطلبات قيد التوصيل")) == "قيد التوصيل"
+    assert asyncio.run(extract_status("الطلبات قيد التوصيل", _API_KEY)) == "قيد التوصيل"
 
 
 def test_statuses_are_derived_from_data_not_hardcoded():
-    """الحالات تُقرأ من orders.json وقت التشغيل — حالة جديدة بالبيانات تشتغل
+    """الحالات تُقرأ من استعلام حي وقت التشغيل — حالة جديدة بالبيانات تشتغل
     فوراً بلا تعديل كود (نفس مبدأ دروع المبيعات)."""
     from app.features.support.router import _known_statuses
 
-    statuses = asyncio.run(_known_statuses())
+    statuses = asyncio.run(_known_statuses(_API_KEY))
     assert set(statuses) == set(_BY_STATUS)
 
 
@@ -188,7 +249,7 @@ def test_followup_resolves_status_from_history():
         {"role": "user", "content": "المكتمله تعني التي تم توصيلها"},
         {"role": "assistant", "content": "..."},
     ]
-    answer = asyncio.run(_deterministic_status_answer("اعطني هذه الطلبات", history))
+    answer = _answer("اعطني هذه الطلبات", history)
     assert answer is not None, "المتابعة لسه تروح للموديل"
     assert "ORD-1002" in answer and "ORD-1004" in answer
     assert "ORD-1001" not in answer

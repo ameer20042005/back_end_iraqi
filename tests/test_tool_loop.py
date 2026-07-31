@@ -1,68 +1,27 @@
 # -*- coding: utf-8 -*-
-"""متانة حلقة الأدوات (app/tool_loop.py) أمام انحرافات الموديل عن الصيغة.
+"""متانة حلقة الأدوات (app/tool_loop.py) أمام رد الموديل المقيَّد بـ guided_json.
 
-الخلفية: البروتوكول عندنا نصّي (`[TOOL_CALL]{...}[/TOOL_CALL]`) مو
-function-calling أصلي، والموديل مرصود إنه ما يلتزم بالصيغة حرفياً (انظر
-TRAINING_DATA_PROMPT.md — النمط أصلاً غير موجود ببيانات التدريب). كل انحراف
-كان يُسقِط الاستدعاء بصمت، فيصير أحد أمرين، وكلاهما مرفوض:
-
-  1. النص الخام («[TOOL_CALL]{...}») يوصل العميل كما هو.
-  2. الموديل «ما يشوف» نتيجة الأداة فيخترع الجواب — نفس هلوسة ORD-1002.
+الخلفية: البروتوكول عندنا مخطط JSON صارم (action: tool_call | final_answer)
+مقيَّد بـ guided decoding (response_format.json_schema بجهة vLLM) — بدل
+البروتوكول النصي القديم ([TOOL_CALL]{...}[/TOOL_CALL]) اللي كان عرضة لانحراف
+الموديل عن الصيغة. guided_json يضمن JSON صالحاً نحوياً، لكن الحلقة تبقى
+متحفّظة على شكل الحقول (data.get بدل data[]) لأن enum قد ينحرف بطرق أخرى.
 
 التشغيل:  python -m pytest tests/test_tool_loop.py -v
 """
 
 import asyncio
+import json
 
 import pytest
 
 from app import tool_loop
-from app.tool_loop import _EXHAUSTED_FALLBACK, _extract_tool_call, run_with_tools
+from app.tool_loop import _EXHAUSTED_FALLBACK, build_schema, run_with_tools
 
-# --------------------------------------------------------------------------
-# استخراج الاستدعاء من صيغه المنحرفة
-# --------------------------------------------------------------------------
-
-_CALL = '{"tool": "get_order_status", "args": {"order_id": "ORD-1001"}}'
-
-EXTRACT_CASES = [
-    ("الصيغة القياسية", f"[TOOL_CALL]{_CALL}", True),
-    ("كلام قبل الاستدعاء", f"خليني اشوفلك [TOOL_CALL]{_CALL}", True),
-    ("كلام بعد الاستدعاء", f"[TOOL_CALL]{_CALL} راح اشوفلك", True),
-    ("وسم ختامي كامل", f"[TOOL_CALL]{_CALL}[/TOOL_CALL]", True),
-    ("وسم ختامي وكلام بعده", f"[TOOL_CALL]{_CALL}[/TOOL_CALL] لحظة", True),
-    ("JSON عارٍ بلا وسوم", _CALL, True),
-    ("JSON عارٍ داخل جملة", f"اكيد، {_CALL} ثانية وحدة", True),
-    ("فراغات حول الـ JSON", f"[TOOL_CALL]  {_CALL}  ", True),
-    ("رد طبيعي بلا استدعاء", "هلا بيك، شلون اكدر اساعدك؟", False),
-    ("JSON بلا مفتاح tool", '{"order_id": "ORD-1001"}', False),
-]
-
-
-@pytest.mark.parametrize(
-    "description,text,should_find",
-    EXTRACT_CASES,
-    ids=[c[0] for c in EXTRACT_CASES],
-)
-def test_extract_tool_call(description, text, should_find):
-    call, _ = _extract_tool_call(text)
-    if should_find:
-        assert call is not None, description
-        assert call["tool"] == "get_order_status", description
-        assert call["args"]["order_id"] == "ORD-1001", description
-    else:
-        assert call is None, description
-
-
-def test_visible_text_excludes_the_call():
-    """النص المرئي المُعاد للسياق ما يحتوي وسوم الاستدعاء."""
-    _, visible = _extract_tool_call(f"خليني اشوفلك [TOOL_CALL]{_CALL}")
-    assert "TOOL_CALL" not in visible and visible == "خليني اشوفلك"
-
-
-# --------------------------------------------------------------------------
-# سلوك الحلقة كاملة (بموديل وهمي)
-# --------------------------------------------------------------------------
+_ORDER_STATUS_CALL = {
+    "action": "tool_call",
+    "tool_call": {"tool": "get_order_status", "args": {"order_id": "ORD-1001"}},
+}
 
 
 class _FakeEngine:
@@ -77,7 +36,8 @@ class _FakeEngine:
 
     async def generate_full(self, prompt, result_holder=None, **kwargs):
         self.calls += 1
-        text = self._replies.pop(0) if self._replies else ""
+        reply = self._replies.pop(0) if self._replies else {"action": "final_answer", "final_answer": ""}
+        text = json.dumps(reply, ensure_ascii=False) if not isinstance(reply, str) else reply
         if result_holder is not None:
             result_holder["stop_reason"] = None
             result_holder["finish_reason"] = "stop"
@@ -107,47 +67,50 @@ def _run(replies, engine_factory, **kwargs):
 
 def test_tool_result_reaches_final_answer(fake_engine):
     """المسار السليم: استدعاء ثم رد نهائي يعتمد على نتيجة الأداة."""
-    answer = _run([f"[TOOL_CALL]{_CALL}", "طلبك قيد التوصيل"], fake_engine)
-    assert answer == "طلبك قيد التوصيل"
+    data = _run(
+        [_ORDER_STATUS_CALL, {"action": "final_answer", "final_answer": "طلبك قيد التوصيل"}],
+        fake_engine,
+    )
+    assert data["final_answer"] == "طلبك قيد التوصيل"
 
 
-def test_call_without_closing_tag_still_executes(fake_engine):
-    """بلا وسم ختامي (فما ينطلق الـ stop string): الاستدعاء لازم يُنفَّذ لا
-    يُسلَّم نصاً خاماً — هذي كانت أكثر الانحرافات ضرراً."""
-    answer = _run([f"[TOOL_CALL]{_CALL} لحظة", "طلبك قيد التوصيل"], fake_engine)
-    assert answer == "طلبك قيد التوصيل"
-    assert "TOOL_CALL" not in answer
+def test_unknown_tool_reported_back_to_model(fake_engine):
+    """أداة غير مسجَّلة: يرجع خطأ بنتيجة الأداة بدل ما ينهار، والموديل يكمل."""
+    call = {"action": "tool_call", "tool_call": {"tool": "web_search", "args": {"query": "شي"}}}
+    data = _run(
+        [call, {"action": "final_answer", "final_answer": "ما اكدر اسويها"}],
+        fake_engine,
+    )
+    assert data["final_answer"] == "ما اكدر اسويها"
 
 
-def test_bare_json_call_still_executes(fake_engine):
-    """JSON عارٍ بلا وسوم — الموديل نسى الوسوم وتذكّر البنية."""
-    answer = _run([_CALL, "طلبك قيد التوصيل"], fake_engine)
-    assert answer == "طلبك قيد التوصيل"
-
-
-def test_malformed_call_is_not_leaked(fake_engine):
-    """استدعاء مشوَّه تعذّر تفكيكه: يُحجب ويُستبدل برد آمن."""
-    answer = _run(['[TOOL_CALL]{"tool": "get_order_status", "args": {'], fake_engine)
-    assert answer == _EXHAUSTED_FALLBACK
-    assert "TOOL_CALL" not in answer
+def test_malformed_json_is_not_leaked(fake_engine):
+    """رد ما يطابق JSON صالح إطلاقاً (نظرياً guided_json يمنعه، لكن الحلقة
+    تبقى متحفّظة): يُحجب ويُستبدل برد آمن، بلا تسريب نص خام."""
+    engine = fake_engine(["مو JSON صالح"])
+    data = asyncio.run(
+        run_with_tools([{"role": "user", "content": "وين طلبي"}],
+                       tools={"get_order_status": _ok_tool})
+    )
+    assert data["final_answer"] == _EXHAUSTED_FALLBACK
+    assert engine.calls == 1
 
 
 def test_exhausted_rounds_return_fallback(fake_engine):
     """الموديل عالق يستدعي الأداة بكل جولة: العميل ياخذ رداً آمناً، مو آخر
     استدعاء أداة نصف مكتوب."""
-    answer = _run([f"[TOOL_CALL]{_CALL}"] * 5, fake_engine, max_rounds=3)
-    assert answer == _EXHAUSTED_FALLBACK
-    assert "TOOL_CALL" not in answer
+    data = _run([_ORDER_STATUS_CALL] * 5, fake_engine, max_rounds=3)
+    assert data["final_answer"] == _EXHAUSTED_FALLBACK
 
 
 def test_plain_answer_passes_through(fake_engine):
     """رد عادي بلا أدوات يمر كما هو بجولة واحدة."""
-    engine = fake_engine(["هلا بيك، شلون اساعدك؟"])
-    answer = asyncio.run(
+    engine = fake_engine([{"action": "final_answer", "final_answer": "هلا بيك، شلون اساعدك؟"}])
+    data = asyncio.run(
         run_with_tools([{"role": "user", "content": "هلا"}],
                        tools={"get_order_status": _ok_tool})
     )
-    assert answer == "هلا بيك، شلون اساعدك؟"
+    assert data["final_answer"] == "هلا بيك، شلون اساعدك؟"
     assert engine.calls == 1
 
 
@@ -156,9 +119,25 @@ def test_failing_tool_does_not_break_conversation(fake_engine):
     async def _boom(args):
         raise RuntimeError("الخدمة الخارجية واقعة")
 
-    fake_engine([f"[TOOL_CALL]{_CALL}", "معذرة، صار خلل مؤقت"])
-    answer = asyncio.run(
+    fake_engine([_ORDER_STATUS_CALL, {"action": "final_answer", "final_answer": "معذرة، صار خلل مؤقت"}])
+    data = asyncio.run(
         run_with_tools([{"role": "user", "content": "وين طلبي"}],
                        tools={"get_order_status": _boom})
     )
-    assert answer == "معذرة، صار خلل مؤقت"
+    assert data["final_answer"] == "معذرة، صار خلل مؤقت"
+
+
+def test_extra_schema_field_passed_through(fake_engine):
+    """حقل إضافي بالمخطط (مثل order_ready بالمبيعات) يرجع بالـ dict كما هو
+    بلا ما تفرضه الحلقة العامة أو تسقطه."""
+    schema = build_schema(extra_properties={"order_ready": {"type": "boolean"}})
+    engine = fake_engine([
+        {"action": "final_answer", "final_answer": "زين، ثبّتلك الطلب", "order_ready": True}
+    ])
+    data = asyncio.run(
+        run_with_tools([{"role": "user", "content": "اي اكيد"}],
+                       tools={}, schema=schema)
+    )
+    assert data["final_answer"] == "زين، ثبّتلك الطلب"
+    assert data["order_ready"] is True
+    assert engine.calls == 1

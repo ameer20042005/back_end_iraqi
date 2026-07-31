@@ -13,13 +13,67 @@ None تعني: هذا النص ما يحتوي رقماً عراقياً صال�
 """
 
 import asyncio
+from collections import defaultdict
 
 import pytest
 
+from app.features.support import router as support_router
 from app.features.support.router import (
     _deterministic_status_answer,
     extract_phone,
 )
+
+_API_KEY = "test-key"
+
+_ORDERS = [
+    {"order_id": "ORD-1001", "phone": "07701234567", "status": "قيد التوصيل",
+     "items": [{"product_name": "لابتوب لينوفو IdeaPad 15", "quantity": 1}], "eta": "خلال يومين"},
+    {"order_id": "ORD-1002", "phone": "07709876543", "status": "تم التسليم",
+     "items": [{"product_name": "سماعة بلوتوث JBL", "quantity": 2}], "eta": None},
+    {"order_id": "ORD-1003", "phone": "07512223344", "status": "قيد التجهيز",
+     "items": [{"product_name": "حقيبة لابتوب مبطنة", "quantity": 1}], "eta": "خلال ثلاثة أيام"},
+    {"order_id": "ORD-1004", "phone": "07512223344", "status": "تم التسليم",
+     "items": [{"product_name": "ماوس لاسلكي لوجيتك", "quantity": 1}], "eta": None},
+    {"order_id": "ORD-1005", "phone": "07801119988", "status": "قيد التوصيل",
+     "items": [{"product_name": "شاحن سريع 65 واط", "quantity": 3}], "eta": "اليوم"},
+    {"order_id": "ORD-1006", "phone": "07905554433", "status": "ملغي",
+     "items": [{"product_name": "كيبورد ميكانيكي", "quantity": 1}], "eta": None},
+]
+
+
+class _FakeOrderStatusProvider:
+    """مزوّد وهمي بالذاكرة يحمل نفس بيانات app/data/orders.json التجريبية
+    القديمة — order_status_provider الحقيقي أصبح استعلام HTTP حي."""
+
+    def __init__(self, orders):
+        self.orders = orders
+        self._by_id = {o["order_id"].upper(): o for o in orders}
+        self._by_phone = defaultdict(list)
+        for o in orders:
+            self._by_phone[o["phone"]].append(o)
+
+    async def get_by_order_id(self, order_id, api_key):
+        return self._by_id.get(str(order_id).upper())
+
+    async def search_by_phone(self, phone, api_key):
+        return list(self._by_phone.get(str(phone), []))
+
+    async def search_by_status(self, status, api_key):
+        return [o for o in self.orders if o["status"] == status]
+
+    async def list_all(self, api_key):
+        return list(self.orders)
+
+
+@pytest.fixture(autouse=True)
+def fake_provider(monkeypatch):
+    fake = _FakeOrderStatusProvider(_ORDERS)
+    monkeypatch.setattr(support_router, "order_status_provider", fake)
+    return fake
+
+
+def _answer(message):
+    return asyncio.run(_deterministic_status_answer(message, _API_KEY))
 
 # --------------------------------------------------------------------------
 # ٢٥ حالة استخراج
@@ -95,23 +149,23 @@ def test_extract_phone(description, message, expected):
 )
 def test_deterministic_answer_uses_real_data(message, expected_fragment):
     """صيغة الرقم مهما اختلفت لازم توصل لنفس الطلب الحقيقي بالمزوّد."""
-    answer = asyncio.run(_deterministic_status_answer(message))
+    answer = _answer(message)
     assert answer is not None, "الرقم ما انلقط — الرد راح يروح للموديل"
     assert expected_fragment in answer
 
 
 def test_multiple_orders_on_one_phone():
     """رقم عليه طلبان: الرد لازم يذكر الاثنين، مو واحداً فقط."""
-    answer = asyncio.run(_deterministic_status_answer("رقمي 07512223344"))
+    answer = _answer("رقمي 07512223344")
     assert "ORD-1003" in answer and "ORD-1004" in answer
 
 
 def test_unknown_phone_is_denied_not_invented():
     """رقم غير مسجّل: نفي صريح — ممنوع اختراع حالة طلب."""
-    answer = asyncio.run(_deterministic_status_answer("رقمي 07700000000"))
+    answer = _answer("رقمي 07700000000")
     assert answer is not None and "ماكو طلبات" in answer
 
 
 def test_no_identifier_falls_through_to_model():
     """بدون رقم طلب ولا هاتف: المسار الحتمي يرجع None حتى يتولّى الموديل."""
-    assert asyncio.run(_deterministic_status_answer("شلونكم، وين وصل طلبي؟")) is None
+    assert _answer("شلونكم، وين وصل طلبي؟") is None

@@ -646,6 +646,22 @@
     <span id="statusText">لم يُفحص بعد</span>
   </div>
 
+  <div class="base-url-box" id="apiKeysBox">
+    <label>مفاتيح API (لكل خدمة مفتاحها الخاص — X-API-Key)</label>
+    <div class="base-url-row">
+      <input id="salesApiKey" type="text" placeholder="مفتاح المبيعات"
+             value="sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" spellcheck="false" />
+    </div>
+    <div class="base-url-row">
+      <input id="supportApiKey" type="text" placeholder="مفتاح الدعم"
+             value="sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f" spellcheck="false" />
+    </div>
+    <div class="base-url-row">
+      <input id="ordersApiKey" type="text" placeholder="مفتاح إنشاء الطلبات"
+             value="sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" spellcheck="false" />
+    </div>
+  </div>
+
   <nav class="groups" id="navGroups"></nav>
 
   <div class="theme-toggle">
@@ -694,6 +710,34 @@
   });
   function baseUrl() {
     return baseUrlInput.value.trim().replace(/\/+$/, "");
+  }
+
+  /* ---------------- API keys persistence (مفتاح مستقل لكل خدمة) ---------------- */
+  var apiKeyInputs = {
+    sales: document.getElementById("salesApiKey"),
+    support: document.getElementById("supportApiKey"),
+    orders: document.getElementById("ordersApiKey")
+  };
+  Object.keys(apiKeyInputs).forEach(function (svc) {
+    var input = apiKeyInputs[svc];
+    try {
+      var saved = localStorage.getItem("iraqi_api_key_" + svc);
+      if (saved) input.value = saved;
+    } catch (e) {}
+    input.addEventListener("change", function () {
+      try { localStorage.setItem("iraqi_api_key_" + svc, input.value.trim()); } catch (e) {}
+    });
+  });
+  // يقرأ مفتاح خدمة معيّنة وقت الإرسال (لا وقت التحميل) حتى يعكس آخر قيمة
+  // كتبها المستخدم فوراً بلا الحاجة لضغط Enter أو فقدان تركيز الحقل.
+  function apiKeyFor(service) {
+    return apiKeyInputs[service] ? apiKeyInputs[service].value.trim() : "";
+  }
+  // هيدر جاهز للإرسال المباشر بـ fetch — يرجع {} إذا الحقل فارغ (fetch تتجاهل
+  // هيدر بقيمة فارغة، فالسيرفر يرفضها بـ422 وضّاح بدل ما نرسل نصاً فارغاً).
+  function apiKeyHeader(service) {
+    var key = apiKeyFor(service);
+    return key ? { "X-API-Key": key } : {};
   }
 
   /* ---------------- Server status ping ---------------- */
@@ -787,7 +831,8 @@
       method: "POST",
       path: "/sales/chat",
       title: "POST /sales/chat",
-      desc: "رد كامل (بدون بث). يحاول يقنع العميل بالشراء، يقترح منتج إضافي، ويثبّت الطلب تلقائياً عند الموافقة الصريحة.",
+      desc: "رد كامل (بدون بث). يحاول يقنع العميل بالشراء، يقترح منتج إضافي، ويثبّت الطلب تلقائياً عند الموافقة الصريحة. يحتاج مفتاح API المبيعات (X-API-Key).",
+      apiKeyService: "sales",
       render: renderChatForm
     },
     {
@@ -796,7 +841,8 @@
       method: "POST",
       path: "/sales/chat/stream",
       title: "POST /sales/chat/stream",
-      desc: "نفس مدخل /sales/chat، لكن بث Server-Sent Events — يظهر أول جزء من الرد بسرعة قبل اكتماله.",
+      desc: "نفس مدخل /sales/chat، لكن بث Server-Sent Events — يظهر أول جزء من الرد بسرعة قبل اكتماله. يحتاج مفتاح API المبيعات.",
+      apiKeyService: "sales",
       render: renderChatStreamForm
     },
     {
@@ -805,7 +851,8 @@
       method: "POST",
       path: "/support/chat",
       title: "POST /support/chat",
-      desc: "تتبع حالة طلب برقم الطلب (مثل ORD-1001) أو رقم الهاتف، أو أي سؤال عام (بحث ويب تلقائي).",
+      desc: "تتبع حالة طلب برقم الطلب (مثل ORD-1001) أو رقم الهاتف، أو أي سؤال عام. يحتاج مفتاح API الدعم (X-API-Key).",
+      apiKeyService: "support",
       render: renderSupportForm
     },
     {
@@ -814,7 +861,8 @@
       method: "POST",
       path: "/orders/create",
       title: "POST /orders/create",
-      desc: "إنشاء طلب مباشر من مدخل واحد فقط: نص، أو ملف صوتي، أو صورة.",
+      desc: "إنشاء طلب مباشر من مدخل واحد فقط: نص، أو ملف صوتي، أو صورة. يحتاج مفتاح API إنشاء الطلبات.",
+      apiKeyService: "orders",
       render: renderOrdersCreateForm
     },
     {
@@ -823,7 +871,8 @@
       method: "POST",
       path: "/sales/chat",
       title: "اختبار الحمل — طلبات متزامنة",
-      desc: "يرسل عدة طلبات /sales/chat بنفس اللحظة ويقيس زمن كل طلب — لفحص سلوك السيرفر تحت التزامن (المحرك الحالي يعالج الطلبات بالتتابع عبر قفل، فالأزمنة تتراكم تدريجياً).",
+      desc: "يرسل عدة طلبات /sales/chat بنفس اللحظة ويقيس زمن كل طلب — لفحص سلوك السيرفر تحت التزامن (المحرك الحالي يعالج الطلبات بالتتابع عبر قفل، فالأزمنة تتراكم تدريجياً). يحتاج مفتاح API المبيعات.",
+      apiKeyService: "sales",
       render: renderLoadTest
     }
   ];
@@ -1025,7 +1074,7 @@
           tasks.push(
             fetch(baseUrl() + "/sales/chat", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader("sales")),
               // بدون session_id — كل طلب جلسة مستقلة حتى ما تتداخل الذاكرة
               body: JSON.stringify({ message: msgInput.value + " (#" + (idx + 1) + ")" })
             })
@@ -1165,7 +1214,7 @@
       try {
         var res = await fetch(baseUrl() + ep.path, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
           body: JSON.stringify(payload)
         });
         var ms = Math.round(performance.now() - t0);
@@ -1278,7 +1327,7 @@
       try {
         var res = await fetch(baseUrl() + ep.path, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
           body: JSON.stringify(payload)
         });
         var reader = res.body.getReader();
@@ -1384,7 +1433,7 @@
       try {
         var res = await fetch(baseUrl() + ep.path, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
           body: JSON.stringify(payload)
         });
         var ms = Math.round(performance.now() - t0);
@@ -1505,7 +1554,7 @@
       body.innerHTML = '<div class="empty-state">جاري المعالجة (قد تأخذ وقتاً أطول للصوت/الصورة)...</div>';
       var t0 = performance.now();
       try {
-        var res = await fetch(baseUrl() + ep.path, { method: "POST", body: form });
+        var res = await fetch(baseUrl() + ep.path, { method: "POST", headers: apiKeyHeader(ep.apiKeyService), body: form });
         var ms = Math.round(performance.now() - t0);
         var json = await res.json().catch(function () { return null; });
         meta.innerHTML =

@@ -13,9 +13,10 @@ import logging
 import re
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from starlette.concurrency import run_in_threadpool
 
+from app.auth import require_orders_api_key
 from app.config import settings
 from app.engine import llm_engine
 from app.features.order_intake.prompts import build_order_intake_prompt
@@ -44,6 +45,7 @@ async def create_order(
     text: Optional[str] = Form(None),
     audio: Optional[UploadFile] = File(None),
     image: Optional[UploadFile] = File(None),
+    api_key: str = Depends(require_orders_api_key),
 ):
     provided = [v for v in (text, audio, image) if v is not None]
     if len(provided) != 1:
@@ -117,7 +119,7 @@ async def create_order(
     else:
         extraction = OrderExtraction(items=[{"product_name": raw_text, "quantity": 1}])
 
-    return await resolve_order(extraction)
+    return await resolve_order(extraction, api_key)
 
 
 # تصحيح الموقع وكود المحافظة انتقلا لـ app/order_extraction.py حتى يشاركهما

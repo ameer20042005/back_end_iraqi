@@ -36,7 +36,7 @@ command -v ffmpeg >/dev/null 2>&1 || {
 MODEL_NAME="${MODEL_NAME:-ameer4wisam/gemma-iraqi-finetune-v2}"
 VLLM_PORT="${VLLM_PORT:-18001}"
 API_PORT="${API_PORT:-8000}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-10000}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 VLLM_LOG="/tmp/vllm_boot.log"
 

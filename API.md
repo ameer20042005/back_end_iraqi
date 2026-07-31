@@ -7,13 +7,137 @@
 
 كل الأمثلة أدناه تفترض `http://localhost:8000` — بدّلها برابط الـ Pod الفعلي بعد الرفع.
 
-## المصادقة
+## المصادقة — مفتاح API خاص لكل خدمة
 
-ماكو مصادقة حالياً — كل النقاط مفتوحة.
+كل خدمة (المبيعات، الدعم، إنشاء الطلبات) محمية بمفتاحها الخاص المستقل تماماً عن غيرها. المفتاح يُرسَل بهيدر HTTP:
+
+```
+X-API-Key: <المفتاح>
+```
+
+| الخدمة | النقاط المحمية | المتغير (app/config.py) | القيمة الثابتة الحالية |
+|---|---|---|---|
+| المبيعات | `POST /sales/chat`, `POST /sales/chat/stream` | `sales_api_key` | `sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2` |
+| الدعم | `POST /support/chat` | `support_api_key` | `sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f` |
+| إنشاء الطلبات | `POST /orders/create` | `orders_api_key` | `sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c` |
+
+- **النقاط المفتوحة بلا مفتاح**: `GET /health`, `GET /gpu`, `GET /`, `GET /docs`.
+- **مفتاح خدمة لا يشتغل بخدمة ثانية** — مفتاح المبيعات مرفوض على `/support/chat` وبالعكس، كل خدمة تتحقق من مفتاحها هي حصراً (انظر `app/auth.py`).
+- **القيم مكتوبة ثابتة بالكود** (`app/config.py`) لتشتغل فوراً بلا أي إعداد `.env` — لو تحتاج قيماً مختلفة (مثلاً بيئة إنتاج منفصلة)، عرّف نفس الأسماء بمتغيرات بيئة (`SALES_API_KEY`, `SUPPORT_API_KEY`, `ORDERS_API_KEY`) وهي تتجاوز الثابتة بالكود تلقائياً (`.env` أو Environment Variables بإعدادات RunPod).
+
+**أمثلة استدعاء:**
+
+```bash
+# مبيعات
+curl -X POST http://localhost:8000/sales/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
+  -d '{"message": "شنو عندكم لابتوبات؟"}'
+
+# دعم
+curl -X POST http://localhost:8000/support/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f" \
+  -d '{"message": "وين طلبي ORD-1001؟"}'
+
+# إنشاء طلب (multipart)
+curl -X POST http://localhost:8000/orders/create \
+  -H "X-API-Key: sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" \
+  -F "text=أريد لابتوب لينوفو"
+```
+
+**أخطاء المصادقة:**
+
+| الحالة | الاستجابة |
+|---|---|
+| الهيدر `X-API-Key` غير مرسَل إطلاقاً | `422 Unprocessable Entity` (FastAPI يرفض الطلب لغياب حقل إلزامي) |
+| المفتاح مرسَل لكنه غير صحيح لهذي الخدمة | `401 Unauthorized` — `{"detail": "مفتاح API غير صحيح لخدمة <الاسم>"}` |
+| مفتاح الخدمة غير مضبوط بالخادم إطلاقاً (فارغ) | `500 Internal Server Error` |
 
 ## واجهة تفاعلية جاهزة
 
-`GET /docs` — Swagger UI يبني نفسه تلقائياً من الكود، تكدر تجرب كل نقطة منه مباشرة بالمتصفح. هذا الملف توثيق مرجعي إضافي (سياق الاستخدام، أمثلة، شكل الـ SSE).
+`GET /docs` — Swagger UI يبني نفسه تلقائياً من الكود؛ لتجربة نقطة محمية منه اضغط زر **Authorize** وأدخل قيمة الهيدر `X-API-Key` المطابقة للخدمة. هذا الملف توثيق مرجعي إضافي (سياق الاستخدام، أمثلة، شكل الـ SSE).
+
+**لوحة الاختبار الجاهزة** (`GET /test`، أو افتح `static/index.html` مباشرة): فيها ثلاث خانات إدخال بالشريط الجانبي (مفتاح المبيعات/الدعم/إنشاء الطلبات) معبّأة مسبقاً بنفس القيم الثابتة أعلاه — كل نقطة بالقائمة ترسل تلقائياً هيدر `X-API-Key` بالمفتاح المطابق لخدمتها. القيم تُحفظ بمتصفحك (`localStorage`) فتقدر تغيّرها لو بدّلت المفاتيح بـ.env.
+
+---
+
+## آلية عمل الموديل داخلياً — مخطط JSON صارم لكل رد (tool_call / final_answer)
+
+**هذا داخلي بحت وما يظهر بجسم استجابة `/sales/chat` أو `/support/chat`** — العميل المستهلك للـ API يشوف فقط `answer` النهائي كنص عادي. القسم هذا يشرح كيف يقرر النموذج نفسه، بجهة الخادم، متى يحتاج بيانات (منتج، حالة طلب) قبل ما يصيغ الجواب — لفهم دقيق لسلوك النظام ولو احتجت تبني/تصحّح أدوات جديدة (`app/tool_loop.py`).
+
+بدل الاعتماد على tool-calling الأصلي لأي محرك، كل استدعاء توليد بميزتَي `sales`/`support` مقيَّد بـ **guided decoding** (`response_format.json_schema` بجهة vLLM — انظر `app/engine.py`) بهذا المخطط الصارم:
+
+```json
+{
+  "response_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "action": {"enum": ["tool_call", "final_answer"]},
+        "tool_call": {
+          "type": "object",
+          "properties": {
+            "tool": {"type": "string"},
+            "args": {"type": "object"}
+          },
+          "required": ["tool"]
+        },
+        "final_answer": {"type": "string"}
+      },
+      "required": ["action"]
+    }
+  }
+}
+```
+
+vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decoding) — الموديل **لا يقدر** يخرج JSON خارج هذا الشكل، بعكس البروتوكول النصي القديم (`[TOOL_CALL]{...}[/TOOL_CALL]`) اللي كان عرضة لانحراف الموديل عن الصيغة.
+
+### كيف تُستهلك النتيجة (`app/tool_loop.py::run_with_tools`)
+
+1. الموديل يولّد رداً واحداً مطابقاً للمخطط أعلاه.
+2. **إذا `action == "tool_call"`**: الباك اند يقرأ `tool_call.tool` (اسم الأداة) و`tool_call.args` (معاملاتها)، ينفّذ الأداة المطابقة فعلياً (استعلام حقيقي — مثل `search_products` أو `get_order_status`)، ويضيف نتيجتها كرسالة جديدة بالمحادثة، ثم يعيد التوليد بجولة ثانية (حتى `max_rounds`، افتراضياً 3).
+3. **إذا `action == "final_answer"`**: `final_answer` هو النص الذي يصل للعميل فعلياً بحقل `answer` بجسم الاستجابة — تنتهي الحلقة.
+
+**مثال `tool_call` فعلي** (النموذج يطلب بحث منتج بالمبيعات):
+```json
+{
+  "action": "tool_call",
+  "tool_call": {"tool": "search_products", "args": {"query": "لابتوب", "top_k": 5}}
+}
+```
+
+**مثال `final_answer` فعلي** (بعد ما استلم نتيجة الأداة):
+```json
+{
+  "action": "final_answer",
+  "final_answer": "عدنا لابتوب لينوفو IdeaPad 15 بسعر 750,000 دينار، شنو رأيك؟"
+}
+```
+
+### الأدوات المسجَّلة فعلياً بكل ميزة
+
+| الميزة | الأداة (`tool`) | التنفيذ الفعلي |
+|---|---|---|
+| المبيعات | `search_products` | `app/tools/products.py::search_products_tool` — استعلام حي على باك اند السستم (`args.query`, `args.top_k`) |
+| الدعم | `get_order_status` | `app/features/support/router.py::_get_order_status_tool` — استعلام حي (`args.order_id` أو `args.phone` أو `args.status` أو `args.all`) |
+
+النموذج **ما يفترض وجود أدوات أخرى غير المسجَّلة**؛ لو رجّع `tool_call.tool` باسم غير معروف، الباك اند يرجّع `{"error": "أداة غير معروفة: ..."}` كنتيجة، والموديل يكمل الحلقة (بدل ما ينهار).
+
+### حقل إضافي بالمبيعات: `order_ready`
+
+مخطط `/sales/chat` يوسّع المخطط الأساسي بحقل إضافي واحد (عبر `app.tool_loop.build_schema`):
+
+```json
+{
+  "action": "final_answer",
+  "final_answer": "زين، ثبّتلك الطلب — تأكدلي الاسم والهاتف والعنوان صح؟",
+  "order_ready": false
+}
+```
+
+`order_ready: true` يعني الموديل قرر إن العميل أكّد الشراء صراحةً بعد ملخّص الطلب — هذا **يحل محل** علامة `[ORDER_READY]` النصية القديمة. القرار النهائي بتثبيت الطلب فعلياً لا يعتمد على هذا الحقل وحده: بوابة حتمية منفصلة (`_missing_order_fields`، انظر `app/features/sales/router.py`) تتحقق أن الاسم/الهاتف/العنوان مذكورة فعلاً بكلام العميل قبل قبول `order_ready=true` — لو نقص أي حقل، الطلب لا يُثبَّت مهما رجّع الموديل.
 
 ---
 
@@ -85,7 +209,6 @@
   "session_id": "6ca92bdb-98fd-4843-a1e1-824b736c8587",
   "answer": "عندنا لابتوب لينوفو IdeaPad 15 بسعر 750000 دينار...",
   "order": null,
-  "sources": {"words": [...], "products": [...]},
   "engine": "vllm"
 }
 ```
@@ -119,7 +242,6 @@
     "notes": null,
     "confirmation_message": "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
   },
-  "sources": {"words": [...], "products": [...]},
   "engine": "vllm"
 }
 ```
@@ -129,27 +251,22 @@
 | `session_id` | string | نفسه لو أرسلته، أو معرّف جديد تولّد تلقائياً |
 | `answer` | string | رد الوكيل للعميل (نص المحادثة العادي، بدون أي علامات داخلية) |
 | `order` | object \| null | `null` إلا لو العميل أكّد الشراء بنفس هذا الرد — عندها كائن `OrderConfirmation` كامل (تفصيله بالأسفل) |
-| `sources` | object | `{"words": [...], "products": [...]}` — نتائج RAG المستخدَمة ببناء الرد (للتصحيح/الشفافية، اختياري عرضها بالواجهة) |
 | `engine` | string | `"vllm"` (توليد حقيقي) أو `"fallback"` (محلياً بدون GPU) |
 
-**ملاحظة مهمة**: `order` يظهر فقط بالرد اللي فيه العميل أكّد الشراء صراحة. أي رد بعده (لو رجع يسأل شي ثاني بنفس الجلسة) يرجّع `order: null` من جديد.
+**ملاحظة مهمة**: `order` يظهر فقط بالرد اللي فيه العميل أكّد الشراء صراحة. أي رد بعده (لو رجع يسأل شي ثاني بنفس الجلسة) يرجّع `order: null` من جديد. القرار بالاكتمال يجيك من حقل `order_ready` داخلي بمخطط guided_json (انظر [README.md](README.md#آلية-الوكيل-يقرر-واستدعاء-الأدوات))، مو من علامة نصية بالرد.
 
 ### `POST /sales/chat/stream`
-نفس المدخل بالضبط، لكن بث Server-Sent Events (`Content-Type: text/event-stream`) بدل انتظار الرد كامل — يظهر أول جزء من كلام الوكيل بسرعة.
+نفس المدخل بالضبط، لكن بصيغة SSE (`Content-Type: text/event-stream`). **الرد يوصل كقطعة واحدة لا تدريجياً**: كل رد من الموديل مقيَّد بمخطط JSON صارم (`guided_json`) فلازم يكتمل بالكامل قبل ما يصير صالحاً للتحليل، فالبث هنا شكلي (توافقاً مع عملاء SSE موجودين) لا تدفقاً حقيقياً توكن-بتوكن.
 
 **تدفق الأحداث:**
 ```
-data: {"delta": "عند"}
+data: {"delta": "عندنا لابتوب لينوفو IdeaPad 15 بسعر 750000 دينار..."}
 
-data: {"delta": "نا لابتوب"}
-
-data: {"delta": " لينوفو..."}
-
-data: {"done": true, "session_id": "...", "sources": {"words": [...], "products": [...]}, "order": null}
+data: {"done": true, "session_id": "...", "order": null}
 
 ```
 
-- كل حدث `delta` يحمل جزء نصي إضافي — اجمعهم بالترتيب للحصول على الرد الكامل.
+- حدث `delta` وحيد يحمل الرد كاملاً.
 - الحدث الأخير دايماً `{"done": true, ...}` ويحمل `order` (نفس شكل `/sales/chat` — `null` أو كائن `OrderConfirmation` كامل).
 
 **مثال عميل (JavaScript، `fetch` + `ReadableStream`، أو `EventSource` لو عدّلت الطلب لـ GET — حالياً POST فتحتاج `fetch`):**
