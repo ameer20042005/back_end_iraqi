@@ -38,6 +38,7 @@ VLLM_PORT="${VLLM_PORT:-18001}"
 API_PORT="${API_PORT:-8000}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-10000}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-128}"
 VLLM_LOG="/tmp/vllm_boot.log"
 
 # تنظيف عمليات لنا عالقة من تشغيلة سابقة (start.sh انقطع بمنتصف الطريق أو
@@ -89,6 +90,7 @@ _start_vllm() {
         --port "${VLLM_PORT}" \
         --max-model-len "${MAX_MODEL_LEN}" \
         --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
+        --max-num-seqs "${MAX_NUM_SEQS}" \
         --async-scheduling \
         --enable-prefix-caching \
         --limit-mm-per-prompt '{"image": 1, "audio": 0}' \
