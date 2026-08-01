@@ -96,7 +96,21 @@ class SupportChatResponse(BaseModel):
     engine: str
 
 
-async def _get_order_status_tool(args: dict, api_key: str) -> dict:
+async def _list_all_cached(session_id: str, api_key: str) -> List[dict]:
+    """list_all() مع كاش بحدود الجلسة — انظر sessions.cached_orders().
+
+    دفتر الطلبات ما يتغيّر بين رسالتين متتاليتين من نفس الموظف، وextract_status
+    (عبر _known_statuses) يستدعي list_all مرتين أو أكثر بكل رسالة واحدة. أول
+    استدعاء بالجلسة يجيب من باك اند السستم ويخزّن؛ الباقي يقرأ من الذاكرة."""
+    cached = sessions.cached_orders(session_id)
+    if cached is not None:
+        return cached
+    orders = await order_status_provider.list_all(api_key)
+    sessions.cache_orders(session_id, orders)
+    return orders
+
+
+async def _get_order_status_tool(args: dict, api_key: str, session_id: str = "") -> dict:
     """أداة الموديل. تدعم أربعة استعلامات — البوت داخلي فكل البيانات متاحة.
 
     الاستعلام بالحالة والجرد كانا ناقصين، وهذا هو السبب الجذري لهلوسة الموديل:
@@ -119,7 +133,7 @@ async def _get_order_status_tool(args: dict, api_key: str) -> dict:
         orders = await order_status_provider.search_by_status(str(status), api_key)
         return {"orders": orders} if orders else {"error": f"ماكو طلبات بحالة {status}"}
     if args.get("all"):
-        return {"orders": await order_status_provider.list_all(api_key)}
+        return {"orders": await _list_all_cached(session_id, api_key)}
     return {"error": "لازم تزودني برقم الطلب أو رقم الهاتف أو الحالة"}
 
 
@@ -162,10 +176,11 @@ def extract_phone(message: str) -> Optional[str]:
     return digits if len(digits) == 11 and digits.startswith("07") else None
 
 
-async def _known_statuses(api_key: str) -> List[str]:
-    """الحالات الموجودة فعلاً بالبيانات — مشتقة من استعلام حي، مو مكتوبة
-    بالكود ولا محفوظة محلياً."""
-    orders = await order_status_provider.list_all(api_key)
+async def _known_statuses(api_key: str, session_id: str = "") -> List[str]:
+    """الحالات الموجودة فعلاً بالبيانات — مشتقة من استعلام حي (أو كاش
+    الجلسة، انظر _list_all_cached)، مو مكتوبة بالكود ولا محفوظة محلياً
+    عبر الجلسات."""
+    orders = await _list_all_cached(session_id, api_key)
     seen = []
     for order in orders:
         status = str(order.get("status", "")).strip()
@@ -174,7 +189,7 @@ async def _known_statuses(api_key: str) -> List[str]:
     return seen
 
 
-async def extract_status(message: str, api_key: str) -> Optional[str]:
+async def extract_status(message: str, api_key: str, session_id: str = "") -> Optional[str]:
     """يستخرج حالة الطلب المقصودة من سؤال الموظف، أو None.
 
     مصدر الحالات هو استعلام حي (`_known_statuses`) — أي حالة موجودة فعلياً
@@ -186,7 +201,7 @@ async def extract_status(message: str, api_key: str) -> Optional[str]:
     نطابق الأطول أولاً: «قيد التوصيل» تحتوي «التوصيل»، ولو طابقنا الأقصر
     أولاً كان صح بالصدفة هنا وغلط بحالات ثانية."""
     normalized = normalize(message)
-    statuses = await _known_statuses(api_key)
+    statuses = await _known_statuses(api_key, session_id)
     best: Optional[tuple] = None
 
     # (١) الحالة مذكورة كما هي بالبيانات، أو جزء دالّ منها.
@@ -250,9 +265,10 @@ _LATEST_WORDS = ("اخر طلب", "آخر طلب", "احدث طلب", "أحدث 
 
 
 async def _bulk_query_answer(
-    message: str, api_key: str, history: Optional[List[dict]] = None
+    message: str, api_key: str, history: Optional[List[dict]] = None, session_id: str = ""
 ) -> Optional[str]:
-    """يجاوب أسئلة الموظف التشغيلية عن دفتر الطلبات — باستعلام حي مباشر.
+    """يجاوب أسئلة الموظف التشغيلية عن دفتر الطلبات — باستعلام حي مباشر (أو
+    كاش الجلسة لجلب القائمة الكاملة، انظر _list_all_cached).
 
     البوت داخلي للشركة، فهذي استعلامات شغل مشروعة مو تسريب بيانات. تُحسم هنا
     لا بالموديل لأن الموديل يخترع معرّفات وحالات (انظر _STATUS_SYNONYMS).
@@ -262,13 +278,13 @@ async def _bulk_query_answer(
     سياق ما تعني شي، ومعه تعني حالة التسليم."""
     normalized = normalize(message)
 
-    status = await extract_status(message, api_key)
+    status = await extract_status(message, api_key, session_id)
 
     # ما بالرسالة حالة صريحة؟ إذا كانت متابعة، ندوّر الحالة برسائل الموظف
     # السابقة — الأحدث أولاً.
     if not status and history and any(w in normalized for w in _FOLLOWUP_WORDS):
         for past in reversed([m for m in history if m.get("role") == "user"]):
-            status = await extract_status(past.get("content", ""), api_key)
+            status = await extract_status(past.get("content", ""), api_key, session_id)
             if status:
                 break
 
@@ -279,7 +295,7 @@ async def _bulk_query_answer(
         orders = (
             await order_status_provider.search_by_status(status, api_key)
             if status
-            else await order_status_provider.list_all(api_key)
+            else await _list_all_cached(session_id, api_key)
         )
         if not orders:
             return f"ماكو طلبات {status} حالياً." if status else "ماكو طلبات مسجلة."
@@ -297,7 +313,7 @@ async def _bulk_query_answer(
         return _format_order_list(orders, heading)
 
     if any(w in normalized for w in _LIST_ALL_WORDS):
-        orders = await order_status_provider.list_all(api_key)
+        orders = await _list_all_cached(session_id, api_key)
         if wants_count:
             return f"عدد الطلبات الكلي: {len(orders)}.\n" + _format_order_list(
                 orders, "التفاصيل"
@@ -307,14 +323,14 @@ async def _bulk_query_answer(
     # طلب أرقام هواتف بلا حالة محددة: نعطي كل الطلبات بأرقامها — القائمة
     # أصلاً تحمل الهاتف بكل سطر.
     if any(w in normalized for w in _CONTACT_REQUEST_WORDS):
-        orders = await order_status_provider.list_all(api_key)
+        orders = await _list_all_cached(session_id, api_key)
         return _format_order_list(orders, "أرقام هواتف الطلبات")
 
     return None
 
 
 async def _deterministic_status_answer(
-    message: str, api_key: str, history: Optional[List[dict]] = None
+    message: str, api_key: str, history: Optional[List[dict]] = None, session_id: str = ""
 ) -> Optional[str]:
     """توجيه حتمي لطلبات التتبع: إذا الرسالة فيها رقم طلب أو هاتف، نستعلم
     من المصدر مباشرة (استدعاء حي، بلا تخزين محلي) ونبني الرد من البيانات
@@ -340,14 +356,14 @@ async def _deterministic_status_answer(
     # ما بيها معرّف محدد: يمكن استعلام تشغيلي عن دفتر الطلبات (حالة/جرد).
     # يجي **بعد** المعرّفات عمداً: «حالة ORD-1001» لازم ترجع ذاك الطلب بالذات،
     # مو قائمة كل الطلبات اللي بنفس حالته.
-    return await _bulk_query_answer(message, api_key, history)
+    return await _bulk_query_answer(message, api_key, history, session_id)
 
 
 async def _fallback_support_answer(
-    message: str, api_key: str, history: Optional[List[dict]] = None
+    message: str, api_key: str, history: Optional[List[dict]] = None, session_id: str = ""
 ) -> str:
     """يُستخدم فقط إذا لم يكن الموديل متوفراً (محلياً بدون GPU)."""
-    deterministic = await _deterministic_status_answer(message, api_key, history)
+    deterministic = await _deterministic_status_answer(message, api_key, history, session_id)
     if deterministic:
         return "[وضع محلي بدون GPU] " + deterministic
     return "[وضع محلي بدون GPU] عطيني رقم الطلب أو رقم الهاتف حتى اكدر اكَولك وين وصل."
@@ -368,19 +384,19 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
     # اللي يلتقط استثناءات الأدوات بنفسه) — فباك اند السستم غير المتاح هنا
     # لازم يُلتقط صراحةً بدل ما يطلع 500 عارية للعميل.
     try:
-        deterministic = await _deterministic_status_answer(req.message, api_key, history)
+        deterministic = await _deterministic_status_answer(req.message, api_key, history, key)
     except SystemBackendUnavailable:
         deterministic = "معذرة، تعذّر الوصول لبيانات الطلبات حالياً — جرّب بعد شوي."
     if deterministic is not None:
         answer = deterministic
         engine_name = "deterministic"
     elif llm_engine.ready:
-        tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key)}
+        tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key, session_id=key)}
         data = await run_with_tools(messages, tools=tools)
         answer = data["final_answer"]
         engine_name = "vllm"
     else:
-        answer = await _fallback_support_answer(req.message, api_key, history)
+        answer = await _fallback_support_answer(req.message, api_key, history, key)
         engine_name = "fallback"
 
     sessions.append(key, "user", req.message)

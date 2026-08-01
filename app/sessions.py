@@ -6,7 +6,7 @@ start.sh) لأنها غير مشتركة بين عدة عمليات.
 """
 
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 _MAX_TURNS = 12  # آخر N رسالة (مستخدم + مساعد) تُرسل كسياق
 _MAX_PRODUCTS = 12  # آخر N منتج ظهر بالجلسة يبقى مرجعاً موثوقاً للدروع
@@ -16,6 +16,10 @@ _sessions: Dict[str, List[Dict[str, str]]] = defaultdict(list)
 _session_products: Dict[str, List[dict]] = defaultdict(list)
 # آخر موقع ذكره العميل بهذه الجلسة — انظر remember_location().
 _session_location: Dict[str, dict] = {}
+# كاش قائمة الطلبات الكاملة (list_all) بحدود الجلسة — انظر
+# cached_orders()/cache_orders(). يُمسح فقط عند invalidate_orders() (بعد
+# تثبيت طلب جديد) أو نهاية الجلسة نفسها؛ لا TTL زمني.
+_session_orders_cache: Dict[str, List[dict]] = {}
 
 
 def get(session_id: str) -> List[Dict[str, str]]:
@@ -75,3 +79,26 @@ def remember_location(session_id: str, city: str = "", district: str = "") -> No
 def known_location(session_id: str) -> dict:
     """آخر موقع معروف بهذه الجلسة: {"city", "district"} (قيم فارغة إن ماكو)."""
     return _session_location.get(session_id, {"city": "", "district": ""})
+
+
+def cached_orders(session_id: str) -> Optional[List[dict]]:
+    """قائمة الطلبات الكاملة (list_all) المخزَّنة بهذه الجلسة، أو None إذا
+    ما محفوظة بعد — يميّز "محفوظة وفاضية" عن "غير محفوظة أصلاً".
+
+    السبب: _known_statuses تُستدعى من extract_status، والذي يُستدعى مرتين+
+    بكل رسالة دعم واحدة (مرة للرسالة الحالية، ومرات لرسائل history عند
+    المتابعة) — كل استدعاء كان يجيب *كل* الطلبات من باك اند السستم من
+    الصفر. بحدود نفس الجلسة، دفتر الطلبات ما يتغيّر بين رسالتين متتاليتين
+    من نفس الموظف، فلا داعي لإعادة الجلب إلا بعد تثبيت طلب جديد."""
+    return _session_orders_cache.get(session_id)
+
+
+def cache_orders(session_id: str, orders: List[dict]) -> None:
+    """يخزّن قائمة الطلبات الكاملة بهذه الجلسة (انظر cached_orders)."""
+    _session_orders_cache[session_id] = orders
+
+
+def invalidate_orders(session_id: str) -> None:
+    """يمسح كاش الطلبات بهذه الجلسة — يُستدعى بعد تثبيت طلب جديد حتى لا
+    يبقى الجرد المخزَّن ناقصاً عن الواقع."""
+    _session_orders_cache.pop(session_id, None)
