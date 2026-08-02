@@ -303,7 +303,7 @@ async def _run_sales_turn(
     if not llm_engine.ready:
         return _fallback_sales_answer(req.message), False, "fallback"
 
-    tools = {"search_products": partial(search_products_tool, api_key=api_key)}
+    tools = {"search_products": partial(search_products_tool, api_key=api_key, session_id=key)}
     data = await run_with_tools(
         messages,
         tools=tools,

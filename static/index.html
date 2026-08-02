@@ -660,6 +660,10 @@
       <input id="ordersApiKey" type="text" placeholder="مفتاح إنشاء الطلبات"
              value="sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" spellcheck="false" />
     </div>
+    <div class="base-url-row">
+      <input id="voiceFollowupApiKey" type="text" placeholder="مفتاح المتابعة الصوتية"
+             value="sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" spellcheck="false" />
+    </div>
   </div>
 
   <nav class="groups" id="navGroups"></nav>
@@ -716,7 +720,8 @@
   var apiKeyInputs = {
     sales: document.getElementById("salesApiKey"),
     support: document.getElementById("supportApiKey"),
-    orders: document.getElementById("ordersApiKey")
+    orders: document.getElementById("ordersApiKey"),
+    voiceFollowup: document.getElementById("voiceFollowupApiKey")
   };
   Object.keys(apiKeyInputs).forEach(function (svc) {
     var input = apiKeyInputs[svc];
@@ -866,6 +871,16 @@
       render: renderOrdersCreateForm
     },
     {
+      group: "المتابعة الصوتية",
+      id: "voiceFollowup",
+      method: "POST",
+      path: "/voice_followup/ask → /voice_followup/respond",
+      title: "متابعة صوتية لسبب حالة طلب",
+      desc: "مسار كامل من خطوتين: POST /ask يستقبل تفاصيل طلب ويرجع سؤالاً صوتياً (audio/wav) عن سبب حالته؛ POST /respond يستقبل session_id + صوت رد الزبون ويرجع صوت شكر (audio/wav) بعد تحليل السبب وإرساله لباك اند السستم. يحتاج مفتاح API المتابعة الصوتية.",
+      apiKeyService: "voiceFollowup",
+      render: renderVoiceFollowupForm
+    },
+    {
       group: "اختبار الحمل",
       id: "loadTest",
       method: "POST",
@@ -877,7 +892,7 @@
     }
   ];
 
-  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب", "اختبار الحمل"];
+  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب", "المتابعة الصوتية", "اختبار الحمل"];
   var navGroups = document.getElementById("navGroups");
   var mainView = document.getElementById("mainView");
 
@@ -1574,6 +1589,272 @@
         body.innerHTML = '<div class="empty-state">تعذّر الوصول للسيرفر: ' + escapeHtml(e.message) + "</div>";
       }
       btn.setBusy(false);
+    };
+  }
+
+  /* ---------------- Voice followup (ask + respond, صوت فعلي) ---------------- */
+  function renderVoiceFollowupForm(container, ep) {
+    var sessionId = null;
+    var defaultOrder = {
+      order_id: "ORD-1042",
+      status: "ملغي",
+      customer_name: "أحمد كاظم",
+      customer_phone: "07701234567",
+      customer_city: "بغداد",
+      customer_district: "الكرادة",
+      customer_address: "بغداد - الكرادة - قرب مطعم النخيل",
+      items: [
+        { product_name: "لابتوب لينوفو IdeaPad 15", quantity: 1 },
+        { product_name: "ماوس لوجيتك لاسلكي", quantity: 1 }
+      ],
+      reason_hint: "رفض الزبون استلام الطلب من المندوب",
+      notes: ""
+    };
+
+    /* ---- الخطوة 1: POST /ask ---- */
+    var askPanel = makePanel("الخطوة ١ — بيانات الطلب (JSON قابل للتعديل)");
+    var orderField = document.createElement("div");
+    orderField.className = "field";
+    var orderTextarea = document.createElement("textarea");
+    orderTextarea.style.minHeight = "220px";
+    orderTextarea.style.direction = "ltr";
+    orderTextarea.style.textAlign = "left";
+    orderTextarea.value = JSON.stringify(defaultOrder, null, 2);
+    orderField.appendChild(orderTextarea);
+    askPanel.appendChild(orderField);
+
+    var askBtn = makeButton("أرسل /ask واستمع للسؤال");
+    var askSessionPill = document.createElement("span");
+    askSessionPill.className = "session-pill";
+    askSessionPill.innerHTML = 'الجلسة: <span class="val"></span>';
+    askPanel.appendChild(makeActionsRow(askBtn, askSessionPill));
+    container.appendChild(askPanel);
+
+    var askResultPanel = makePanel("رد /ask — السؤال الصوتي");
+    var askMeta = document.createElement("div");
+    askMeta.className = "response-meta";
+    var askBody = document.createElement("div");
+    askBody.innerHTML = '<div class="empty-state">عدّل بيانات الطلب (أو اتركها كما هي) واضغط "أرسل /ask" — يتشغّل السؤال الصوتي تلقائياً.</div>';
+    askResultPanel.appendChild(askMeta);
+    askResultPanel.appendChild(askBody);
+    container.appendChild(askResultPanel);
+
+    askBtn.onclick = async function () {
+      var orderPayload;
+      try {
+        orderPayload = JSON.parse(orderTextarea.value);
+      } catch (e) {
+        alert("JSON غير صالح: " + e.message);
+        return;
+      }
+      askBtn.setBusy(true);
+      askMeta.innerHTML = "";
+      askBody.innerHTML = '<div class="empty-state">جاري توليد السؤال الصوتي (تحويل نص → صوت، قد يأخذ وقتاً)...</div>';
+      var t0 = performance.now();
+      try {
+        var res = await fetch(baseUrl() + "/voice_followup/ask", {
+          method: "POST",
+          headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
+          body: JSON.stringify(orderPayload)
+        });
+        var ms = Math.round(performance.now() - t0);
+        if (!res.ok) {
+          var errJson = await res.json().catch(function () { return null; });
+          askMeta.innerHTML = '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
+            '<span class="latency">' + ms + " ms</span>";
+          askBody.innerHTML = '<div class="empty-state">' + escapeHtml((errJson && errJson.detail) || "فشل الطلب") + "</div>";
+          askBtn.setBusy(false);
+          return;
+        }
+        sessionId = res.headers.get("X-Session-Id");
+        var questionText = "";
+        try { questionText = decodeURIComponent(res.headers.get("X-Question-Text") || ""); } catch (e2) {}
+        var blob = await res.blob();
+        var audioUrl = URL.createObjectURL(blob);
+
+        askMeta.innerHTML =
+          '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
+          '<span class="latency">' + ms + " ms</span>";
+        askSessionPill.querySelector(".val").textContent = sessionId || "—";
+        askSessionPill.classList.add("show");
+
+        askBody.innerHTML = "";
+        var questionBubble = document.createElement("div");
+        questionBubble.className = "bubble assistant";
+        questionBubble.innerHTML = '<div class="who">السؤال الصوتي (نص)</div>' + escapeHtml(questionText || "(بدون نص بالهيدر)");
+        askBody.appendChild(questionBubble);
+
+        var audioEl = document.createElement("audio");
+        audioEl.controls = true;
+        audioEl.autoplay = true;
+        audioEl.src = audioUrl;
+        audioEl.style.width = "100%";
+        audioEl.style.marginTop = "10px";
+        askBody.appendChild(audioEl);
+
+        // فعّل قسم الرد الآن أن عدنا session_id صالحة.
+        respondPanel.style.display = "";
+        respondSessionNote.textContent = sessionId
+          ? "الجلسة الحالية: " + sessionId
+          : "تحذير: ما وصلت session_id بالهيدر — تحقق من إعداد CORS (X-Session-Id لازم يكون بـ Access-Control-Expose-Headers).";
+      } catch (e) {
+        askMeta.innerHTML = '<span class="status-code s5">خطأ</span>';
+        askBody.innerHTML = '<div class="empty-state">تعذّر الوصول للسيرفر: ' + escapeHtml(e.message) + "</div>";
+      }
+      askBtn.setBusy(false);
+    };
+
+    /* ---- الخطوة 2: POST /respond ---- */
+    var respondPanel = makePanel("الخطوة ٢ — رد الزبون الصوتي");
+    respondPanel.style.display = "none"; // يظهر بعد نجاح /ask
+    var respondSessionNote = document.createElement("div");
+    respondSessionNote.style.fontSize = "12.5px";
+    respondSessionNote.style.color = "var(--text-dim)";
+    respondSessionNote.style.marginBottom = "10px";
+    respondPanel.appendChild(respondSessionNote);
+
+    // تسجيل مباشر بالمايكروفون (MediaRecorder) — بديل لرفع ملف جاهز.
+    var recordRow = document.createElement("div");
+    recordRow.className = "radio-row";
+    var recordBtn = document.createElement("button");
+    recordBtn.className = "ghost";
+    recordBtn.type = "button";
+    recordBtn.textContent = "🎙 سجّل رد الزبون";
+    var recordStatus = document.createElement("span");
+    recordStatus.style.fontSize = "12.5px";
+    recordStatus.style.color = "var(--text-dim)";
+    recordStatus.style.alignSelf = "center";
+    recordRow.appendChild(recordBtn);
+    recordRow.appendChild(recordStatus);
+    respondPanel.appendChild(recordRow);
+
+    var fileArea = document.createElement("div");
+    fileArea.className = "field";
+    fileArea.style.marginTop = "12px";
+    fileArea.innerHTML = '<label>أو ارفع ملف صوتي جاهز (wav/mp3/m4a)</label>';
+    var fileDrop = document.createElement("div");
+    fileDrop.className = "file-drop";
+    var fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "audio/*";
+    fileDrop.appendChild(fileInput);
+    fileArea.appendChild(fileDrop);
+    respondPanel.appendChild(fileArea);
+
+    var recordedPreview = document.createElement("audio");
+    recordedPreview.controls = true;
+    recordedPreview.style.width = "100%";
+    recordedPreview.style.marginTop = "10px";
+    recordedPreview.style.display = "none";
+    respondPanel.appendChild(recordedPreview);
+
+    var recordedBlob = null;
+    var mediaRecorder = null;
+    var mediaChunks = [];
+    recordBtn.onclick = async function () {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        return;
+      }
+      try {
+        var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = function (e) { if (e.data.size > 0) mediaChunks.push(e.data); };
+        mediaRecorder.onstop = function () {
+          recordedBlob = new Blob(mediaChunks, { type: "audio/webm" });
+          recordedPreview.src = URL.createObjectURL(recordedBlob);
+          recordedPreview.style.display = "";
+          recordBtn.textContent = "🎙 سجّل رد الزبون";
+          recordStatus.textContent = "تسجيل جاهز (" + Math.round(recordedBlob.size / 1024) + " كيلوبايت).";
+          stream.getTracks().forEach(function (t) { t.stop(); });
+        };
+        mediaRecorder.start();
+        recordBtn.textContent = "⏹ إيقاف التسجيل";
+        recordStatus.textContent = "جاري التسجيل...";
+      } catch (e) {
+        recordStatus.textContent = "تعذّر الوصول للمايكروفون: " + e.message;
+      }
+    };
+
+    var respondBtn = makeButton("أرسل /respond واستمع للشكر");
+    respondPanel.appendChild(makeActionsRow(respondBtn));
+    container.appendChild(respondPanel);
+
+    var respondResultPanel = makePanel("رد /respond — التحليل وصوت الشكر");
+    var respondMeta = document.createElement("div");
+    respondMeta.className = "response-meta";
+    var respondBody = document.createElement("div");
+    respondBody.innerHTML = '<div class="empty-state">سجّل أو ارفع رد الزبون الصوتي، ثم اضغط "أرسل /respond".</div>';
+    respondResultPanel.appendChild(respondMeta);
+    respondResultPanel.appendChild(respondBody);
+    container.appendChild(respondResultPanel);
+
+    respondBtn.onclick = async function () {
+      if (!sessionId) { alert("لازم تسوي /ask أول وتوصل session_id."); return; }
+      var audioFile = fileInput.files[0] || recordedBlob;
+      if (!audioFile) { alert("سجّل صوتاً أو ارفع ملفاً أولاً."); return; }
+
+      respondBtn.setBusy(true);
+      respondMeta.innerHTML = "";
+      respondBody.innerHTML = '<div class="empty-state">جاري التحليل (صوت → نص → تلخيص → صوت شكر)...</div>';
+
+      var form = new FormData();
+      form.append("audio", audioFile, audioFile.name || "reply.webm");
+
+      var t0 = performance.now();
+      try {
+        var url = baseUrl() + "/voice_followup/respond?session_id=" + encodeURIComponent(sessionId);
+        var res = await fetch(url, { method: "POST", headers: apiKeyHeader(ep.apiKeyService), body: form });
+        var ms = Math.round(performance.now() - t0);
+        if (!res.ok) {
+          var errJson = await res.json().catch(function () { return null; });
+          respondMeta.innerHTML = '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
+            '<span class="latency">' + ms + " ms</span>";
+          respondBody.innerHTML = '<div class="empty-state">' + escapeHtml((errJson && errJson.detail) || "فشل الطلب") + "</div>";
+          respondBtn.setBusy(false);
+          return;
+        }
+        var reasonSummary = "", transcript = "", querySent = "";
+        try { reasonSummary = decodeURIComponent(res.headers.get("X-Reason-Summary") || ""); } catch (e2) {}
+        try { transcript = decodeURIComponent(res.headers.get("X-Customer-Transcript") || ""); } catch (e3) {}
+        querySent = res.headers.get("X-Query-Sent") || "";
+        var blob = await res.blob();
+        var audioUrl = URL.createObjectURL(blob);
+
+        respondMeta.innerHTML =
+          '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
+          '<span class="latency">' + ms + " ms</span>" +
+          '<span class="engine-pill ' + (querySent === "true" ? "vllm" : "fallback") + '">' +
+          (querySent === "true" ? "أُرسل query لباك اند السستم" : "تعذّر إرسال الـ query") + "</span>";
+
+        respondBody.innerHTML = "";
+        var transcriptBubble = document.createElement("div");
+        transcriptBubble.className = "bubble user";
+        transcriptBubble.innerHTML = '<div class="who">رد الزبون (نص من Whisper)</div>' + escapeHtml(transcript || "—");
+        respondBody.appendChild(transcriptBubble);
+
+        var reasonBubble = document.createElement("div");
+        reasonBubble.className = "bubble assistant";
+        reasonBubble.innerHTML = '<div class="who">ملخّص السبب</div>' + escapeHtml(reasonSummary || "—");
+        respondBody.appendChild(reasonBubble);
+
+        var audioEl = document.createElement("audio");
+        audioEl.controls = true;
+        audioEl.autoplay = true;
+        audioEl.src = audioUrl;
+        audioEl.style.width = "100%";
+        audioEl.style.marginTop = "10px";
+        respondBody.appendChild(audioEl);
+
+        // جلسة استُهلكت (session_store.pop) — نصفّرها حتى ما يُعاد استعمالها.
+        sessionId = null;
+        askSessionPill.classList.remove("show");
+      } catch (e) {
+        respondMeta.innerHTML = '<span class="status-code s5">خطأ</span>';
+        respondBody.innerHTML = '<div class="empty-state">تعذّر الوصول للسيرفر: ' + escapeHtml(e.message) + "</div>";
+      }
+      respondBtn.setBusy(false);
     };
   }
 

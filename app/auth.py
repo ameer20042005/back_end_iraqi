@@ -42,3 +42,4 @@ def _make_dependency(service_name: str, expected_key: str):
 require_sales_api_key = _make_dependency("المبيعات", settings.sales_api_key)
 require_support_api_key = _make_dependency("الدعم", settings.support_api_key)
 require_orders_api_key = _make_dependency("إنشاء الطلبات", settings.orders_api_key)
+require_voice_followup_api_key = _make_dependency("المتابعة الصوتية", settings.voice_followup_api_key)

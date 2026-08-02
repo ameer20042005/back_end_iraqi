@@ -18,6 +18,8 @@ from app.features.order_intake.router import router as order_intake_router
 from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
 from app.features.support.router import router as support_router
+from app.features.voice_followup.router import router as voice_followup_router
+from app.features.voice_followup.tts import warmup as warmup_tts
 
 try:
     import torch
@@ -40,9 +42,13 @@ async def lifespan(app: FastAPI):
     # بطء بالتحويل. نحمّله بالخلفية من الآن: بخيط منفصل حتى لا يجمّد الـ event
     # loop، وكمَهمّة حتى لا يتأخر إقلاع الخادم (باقي المسارات تشتغل فوراً).
     warmup_task = asyncio.create_task(run_in_threadpool(warmup_transcriber))
+    # نفس مبرر تحميل Whisper أعلاه، لموديل تحويل النص لصوت (F5-TTS) الذي
+    # يخدم مسار المتابعة الصوتية (app/features/voice_followup).
+    tts_warmup_task = asyncio.create_task(run_in_threadpool(warmup_tts))
     yield
     # يوقف فاحص الجاهزية ويغلق عميل HTTP.
     warmup_task.cancel()
+    tts_warmup_task.cancel()
     await llm_engine.shutdown()
 
 
@@ -58,11 +64,21 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # بدون هذا، JS بالمتصفح ما يقدر يقرأ هيدرات الرد المخصَّصة حتى لو نجح
+    # الطلب فعلياً (قيد CORS قياسي: فقط هيدرات "safelisted" مقروءة افتراضياً).
+    # مسار المتابعة الصوتية (app/features/voice_followup/router.py) يرجع
+    # session_id ونتيجة التحليل بهذي الهيدرات بدل جسم JSON (الجسم صوت خام) —
+    # static/index.html يقرأها مباشرة لعرض التجربة الصوتية الكاملة.
+    expose_headers=[
+        "X-Session-Id", "X-Question-Text",
+        "X-Reason-Summary", "X-Customer-Transcript", "X-Query-Sent",
+    ],
 )
 
 app.include_router(sales_router)
 app.include_router(support_router)
 app.include_router(order_intake_router)
+app.include_router(voice_followup_router)
 
 
 @app.get("/")

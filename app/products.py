@@ -21,8 +21,20 @@ from app.system_backend import request as backend_request
 
 class ProductRepository(ABC):
     @abstractmethod
-    async def search(self, query: str, api_key: str, top_k: int = 5) -> List[dict]:
-        """يرجع أفضل top_k منتج مطابق للاستعلام، حسب ترتيب باك اند السستم."""
+    async def search(
+        self,
+        query: str,
+        api_key: str,
+        top_k: int = 5,
+        category: Optional[str] = None,
+        in_stock_only: bool = False,
+    ) -> List[dict]:
+        """يرجع أفضل top_k منتج مطابق للاستعلام، حسب ترتيب باك اند السستم.
+
+        `category`/`in_stock_only` فلاتر اختيارية فوق سكيما جيني ستورز
+        (catalog.categories وcatalog.stock_info — انظر
+        assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER.md) تُمرَّر كما هي
+        لباك اند السستم؛ هذا الباك اند لا يفهرسها ولا يطابقها محلياً."""
 
     @abstractmethod
     async def get_by_id(self, product_id: str, api_key: str) -> Optional[dict]:
@@ -46,11 +58,23 @@ class HttpProductRepository(ProductRepository):
     def _headers(self, api_key: str) -> dict:
         return {"X-API-Key": api_key}
 
-    async def search(self, query: str, api_key: str, top_k: int = 5) -> List[dict]:
+    async def search(
+        self,
+        query: str,
+        api_key: str,
+        top_k: int = 5,
+        category: Optional[str] = None,
+        in_stock_only: bool = False,
+    ) -> List[dict]:
+        params = {"q": query, "top_k": top_k}
+        if category:
+            params["category"] = category
+        if in_stock_only:
+            params["in_stock_only"] = "true"
         async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
             resp = await backend_request(
                 client, "GET", "/products/search",
-                params={"q": query, "top_k": top_k},
+                params=params,
                 headers=self._headers(api_key),
             )
             resp.raise_for_status()

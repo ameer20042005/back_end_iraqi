@@ -28,6 +28,13 @@ command -v ffmpeg >/dev/null 2>&1 || {
     echo "==> تثبيت ffmpeg (لازم لميزة تحويل الصوت لنص)..."
     apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg
 }
+# libsndfile1 لازمة لـ soundfile (app/features/voice_followup/tts.py) — كتابة
+# مخرَج F5-TTS كملف WAV. ldconfig -p يتحقق من وجود مكتبة النظام نفسها (الحزمة
+# pip منفصلة عن مكتبة C اللي تربطها)، لا حزمة python soundfile.
+ldconfig -p 2>/dev/null | grep -q libsndfile.so || {
+    echo "==> تثبيت libsndfile1 (لازمة لميزة تحويل النص لصوت)..."
+    apt-get update -qq && apt-get install -y -qq --no-install-recommends libsndfile1
+}
 
 # 8001 مستخدَم أحياناً من خدمة نظام على قوالب RunPod العامة (لاحظنا nginx
 # داخلي ماسكه بالفعل على بعض الـ Pods) — 18001 منفذ داخلي (بين الحاويتين

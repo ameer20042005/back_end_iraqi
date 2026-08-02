@@ -6,8 +6,10 @@ FROM vllm/vllm-openai:gemma4-unified
 
 WORKDIR /workspace/app
 
-# ffmpeg لازم لتحويل الصوت لنص (app/features/order_intake/transcribe.py)
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# ffmpeg لازم لتحويل الصوت لنص (app/features/order_intake/transcribe.py).
+# libsndfile1 لازمة لـ soundfile (app/features/voice_followup/tts.py) —
+# كتابة مخرَج F5-TTS كملف WAV.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 # متطلبات FastAPI فقط — torch/transformers/vllm موجودة مسبقاً بصورة vLLM

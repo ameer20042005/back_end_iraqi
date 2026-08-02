@@ -96,11 +96,17 @@ class Settings(BaseSettings):
     sales_api_key: Optional[str] = "sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2"
     support_api_key: Optional[str] = "sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f"
     orders_api_key: Optional[str] = "sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c"
+    voice_followup_api_key: Optional[str] = "sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b"
 
     # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
     # مفرَّغ عليه اللهجة العربية (نموذج transformers عادي، يعمل بعملية FastAPI
     # نفسها — الصوت لا يمر بخادم vLLM)
     whisper_model: str = "ayoubkirouane/whisper-small-ar"
+
+    # تحويل نص لصوت باللهجة العراقية (app/features/voice_followup/tts.py) —
+    # يخدم مسار المتابعة الصوتية للطلبات (سؤال الزبون سبب الرفض/الإلغاء
+    # صوتياً). موديل transformers منفصل عن Whisper، يعيش بعملية FastAPI نفسها.
+    tts_model: str = "ameer4wisam/Habibi-TTS-IRQ"
 
     class Config:
         env_file = ".env"

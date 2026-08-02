@@ -32,3 +32,10 @@ tokenizers>=0.22,<0.24
 # فك ترميز الصورة المرفوعة (app/features/order_intake/vision.py) — التحويل
 # لـ data URI يصير بـ app/engine.py والاستدلال البصري عند خادم vLLM.
 Pillow>=10.0
+
+# تحويل نص عراقي لصوت (app/features/voice_followup/tts.py) — موديل
+# ameer4wisam/Habibi-TTS-IRQ، نسخة عراقية من F5-TTS (voice cloning من مقطع
+# مرجعي). soundfile يكتب مخرَج الموديل (numpy array) كملف WAV.
+f5-tts>=1.1
+soundfile>=0.12
+huggingface_hub>=0.24

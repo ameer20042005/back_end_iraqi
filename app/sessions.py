@@ -5,7 +5,7 @@
 start.sh) لأنها غير مشتركة بين عدة عمليات.
 """
 
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from typing import Dict, List, Optional
 
 _MAX_TURNS = 12  # آخر N رسالة (مستخدم + مساعد) تُرسل كسياق
@@ -20,6 +20,13 @@ _session_location: Dict[str, dict] = {}
 # cached_orders()/cache_orders(). يُمسح فقط عند invalidate_orders() (بعد
 # تثبيت طلب جديد) أو نهاية الجلسة نفسها؛ لا TTL زمني.
 _session_orders_cache: Dict[str, List[dict]] = {}
+
+# كاش نتائج بحث المنتجات (search_products_tool) بحدود الجلسة — مفتاح مركّب
+# (session_id + نص الاستعلام والفلاتر) لأن كل استعلام مختلف عن الآخر، خلافاً
+# لدفتر الطلبات اللي هو قائمة واحدة كاملة. انظر cached_product_search()/
+# cache_product_search() بـ app/tools/products.py.
+_MAX_PRODUCT_SEARCH_CACHE = 24  # أقصى عدد استعلامات مختلفة تبقى بذاكرة الجلسة
+_session_product_search_cache: Dict[str, "OrderedDict[str, List[dict]]"] = defaultdict(OrderedDict)
 
 
 def get(session_id: str) -> List[Dict[str, str]]:
@@ -102,3 +109,27 @@ def invalidate_orders(session_id: str) -> None:
     """يمسح كاش الطلبات بهذه الجلسة — يُستدعى بعد تثبيت طلب جديد حتى لا
     يبقى الجرد المخزَّن ناقصاً عن الواقع."""
     _session_orders_cache.pop(session_id, None)
+
+
+def cached_product_search(session_id: str, cache_key: str) -> Optional[List[dict]]:
+    """نتيجة بحث منتجات سابقة بنفس `cache_key` (استعلام+فلاتر) بهذه الجلسة،
+    أو None إذا ما استُعلم عنها بعد بهذه الجلسة.
+
+    السبب: النموذج قد يستدعي search_products بنفس الاستعلام أكثر من مرة
+    بنفس المحادثة (يتأكد من السعر قبل الملخّص، ثم عند التثبيت) — بلا هذا
+    الكاش كل استدعاء يجيب من باك اند السستم من الصفر رغم أن كتالوج المنتجات
+    ما يتغيّر بين رسالتين متتاليتين من نفس الزبون."""
+    return _session_product_search_cache[session_id].get(cache_key)
+
+
+def cache_product_search(session_id: str, cache_key: str, results: List[dict]) -> None:
+    """يخزّن نتيجة بحث منتجات بهذه الجلسة (انظر cached_product_search).
+
+    بحد أقصى `_MAX_PRODUCT_SEARCH_CACHE` استعلاماً مختلفاً لكل جلسة —
+    الأقدم يُطرح أولاً (LRU) حتى لا تكبر الذاكرة بلا حدود مع جلسة طويلة
+    كثيرة الاستعلامات."""
+    cache = _session_product_search_cache[session_id]
+    cache[cache_key] = results
+    cache.move_to_end(cache_key)
+    if len(cache) > _MAX_PRODUCT_SEARCH_CACHE:
+        cache.popitem(last=False)
