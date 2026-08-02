@@ -94,6 +94,11 @@ class SupportChatResponse(BaseModel):
     session_id: str
     answer: str
     engine: str
+    # سجل استدعاءات الأدوات (get_order_status) — للشفافية فقط، نفس مبرر
+    # SalesChatResponse.tool_calls (app/features/sales/router.py). فارغة
+    # بالمسارات الحتمية (_deterministic_status_answer) لأنها ما تمر بحلقة
+    # الأدوات أصلاً — تُملأ فقط لما الموديل+الأداة هو من جاوب.
+    tool_calls: List[dict] = []
 
 
 async def _list_all_cached(session_id: str, api_key: str) -> List[dict]:
@@ -387,6 +392,7 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
         deterministic = await _deterministic_status_answer(req.message, api_key, history, key)
     except SystemBackendUnavailable:
         deterministic = "معذرة، تعذّر الوصول لبيانات الطلبات حالياً — جرّب بعد شوي."
+    tool_calls: List[dict] = []
     if deterministic is not None:
         answer = deterministic
         engine_name = "deterministic"
@@ -395,6 +401,7 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
         data = await run_with_tools(messages, tools=tools)
         answer = data["final_answer"]
         engine_name = "vllm"
+        tool_calls = data.get("tool_calls") or []
     else:
         answer = await _fallback_support_answer(req.message, api_key, history, key)
         engine_name = "fallback"
@@ -402,4 +409,6 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
     sessions.append(key, "user", req.message)
     sessions.append(key, "assistant", answer)
 
-    return SupportChatResponse(session_id=session_id, answer=answer, engine=engine_name)
+    return SupportChatResponse(
+        session_id=session_id, answer=answer, engine=engine_name, tool_calls=tool_calls,
+    )

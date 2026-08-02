@@ -92,6 +92,10 @@ async def run_with_tools(
     الإضافية (مثل order_ready) تصل كما رجّعها الموديل بردّه الأخير."""
     working_messages = list(messages)
     guided_json = schema or TOOL_LOOP_SCHEMA
+    # سجل كل استدعاء أداة بهذه الجولة — يُرجَع مع النتيجة النهائية حتى تقدر
+    # الواجهة (static/index.html) تعرضه بشكل مرئي بدل ما يبقى داخلياً فقط.
+    # لا يُستخدم بأي منطق قرار هنا، مجرد شفافية للمتصل.
+    tool_calls_log: List[dict] = []
 
     for _ in range(max_rounds):
         prompt = llm_engine.render_prompt(working_messages)
@@ -105,10 +109,11 @@ async def run_with_tools(
         data = _parse_action(text)
         if data is None:
             logger.warning("رد الموديل ما طابق مخطط tool_call/final_answer: %r", text[:200])
-            return {"final_answer": _EXHAUSTED_FALLBACK}
+            return {"final_answer": _EXHAUSTED_FALLBACK, "tool_calls": tool_calls_log}
 
         if data.get("action") == "final_answer":
             data["final_answer"] = (data.get("final_answer") or "").strip() or _EXHAUSTED_FALLBACK
+            data["tool_calls"] = tool_calls_log
             return data
 
         call = data.get("tool_call") or {}
@@ -122,6 +127,7 @@ async def run_with_tools(
                 tool_result = await tool_func(args)
             except Exception as exc:  # لا نكسر المحادثة إذا فشلت أداة خارجية
                 tool_result = {"error": str(exc)}
+        tool_calls_log.append({"tool": tool_name, "args": args, "result": tool_result})
 
         working_messages.append({
             "role": "assistant",
@@ -137,4 +143,4 @@ async def run_with_tools(
         })
 
     logger.warning("نفدت جولات الأدوات (%s) بلا رد نهائي", max_rounds)
-    return {"final_answer": _EXHAUSTED_FALLBACK}
+    return {"final_answer": _EXHAUSTED_FALLBACK, "tool_calls": tool_calls_log}

@@ -207,6 +207,11 @@ class SalesChatResponse(BaseModel):
     answer: str
     order: Optional[OrderConfirmation] = None
     engine: str
+    # سجل استدعاءات الأدوات (search_products) بهذا الدور — للشفافية فقط
+    # (لا يدخل بأي منطق قرار)، يخلي واجهة الاختبار (static/index.html) تعرض
+    # ما استعلم عنه الموديل فعلياً بدل الرد النهائي وحده. فارغة إذا الموديل
+    # جاوب بلا استدعاء أداة أو كان بوضع fallback.
+    tool_calls: List[dict] = []
 
 
 def _fallback_sales_answer(message: str) -> str:
@@ -297,11 +302,11 @@ async def _run_sales_turn(
     key: str, req: SalesChatRequest, history: List[dict], api_key: str
 ) -> tuple:
     """يولّد رد المبيعات عبر حلقة الأدوات (search_products) ويرجع
-    (answer, order_ready, engine_name)."""
+    (answer, order_ready, engine_name, tool_calls)."""
     messages = build_sales_prompt(history, req.message)
 
     if not llm_engine.ready:
-        return _fallback_sales_answer(req.message), False, "fallback"
+        return _fallback_sales_answer(req.message), False, "fallback", []
 
     tools = {"search_products": partial(search_products_tool, api_key=api_key, session_id=key)}
     data = await run_with_tools(
@@ -311,7 +316,7 @@ async def _run_sales_turn(
         temperature=req.temperature,
         schema=_SALES_SCHEMA,
     )
-    return data["final_answer"], bool(data.get("order_ready")), "vllm"
+    return data["final_answer"], bool(data.get("order_ready")), "vllm", data.get("tool_calls") or []
 
 
 async def _complete_sales_turn(
@@ -319,7 +324,7 @@ async def _complete_sales_turn(
 ) -> tuple:
     """يشغّل دور المبيعات كاملاً (توليد + بوابة الاكتمال + حفظ الجلسة + بناء
     الطلب) — مشترك بين /chat و /chat/stream حتى لا يتكرر منطق البوابة."""
-    answer, order_ready, engine_name = await _run_sales_turn(key, req, history, api_key)
+    answer, order_ready, engine_name, tool_calls = await _run_sales_turn(key, req, history, api_key)
 
     _remember_user_location(key, req.message)
 
@@ -339,7 +344,7 @@ async def _complete_sales_turn(
     sessions.append(key, "assistant", answer)
 
     order = await _maybe_build_order(key, api_key) if order_ready else None
-    return answer, order, engine_name
+    return answer, order, engine_name, tool_calls
 
 
 @router.post("/chat", response_model=SalesChatResponse)
@@ -348,7 +353,7 @@ async def sales_chat(req: SalesChatRequest, api_key: str = Depends(require_sales
     key = _SESSION_PREFIX + session_id
     history = sessions.get(key)
 
-    answer, order, engine_name = await _complete_sales_turn(
+    answer, order, engine_name, tool_calls = await _complete_sales_turn(
         key, session_id, req, history, api_key
     )
 
@@ -357,6 +362,7 @@ async def sales_chat(req: SalesChatRequest, api_key: str = Depends(require_sales
         answer=answer,
         order=order,
         engine=engine_name,
+        tool_calls=tool_calls,
     )
 
 
@@ -371,7 +377,7 @@ async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(requir
     history = sessions.get(key)
 
     async def event_source():
-        answer, order, _ = await _complete_sales_turn(
+        answer, order, _, tool_calls = await _complete_sales_turn(
             key, session_id, req, history, api_key
         )
         yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
@@ -380,6 +386,7 @@ async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(requir
                 "done": True,
                 "session_id": session_id,
                 "order": order.model_dump() if order else None,
+                "tool_calls": tool_calls,
             },
             ensure_ascii=False,
         ) + "\n\n"

@@ -548,6 +548,41 @@
   .jn { color: #e0b45f; }
   .jb { color: #e08fa0; }
 
+  /* استدعاء أداة (search_products / get_order_status) — عرض بسيط بين
+     فقاعات المحادثة، مو بطاقة معقّدة: اسم الأداة + المعاملات + عدد
+     النتائج، مع تفصيل النتيجة الكاملة قابل للطي. */
+  .tool-call {
+    align-self: flex-start;
+    max-width: 82%;
+    font-size: 12px;
+    border: 1px dashed var(--border);
+    background: var(--panel-2);
+    border-radius: 10px;
+    padding: 8px 12px;
+    color: var(--text-dim);
+  }
+  .tool-call .head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .tool-call .tool-name {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-weight: 700;
+    color: var(--accent-strong);
+    direction: ltr;
+  }
+  .tool-call .tool-args {
+    font-family: "Cascadia Code", Consolas, monospace;
+    direction: ltr;
+    color: var(--text-dim);
+  }
+  .tool-call details { margin-top: 6px; }
+  .tool-call summary { cursor: pointer; user-select: none; }
+  .tool-call summary:hover { color: var(--accent-strong); }
+  .tool-call pre.json-view { margin-top: 6px; max-height: 220px; overflow: auto; padding: 10px 12px; font-size: 11.5px; }
+
   .order-card {
     border: 1px solid var(--accent);
     background: var(--accent-soft);
@@ -1245,6 +1280,8 @@
           sessionPill.classList.add("show");
         }
 
+        renderToolCalls(chatLog, json.tool_calls);
+
         var assistantBubble = document.createElement("div");
         assistantBubble.className = "bubble assistant";
         assistantBubble.innerHTML = '<div class="who">الوكيل</div>' + escapeHtml(json.answer || "");
@@ -1375,6 +1412,7 @@
               meta.innerHTML =
                 '<span class="status-code s2">' + res.status + "</span>" +
                 '<span class="latency">أول توكن: ' + (firstTokenMs === null ? "—" : firstTokenMs + "ms") + " · إجمالي: " + totalMs + "ms</span>";
+              renderToolCalls(chatLog, evt.tool_calls);
               if (evt.order) orderBox.appendChild(renderOrderCard(evt.order));
             }
           }
@@ -1462,6 +1500,8 @@
           sessionPill.querySelector(".val").textContent = sessionId;
           sessionPill.classList.add("show");
         }
+        renderToolCalls(chatLog, json.tool_calls);
+
         var assistantBubble = document.createElement("div");
         assistantBubble.className = "bubble assistant";
         assistantBubble.innerHTML = '<div class="who">الدعم</div>' + escapeHtml(json.answer || "");
@@ -1856,6 +1896,34 @@
       }
       respondBtn.setBusy(false);
     };
+  }
+
+  /* ---------------- Tool call renderer (شفافية استدعاء الأدوات) ---------------- */
+  // toolCalls: [{tool, args, result}] — كما يرجعها app/tool_loop.py ضمن
+  // SalesChatResponse.tool_calls / SupportChatResponse.tool_calls. تُعرض
+  // كبطاقة صغيرة بين فقاعة العميل وفقاعة الوكيل: اسم الأداة + المعاملات
+  // مباشرة، والنتيجة الكاملة مطويّة افتراضياً.
+  function renderToolCalls(chatLog, toolCalls) {
+    if (!toolCalls || !toolCalls.length) return;
+    toolCalls.forEach(function (call) {
+      var box = document.createElement("div");
+      box.className = "tool-call";
+      var resultCount = "";
+      if (call.result && Array.isArray(call.result.results)) {
+        resultCount = " · " + call.result.results.length + " نتيجة";
+      } else if (call.result && call.result.error) {
+        resultCount = " · خطأ";
+      }
+      box.innerHTML =
+        '<div class="head">🔧 استدعى الأداة ' +
+        '<span class="tool-name">' + escapeHtml(call.tool || "؟") + "</span>" +
+        '<span class="tool-args">' + escapeHtml(JSON.stringify(call.args || {})) + "</span>" +
+        '<span>' + resultCount + "</span></div>" +
+        "<details><summary>عرض نتيجة الأداة كاملة</summary>" +
+        '<pre class="json-view">' + highlightJson(call.result) + "</pre></details>";
+      chatLog.appendChild(box);
+    });
+    chatLog.scrollTop = chatLog.scrollHeight;
   }
 
   /* ---------------- Order card renderer ---------------- */
