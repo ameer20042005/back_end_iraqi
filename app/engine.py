@@ -29,6 +29,7 @@ messages مباشرة) — لذلك render_prompt/render_multimodal_prompt صا�
 import asyncio
 import base64
 import io
+import json
 import logging
 import time
 from typing import AsyncGenerator, Dict, List, Optional, Union
@@ -174,12 +175,13 @@ class LLMEngine:
             m["content"] = new_content
         return messages
 
-    async def _chat_completion(
-        self,
+    @staticmethod
+    def _build_body(
         messages: List[Message],
         max_tokens: int,
         stop: Optional[List[str]],
         guided_json: Optional[dict],
+        stream: bool = False,
     ) -> dict:
         body: dict = {
             "model": settings.model_name,
@@ -187,6 +189,8 @@ class LLMEngine:
             "max_tokens": max_tokens,
             "temperature": 0.0,  # حتمي دائماً — sampling = انهيار مخرجات (مجرَّب)
         }
+        if stream:
+            body["stream"] = True
         if stop:
             body["stop"] = stop
         if guided_json:
@@ -196,6 +200,16 @@ class LLMEngine:
                 "type": "json_schema",
                 "json_schema": {"name": "extraction", "schema": guided_json},
             }
+        return body
+
+    async def _chat_completion(
+        self,
+        messages: List[Message],
+        max_tokens: int,
+        stop: Optional[List[str]],
+        guided_json: Optional[dict],
+    ) -> dict:
+        body = self._build_body(messages, max_tokens, stop, guided_json)
 
         t0 = time.monotonic()
         try:
@@ -211,6 +225,53 @@ class LLMEngine:
             if len(self.metrics["request_latencies_ms"]) > 500:
                 self.metrics["request_latencies_ms"] = self.metrics["request_latencies_ms"][-500:]
         return resp.json()
+
+    async def stream_chat_completion(
+        self,
+        messages: List[Message],
+        max_tokens: int,
+        stop: Optional[List[str]] = None,
+    ) -> AsyncGenerator[str, None]:
+        """توليد حر (بلا guided_json) مبثوث توكن-بتوكن فعلياً عبر SSE من vLLM
+        (`stream: true`) — يُستخدم فقط للنص النهائي الحر بعد ما تنتهي جولات
+        قرار الأدوات (انظر app/tool_loop.py::stream_final_answer). لا ينفع
+        مع guided_json: JSON مقيَّد ما يصير صالحاً للتحليل إلا مكتملاً، فبثّه
+        جزئياً بلا فائدة للعميل.
+
+        كل قطعة SSE بصيغة OpenAI: `data: {...}\\n\\n`، تنتهي بـ `data: [DONE]`.
+        نقص أي دلتا نص فيها ونتجاهل الباقي (role وما شابه)."""
+        body = self._build_body(messages, max_tokens, stop, guided_json=None, stream=True)
+
+        t0 = time.monotonic()
+        got_any = False
+        try:
+            async with self._client.stream("POST", "/chat/completions", json=body) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[len("data: "):]
+                    if payload == "[DONE]":
+                        break
+                    chunk = json.loads(payload)
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0].get("delta") or {}).get("content")
+                    if delta:
+                        got_any = True
+                        yield delta
+        except Exception:
+            self.metrics["errors"] += 1
+            raise
+        finally:
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            self.metrics["requests_served"] += 1
+            self.metrics["request_latencies_ms"].append(elapsed_ms)
+            if len(self.metrics["request_latencies_ms"]) > 500:
+                self.metrics["request_latencies_ms"] = self.metrics["request_latencies_ms"][-500:]
+        if not got_any:
+            logger.error("⚠️ بث فارغ من vLLM (stream_chat_completion) — تحقق من المُرمِّز/الأوزان")
 
     async def generate_stream(
         self,

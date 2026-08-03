@@ -16,7 +16,13 @@ import json
 import pytest
 
 from app import tool_loop
-from app.tool_loop import _EXHAUSTED_FALLBACK, build_schema, run_with_tools
+from app.tool_loop import (
+    EXHAUSTED_FALLBACK,
+    build_schema,
+    run_decision_rounds,
+    run_with_tools,
+    stream_final_answer,
+)
 
 _ORDER_STATUS_CALL = {
     "action": "tool_call",
@@ -27,9 +33,11 @@ _ORDER_STATUS_CALL = {
 class _FakeEngine:
     """محرك وهمي يرجّع ردوداً محضّرة بالتسلسل — بلا أي اتصال بـ vLLM."""
 
-    def __init__(self, replies):
+    def __init__(self, replies, stream_chunks=None):
         self._replies = list(replies)
+        self._stream_chunks = list(stream_chunks or [])
         self.calls = 0
+        self.stream_calls = 0
 
     def render_prompt(self, messages, tools=None):
         return messages
@@ -43,11 +51,16 @@ class _FakeEngine:
             result_holder["finish_reason"] = "stop"
         return text
 
+    async def stream_chat_completion(self, prompt, max_tokens=None, stop=None):
+        self.stream_calls += 1
+        for chunk in self._stream_chunks:
+            yield chunk
+
 
 @pytest.fixture
 def fake_engine(monkeypatch):
-    def _install(replies):
-        engine = _FakeEngine(replies)
+    def _install(replies, stream_chunks=None):
+        engine = _FakeEngine(replies, stream_chunks=stream_chunks)
         monkeypatch.setattr(tool_loop, "llm_engine", engine)
         return engine
     return _install
@@ -92,7 +105,7 @@ def test_malformed_json_is_not_leaked(fake_engine):
         run_with_tools([{"role": "user", "content": "وين طلبي"}],
                        tools={"get_order_status": _ok_tool})
     )
-    assert data["final_answer"] == _EXHAUSTED_FALLBACK
+    assert data["final_answer"] == EXHAUSTED_FALLBACK
     assert engine.calls == 1
 
 
@@ -100,7 +113,7 @@ def test_exhausted_rounds_return_fallback(fake_engine):
     """الموديل عالق يستدعي الأداة بكل جولة: العميل ياخذ رداً آمناً، مو آخر
     استدعاء أداة نصف مكتوب."""
     data = _run([_ORDER_STATUS_CALL] * 5, fake_engine, max_rounds=3)
-    assert data["final_answer"] == _EXHAUSTED_FALLBACK
+    assert data["final_answer"] == EXHAUSTED_FALLBACK
 
 
 def test_plain_answer_passes_through(fake_engine):
@@ -141,3 +154,58 @@ def test_extra_schema_field_passed_through(fake_engine):
     assert data["final_answer"] == "زين، ثبّتلك الطلب"
     assert data["order_ready"] is True
     assert engine.calls == 1
+
+
+# ---------------------------------------------------------------------------
+# run_decision_rounds / stream_final_answer — البروتوكول المُقسَّم للبث
+# (انظر app/tool_loop.py: فصل قرار الأداة عن النص النهائي الحر).
+# ---------------------------------------------------------------------------
+
+def test_decision_rounds_calls_tool_then_stops(fake_engine):
+    """جولة أداة ثم action=done: تتوقف بلا توليد نص، وترجع working_messages
+    جاهزة لجولة البث + بيانات القرار (order_ready هنا)."""
+    engine = fake_engine([
+        _ORDER_STATUS_CALL,
+        {"action": "done", "order_ready": True},
+    ])
+    working_messages, decision, tool_calls = asyncio.run(
+        run_decision_rounds(
+            [{"role": "user", "content": "وين طلبي"}],
+            tools={"get_order_status": _ok_tool},
+        )
+    )
+    assert decision == {"action": "done", "order_ready": True}
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["tool"] == "get_order_status"
+    assert engine.calls == 2
+    # working_messages تراكمت رسالتي الأداة (assistant + user) فوق الأصل.
+    assert len(working_messages) == 3
+
+
+def test_decision_rounds_exhausted_returns_empty_decision(fake_engine):
+    """الموديل عالق يستدعي الأداة بكل جولة: بعد max_rounds ترجع decision
+    فارغة (بلا انهيار) — الراوتر يعامل هذا كعدم اكتمال (order_ready=False)."""
+    fake_engine([_ORDER_STATUS_CALL] * 5)
+    _working_messages, decision, _tool_calls = asyncio.run(
+        run_decision_rounds(
+            [{"role": "user", "content": "وين طلبي"}],
+            tools={"get_order_status": _ok_tool},
+            max_rounds=3,
+        )
+    )
+    assert decision == {}
+
+
+def test_stream_final_answer_yields_deltas_in_order(fake_engine):
+    """stream_final_answer يمرر دلتات stream_chat_completion كما هي، بالترتيب،
+    بلا guided_json (توليد حر)."""
+    engine = fake_engine([], stream_chunks=["هلا ", "بيك ", "حبيبي"])
+    deltas = asyncio.run(_collect_stream(
+        stream_final_answer([{"role": "user", "content": "هلا"}])
+    ))
+    assert deltas == ["هلا ", "بيك ", "حبيبي"]
+    assert engine.stream_calls == 1
+
+
+async def _collect_stream(agen):
+    return [chunk async for chunk in agen]

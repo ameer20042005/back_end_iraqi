@@ -9,7 +9,7 @@
 # مكتبات CUDA runtime ناقص) بدل التخمين المسبق — شوف _start_vllm أدناه.
 #
 # الأعلام حسب وصفة vLLM الرسمية لـ Gemma 4 (قسم Full-Featured Server Launch)،
-# مضبوطة لهدفنا: أقصى عدد طلبات متزامنة على A40 48GB بردود قصيرة —
+# مضبوطة لهدفنا: أقصى عدد طلبات متزامنة على A100/H100 80GB+ بردود قصيرة —
 #   --max-model-len قصير = KV cache يتسع لطلبات متزامنة أكثر
 #   --async-scheduling يحسّن الـ throughput (توصية الوصفة)
 #   --enable-prefix-caching أكبر مكسب سرعة بجهة الخادم عندنا: كل الطلبات
@@ -19,6 +19,14 @@
 #     بشدة — وهو الجزء الغالب من زمن الاستجابة بردودنا القصيرة.
 #   --limit-mm-per-prompt: صورة وحدة (order_intake)، بلا صوت (الصوت عبر Whisper
 #     داخل FastAPI، ما يمر بـ vLLM)
+#
+# MAX_NUM_SEQS محسوبة على A100/H100 80GB (moved من A40 48GB): الأوزان
+# (bf16, 12B) تأخذ ~24.4GB من أصل ~72GB متاحة (90% من 80GB)، فيتبقى ~47.6GB
+# لـ KV cache — مقابل ~17GB على A40. بنفس MAX_MODEL_LEN=10000 (٠.375MB/توكن
+# لكل طلب × 10000 ≈ 3.7GB/طلب)، هذا يتسع لـ ~12 طلباً متزامناً بالسياق
+# الأقصى فعلياً، لكن أغلب المحادثات أقصر بكثير من الأقصى فتتقاسم عدة طلبات
+# نفس صفحات الـ KV cache — عملياً ~350 طلباً متزامناً بأحمال الإنتاج
+# الفعلية (نفس منطق --max-num-seqs بوصفة vLLM: سقف الجدولة لا حجزاً ثابتاً).
 
 set -e
 cd "$(dirname "$0")"
@@ -45,7 +53,7 @@ VLLM_PORT="${VLLM_PORT:-18001}"
 API_PORT="${API_PORT:-8000}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-10000}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
-MAX_NUM_SEQS="${MAX_NUM_SEQS:-128}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-350}"
 VLLM_LOG="/tmp/vllm_boot.log"
 
 # تنظيف عمليات لنا عالقة من تشغيلة سابقة (start.sh انقطع بمنتصف الطريق أو

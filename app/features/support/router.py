@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """دعم العملاء: POST /support/chat — تتبع حالة الطلب برقم الطلب أو الهاتف."""
 
+import json
 import re
 import uuid
 from functools import partial
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import sessions
@@ -16,7 +18,7 @@ from app.features.support.prompts import build_support_prompt
 from app.order_gateway import order_status_provider
 from app.system_backend import SystemBackendUnavailable
 from app.text_norm import normalize
-from app.tool_loop import run_with_tools
+from app.tool_loop import EXHAUSTED_FALLBACK, run_decision_rounds, run_with_tools, stream_final_answer
 
 router = APIRouter(prefix="/support", tags=["support"])
 
@@ -412,3 +414,51 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
     return SupportChatResponse(
         session_id=session_id, answer=answer, engine=engine_name, tool_calls=tool_calls,
     )
+
+
+@router.post("/chat/stream")
+async def support_chat_stream(req: SupportChatRequest, api_key: str = Depends(require_support_api_key)):
+    """نفس منطق /chat، لكن مسار الموديل+الأدوات (الأسئلة العامة فقط — انظر
+    _deterministic_status_answer) يُبث توكن-بتوكن فعلياً بنفس أسلوب
+    /sales/chat/stream: جولة قرار مصغّرة (get_order_status) ثم جولة نص حرة
+    مبثوثة. المسار الحتمي (رقم طلب/هاتف/حالة) يبقى فورياً كما هو — يُرسَل
+    كدلتا واحدة لأنه أصلاً بلا زمن استدلال ينتظره العميل."""
+    session_id = req.session_id or str(uuid.uuid4())
+    key = _SESSION_PREFIX + session_id
+    history = sessions.get(key)
+
+    async def event_source():
+        try:
+            deterministic = await _deterministic_status_answer(req.message, api_key, history, key)
+        except SystemBackendUnavailable:
+            deterministic = "معذرة، تعذّر الوصول لبيانات الطلبات حالياً — جرّب بعد شوي."
+
+        tool_calls: List[dict] = []
+        if deterministic is not None:
+            answer = deterministic
+            yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
+        elif llm_engine.ready:
+            messages = build_support_prompt(history, req.message)
+            tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key, session_id=key)}
+            working_messages, _decision, tool_calls = await run_decision_rounds(messages, tools=tools)
+
+            answer = ""
+            async for delta in stream_final_answer(working_messages):
+                answer += delta
+                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+            if not answer.strip():
+                answer = EXHAUSTED_FALLBACK
+                yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
+        else:
+            answer = await _fallback_support_answer(req.message, api_key, history, key)
+            yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
+
+        sessions.append(key, "user", req.message)
+        sessions.append(key, "assistant", answer)
+
+        yield "data: " + json.dumps(
+            {"done": True, "session_id": session_id, "tool_calls": tool_calls},
+            ensure_ascii=False,
+        ) + "\n\n"
+
+    return StreamingResponse(event_source(), media_type="text/event-stream")

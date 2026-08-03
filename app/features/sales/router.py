@@ -40,7 +40,14 @@ from app.order_schema import (
 from app.engine import llm_engine
 from app.rag import search_locations
 from app.rag import search as search_words
-from app.tool_loop import build_schema, run_with_tools
+from app.tool_loop import (
+    EXHAUSTED_FALLBACK,
+    build_decision_schema,
+    build_schema,
+    run_decision_rounds,
+    run_with_tools,
+    stream_final_answer,
+)
 from app.tools.products import search_products_tool
 
 logger = logging.getLogger(__name__)
@@ -82,6 +89,14 @@ _FIELD_ORDER = ("product", "name", "phone", "location")
 # مخطط رد المبيعات: نفس أساس tool_loop + order_ready (بدل علامة [ORDER_READY]
 # النصية) — الموديل يعلن اكتمال الطلب صراحةً بحقل مقيَّد guided decoding.
 _SALES_SCHEMA = build_schema(
+    extra_properties={"order_ready": {"type": "boolean"}},
+    extra_required=["order_ready"],
+)
+
+# نفس order_ready لكن بمخطط القرار المصغّر (بلا final_answer) — يُستخدم فقط
+# بمسار /chat/stream (انظر sales_chat_stream). الفصل يسمح ببثّ النص الفعلي
+# بجولة منفصلة غير مقيَّدة (app.tool_loop.stream_final_answer).
+_SALES_DECISION_SCHEMA = build_decision_schema(
     extra_properties={"order_ready": {"type": "boolean"}},
     extra_required=["order_ready"],
 )
@@ -368,19 +383,66 @@ async def sales_chat(req: SalesChatRequest, api_key: str = Depends(require_sales
 
 @router.post("/chat/stream")
 async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(require_sales_api_key)):
-    """نفس منطق /chat، مبثوث كقطعة واحدة (مو توكن-بتوكن): الرد مقيَّد
-    بمخطط JSON صارم (guided_json) فلازم يكتمل كاملاً قبل ما يصير صالحاً
-    للتحليل أصلاً — البث الجزئي لبنية JSON غير مفيد للعميل. الردود قصيرة
-    أصلاً فالتأخير مقبول (نفس تبرير النسخة السابقة)."""
+    """توكن-بتوكن فعلياً (بدل guided_json الكامل السابق): جولة قرار
+    مصغّرة أولاً (search_products + order_ready، انظر _SALES_DECISION_SCHEMA)
+    ثم — إذا البوابة لم تحجب الطلب — جولة نص حرة مبثوثة عبر
+    app.tool_loop.stream_final_answer. أول توكن يصل العميل فور بدء جولة النص
+    بدل انتظار الرد كاملاً، مستفيدة من prefix caching (نفس البادئة محسوبة
+    أصلاً بجولة القرار)."""
     session_id = req.session_id or str(uuid.uuid4())
     key = _SESSION_PREFIX + session_id
     history = sessions.get(key)
 
     async def event_source():
-        answer, order, _, tool_calls = await _complete_sales_turn(
-            key, session_id, req, history, api_key
+        if not llm_engine.ready:
+            answer = _fallback_sales_answer(req.message)
+            sessions.append(key, "user", req.message)
+            sessions.append(key, "assistant", answer)
+            yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
+            yield "data: " + json.dumps(
+                {"done": True, "session_id": session_id, "order": None, "tool_calls": []},
+                ensure_ascii=False,
+            ) + "\n\n"
+            return
+
+        messages = build_sales_prompt(history, req.message)
+        tools = {"search_products": partial(search_products_tool, api_key=api_key, session_id=key)}
+        working_messages, decision, tool_calls = await run_decision_rounds(
+            messages, tools=tools, schema=_SALES_DECISION_SCHEMA,
         )
-        yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
+        order_ready = bool(decision.get("order_ready"))
+
+        _remember_user_location(key, req.message)
+
+        # بوابة الاكتمال تسبق أي بثّ — لو حُجب الطلب، السؤال الحتمي عن
+        # الحقل الناقص أسرع وأدق من أي نص يولّده الموديل (انظر
+        # _missing_order_fields بـ _complete_sales_turn لنفس المنطق بمسار
+        # /chat غير المتدفق).
+        missing = _missing_order_fields(history, req.message, key) if order_ready else []
+        if missing:
+            logger.warning(
+                "تثبيت طلب ناقص أُلغي (بث) — حقول ناقصة: %s (session=%s)",
+                missing, session_id,
+            )
+            order_ready = False
+            answer = _FIELD_QUESTIONS[missing[0]]
+            yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
+        else:
+            answer = ""
+            async for delta in stream_final_answer(working_messages, max_tokens=req.max_tokens):
+                answer += delta
+                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+            if not answer.strip():
+                # جولة البث ما رجّعت أي توكن (عطل مؤقت بجهة vLLM) — العميل
+                # وصله بث فاضي، فلازم نرسل نص احتياطي كدلتا فعلية لا نكتفي
+                # بحفظه بالجلسة بصمت.
+                answer = EXHAUSTED_FALLBACK
+                yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
+
+        sessions.append(key, "user", req.message)
+        sessions.append(key, "assistant", answer)
+
+        order = await _maybe_build_order(key, api_key) if order_ready else None
         yield "data: " + json.dumps(
             {
                 "done": True,
