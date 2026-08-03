@@ -27,6 +27,16 @@
 # الأقصى فعلياً، لكن أغلب المحادثات أقصر بكثير من الأقصى فتتقاسم عدة طلبات
 # نفس صفحات الـ KV cache — عملياً ~350 طلباً متزامناً بأحمال الإنتاج
 # الفعلية (نفس منطق --max-num-seqs بوصفة vLLM: سقف الجدولة لا حجزاً ثابتاً).
+#
+# نسختان من نفس الموديل بالتوازي على نفس الكارت (VLLM_REPLICAS، افتراضياً 2):
+# كل نسخة عملية vllm serve منفصلة على منفذ مستقل (VLLM_PORT, VLLM_PORT+1, ...)،
+# وتحمّل GPU_MEMORY_UTILIZATION تُقسَّم عليهن بالتساوي (كل نسخة تاخذ حصتها
+# فقط من الكارت، والمجموع = القيمة الأصلية). الفائدة: عمليتا vllm منفصلتان =
+# جدولة/تزامن مستقلان، فطلب طويل بنسخة وحدة ما يؤخر طابور النسخة الثانية —
+# مقابل ذلك KV cache أصغر لكل نسخة (نص الحصة تقريباً) فـ MAX_NUM_SEQS الفعّال
+# لكل نسخة أقل، لكن المجموع بين النسختين يقارب نفس السعة الكلية. الباك اند
+# (app/engine.py) يوزّع الطلبات بينهن بـ round-robin مع تتبّع جاهزية مستقلة
+# لكل نسخة — انظر VLLM_BASE_URLS بـ.env.example.
 
 set -e
 cd "$(dirname "$0")"
@@ -54,25 +64,36 @@ API_PORT="${API_PORT:-8000}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-10000}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-350}"
-VLLM_LOG="/tmp/vllm_boot.log"
+# عدد نسخ vLLM بالتوازي على نفس الكارت — كل نسخة منفذها VLLM_PORT+i ونصيبها
+# من GPU_MEMORY_UTILIZATION/VLLM_REPLICAS ومن MAX_NUM_SEQS/VLLM_REPLICAS.
+VLLM_REPLICAS="${VLLM_REPLICAS:-2}"
+VLLM_LOG_PREFIX="/tmp/vllm_boot"
+
+# نسبة VRAM ونصيب الطلبات المتزامنة لكل نسخة — bc غير مضمون بكل صورة، فنستخدم
+# awk (متوفر دائماً). REPLICA_GPU_MEM بدقة 4 خانات عشرية (كافية لعلَم vLLM).
+REPLICA_GPU_MEM=$(awk -v u="${GPU_MEMORY_UTILIZATION}" -v n="${VLLM_REPLICAS}" 'BEGIN { printf "%.4f", u / n }')
+REPLICA_MAX_NUM_SEQS=$(( MAX_NUM_SEQS / VLLM_REPLICAS ))
 
 # تنظيف عمليات لنا عالقة من تشغيلة سابقة (start.sh انقطع بمنتصف الطريق أو
-# أُعيد تشغيله يدوياً بنفس الجلسة)، ثم تحقق أن VLLM_PORT فاضي فعلاً — لو
-# لسا محجوز فمن خدمة نظام (لاحظنا nginx داخلي ماسك 8001 على بعض قوالب
+# أُعيد تشغيله يدوياً بنفس الجلسة)، ثم تحقق أن كل منافذ النسخ فاضية فعلاً —
+# لو لسا محجوزة فمن خدمة نظام (لاحظنا nginx داخلي ماسك 8001 على بعض قوالب
 # RunPod العامة) وليس عملية vllm سابقة لنا، فنفشل بخطأ واضح فوراً بدل تكرار
 # "Address already in use" الغامض من داخل vLLM.
 _port_owner() {
     ss -ltnp 2>/dev/null | grep ":$1 " | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | head -1
 }
-pkill -9 -f "vllm.entrypoints.openai.api_server.*--port ${VLLM_PORT}" 2>/dev/null || true
+pkill -9 -f "vllm.entrypoints.openai.api_server" 2>/dev/null || true
 pkill -9 -f "uvicorn app.main:app" 2>/dev/null || true
 sleep 1
-owner=$(_port_owner "${VLLM_PORT}")
-if [ -n "${owner}" ]; then
-    echo "🛑 المنفذ ${VLLM_PORT} محجوز فعلاً من عملية نظام: ${owner} (مو خادم vLLM سابق لنا)."
-    echo "   غيّر VLLM_PORT لمنفذ ثاني، مثلاً: VLLM_PORT=18002 bash start.sh"
-    exit 1
-fi
+for i in $(seq 0 $((VLLM_REPLICAS - 1))); do
+    port=$((VLLM_PORT + i))
+    owner=$(_port_owner "${port}")
+    if [ -n "${owner}" ]; then
+        echo "🛑 المنفذ ${port} محجوز فعلاً من عملية نظام: ${owner} (مو خادم vLLM سابق لنا)."
+        echo "   غيّر VLLM_PORT لمنفذ يبدأ به التسلسل، مثلاً: VLLM_PORT=18101 bash start.sh"
+        exit 1
+    fi
+done
 
 _fix_cuda_lib_path() {
     # مكتبات CUDA runtime قد تُثبَّت كحزم pip (nvidia-cuda-runtime-cu13...)
@@ -99,54 +120,74 @@ _fix_cuda_lib_path() {
 }
 
 _start_vllm() {
+    # $1=منفذ $2=ملف اللوق — يخلّف العملية بالخلفية بالشل الحالي نفسه (لا
+    # command substitution: subshell $(...) يفقد ملكية العملية الخلفية بمجرد
+    # خروجه ببعض بيئات bash، فيوصل PID لعملية ميتة بالشل الأم). النتيجة تُقرأ
+    # مباشرة من $! بعد الاستدعاء عبر المتغير العالمي VLLM_LAST_PID.
     python3 -m vllm.entrypoints.openai.api_server \
         --model "${MODEL_NAME}" \
         --host 127.0.0.1 \
-        --port "${VLLM_PORT}" \
+        --port "$1" \
         --max-model-len "${MAX_MODEL_LEN}" \
-        --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
-        --max-num-seqs "${MAX_NUM_SEQS}" \
+        --gpu-memory-utilization "${REPLICA_GPU_MEM}" \
+        --max-num-seqs "${REPLICA_MAX_NUM_SEQS}" \
         --async-scheduling \
         --enable-prefix-caching \
         --limit-mm-per-prompt '{"image": 1, "audio": 0}' \
-        > "${VLLM_LOG}" 2>&1 &
-    VLLM_PID=$!
+        > "$2" 2>&1 &
+    VLLM_LAST_PID=$!
 }
 
-echo "==> تشغيل خادم vLLM على المنفذ ${VLLM_PORT} (الموديل: ${MODEL_NAME})..."
-_start_vllm
-# ننتظر شوي ونتأكد أن العملية ما ماتت فوراً (فشل استيراد/تحميل مبكر) قبل ما
-# نكمل — أخطاء لاحقة (OOM أثناء تحميل الأوزان) تبقى تظهر بـ VLLM_LOG لاحقاً.
-sleep 8
-if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
-    echo "🛑 خادم vLLM انطفى فوراً — سجل الإقلاع:"
-    tail -n 40 "${VLLM_LOG}"
-    if grep -qi "Gemma4ForConditionalGeneration\|is not supported for now\|ValueError: Model architectures" "${VLLM_LOG}"; then
-        echo "==> السبب: نسخة vllm الحالية لا تدعم معمارية Gemma4 — تثبيت nightly wheel..."
-        pip install -U vllm --pre \
-            --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
-            --extra-index-url https://download.pytorch.org/whl/cu129 \
-            --index-strategy unsafe-best-match
-    elif grep -qi "libcudart\|libcublas\|cannot open shared object file" "${VLLM_LOG}"; then
-        echo "==> السبب: مسار مكتبات CUDA runtime ناقص — إصلاح LD_LIBRARY_PATH..."
-        _fix_cuda_lib_path
-    else
-        echo "🛑 سبب غير معروف — راجع السجل أعلاه يدوياً. إيقاف."
-        exit 1
-    fi
-    echo "==> إعادة محاولة تشغيل خادم vLLM..."
-    _start_vllm
-    sleep 8
-    if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
-        echo "🛑 فشلت المحاولة الثانية أيضاً — سجل الإقلاع:"
-        tail -n 40 "${VLLM_LOG}"
-        exit 1
-    fi
-fi
-echo "==> خادم vLLM شغّال (PID ${VLLM_PID})، يكمل تحميل الأوزان بالخلفية — راقب ${VLLM_LOG}"
+VLLM_PIDS=()
+VLLM_LOGS=()
+for i in $(seq 0 $((VLLM_REPLICAS - 1))); do
+    port=$((VLLM_PORT + i))
+    log="${VLLM_LOG_PREFIX}_${i}.log"
+    VLLM_LOGS+=("${log}")
+    echo "==> تشغيل نسخة vLLM رقم ${i} على المنفذ ${port} (حصة GPU ${REPLICA_GPU_MEM}, الموديل: ${MODEL_NAME})..."
+    _start_vllm "${port}" "${log}"
+    VLLM_PIDS+=("${VLLM_LAST_PID}")
+done
 
-# لو انطفى أي من العمليتين ينطفي الـ container كامل (أوضح من خدمة نص ميتة)
-trap 'kill ${VLLM_PID} 2>/dev/null || true' EXIT
+# ننتظر شوي ونتأكد أن كل نسخة ما ماتت فوراً (فشل استيراد/تحميل مبكر) قبل ما
+# نكمل — أخطاء لاحقة (OOM أثناء تحميل الأوزان) تبقى تظهر باللوق الخاص فيها لاحقاً.
+sleep 8
+for i in $(seq 0 $((VLLM_REPLICAS - 1))); do
+    port=$((VLLM_PORT + i))
+    log="${VLLM_LOGS[$i]}"
+    pid="${VLLM_PIDS[$i]}"
+    if ! kill -0 "${pid}" 2>/dev/null; then
+        echo "🛑 نسخة vLLM رقم ${i} (منفذ ${port}) انطفت فوراً — سجل الإقلاع:"
+        tail -n 40 "${log}"
+        if grep -qi "Gemma4ForConditionalGeneration\|is not supported for now\|ValueError: Model architectures" "${log}"; then
+            echo "==> السبب: نسخة vllm الحالية لا تدعم معمارية Gemma4 — تثبيت nightly wheel..."
+            pip install -U vllm --pre \
+                --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
+                --extra-index-url https://download.pytorch.org/whl/cu129 \
+                --index-strategy unsafe-best-match
+        elif grep -qi "libcudart\|libcublas\|cannot open shared object file" "${log}"; then
+            echo "==> السبب: مسار مكتبات CUDA runtime ناقص — إصلاح LD_LIBRARY_PATH..."
+            _fix_cuda_lib_path
+        else
+            echo "🛑 سبب غير معروف — راجع السجل أعلاه يدوياً. إيقاف."
+            exit 1
+        fi
+        echo "==> إعادة محاولة تشغيل نسخة vLLM رقم ${i}..."
+        _start_vllm "${port}" "${log}"
+        pid="${VLLM_LAST_PID}"
+        VLLM_PIDS[$i]="${pid}"
+        sleep 8
+        if ! kill -0 "${pid}" 2>/dev/null; then
+            echo "🛑 فشلت المحاولة الثانية أيضاً (نسخة ${i}) — سجل الإقلاع:"
+            tail -n 40 "${log}"
+            exit 1
+        fi
+    fi
+    echo "==> نسخة vLLM رقم ${i} شغّالة (PID ${pid}) على المنفذ ${port}، تكمل تحميل الأوزان بالخلفية — راقب ${log}"
+done
+
+# لو انطفت أي نسخة ينطفي الـ container كامل (أوضح من خدمة نص ميتة جزئياً)
+trap 'for p in "${VLLM_PIDS[@]}"; do kill "$p" 2>/dev/null || true; done' EXIT
 
 echo "==> تشغيل FastAPI على المنفذ ${API_PORT}..."
 echo "    (الميزات تشتغل فوراً بوضع fallback؛ فاحص الجاهزية بـ app/engine.py"

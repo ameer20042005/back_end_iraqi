@@ -7,6 +7,7 @@
 """
 
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic_settings import BaseSettings
 
@@ -19,13 +20,44 @@ class Settings(BaseSettings):
     # start.sh لتمريرها لـ `vllm serve`.
     model_name: str = "ameer4wisam/gemma-iraqi-10k-merged"
 
-    # عنوان خادم vLLM OpenAI-متوافق — الباك اند عميل HTTP رفيع فقط
-    # (انظر app/engine.py). محلياً بدون الخادم يبقى ready=False وكل الميزات
+    # عناوين خوادم vLLM OpenAI-متوافقة — الباك اند عميل HTTP رفيع فقط
+    # (انظر app/engine.py). محلياً بدون أي خادم يبقى ready=False وكل الميزات
     # ترجع لوضع fallback.
-    # ⚠️ لازم يطابق VLLM_PORT بـ start.sh حرفياً (18001 افتراضياً، مو 8001 —
-    # بعض قوالب RunPod العامة عندها nginx داخلي ماسك 8001 مسبقاً، لاحظناه
-    # فعلياً بالنشر). لو غيّرت VLLM_PORT بمتغير بيئة، غيّر هذا معه بنفس القيمة.
+    #
+    # نسختان (أو أكثر) من نفس الموديل بالتوازي على نفس كارت GPU (start.sh
+    # يشغّلهن فعلياً حسب VLLM_REPLICAS، افتراضياً 2 — كل نسخة على منفذ
+    # VLLM_PORT+i بحصة VRAM مقسّمة). engine.py يوزّع الطلبات بينهن round-robin
+    # مع تتبّع جاهزية مستقلة لكل نسخة، فطلب طويل بنسخة وحدة ما يعطّل الثانية.
+    #
+    # مفصولة بفواصل بمتغير بيئة واحد VLLM_BASE_URLS (مثلاً
+    # "http://127.0.0.1:18001/v1,http://127.0.0.1:18002/v1"). القيمة
+    # الافتراضية هنا تُبنى من vllm_base_url (المنفذ الأساسي) + عدد النسخ
+    # الافتراضي بـ start.sh، فلا حاجة لضبط شيء إذا التزمت بالإعداد الافتراضي.
+    # ⚠️ لازم تطابق منافذ start.sh حرفياً (VLLM_PORT وVLLM_REPLICAS) — لا ربط
+    # تلقائي بينهما، فأي تغيير بأحدهما يتطلب تحديث الآخر يدوياً.
     vllm_base_url: str = "http://127.0.0.1:18001/v1"
+    vllm_base_urls: Optional[str] = None
+    # عدد النسخ الافتراضي عند عدم ضبط VLLM_BASE_URLS يدوياً — لازم يطابق
+    # VLLM_REPLICAS بـ start.sh (يُستخدم فقط لبناء القائمة تلقائياً من
+    # vllm_base_url بزيادة رقم المنفذ لكل نسخة؛ لا يوقف vLLM نفسه).
+    vllm_replicas: int = 2
+
+    @property
+    def resolved_vllm_base_urls(self) -> list[str]:
+        """قائمة عناوين خوادم vLLM الفعلية — من VLLM_BASE_URLS (مفصولة
+        بفواصل) إن وُجدت، وإلا تُبنى تلقائياً من vllm_base_url بزيادة رقم
+        المنفذ لكل نسخة حسب vllm_replicas (يطابق تسلسل منافذ start.sh)."""
+        if self.vllm_base_urls:
+            return [u.strip() for u in self.vllm_base_urls.split(",") if u.strip()]
+
+        parsed = urlsplit(self.vllm_base_url)
+        if parsed.port is None:
+            return [self.vllm_base_url]
+        urls = []
+        for i in range(self.vllm_replicas):
+            netloc = f"{parsed.hostname}:{parsed.port + i}"
+            urls.append(urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)))
+        return urls
 
     # توكن Hugging Face — مطلوب لأن Gemma موديل بوابة (gated) وربما مستودع
     # الموديل خاص. لا قيمة افتراضية أبداً؛ يُقرأ فقط من متغير البيئة HF_TOKEN

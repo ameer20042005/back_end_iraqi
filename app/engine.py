@@ -1,19 +1,30 @@
 # -*- coding: utf-8 -*-
-"""عميل vLLM — الباك اند يتصل بخادم vLLM OpenAI-متوافق منفصل بدل تحميل
-الموديل داخل عملية FastAPI.
+"""عميل vLLM — الباك اند يتصل بخوادم vLLM OpenAI-متوافقة منفصلة (نسخة أو
+أكثر من نفس الموديل بالتوازي على نفس كارت GPU) بدل تحميل الموديل داخل عملية
+FastAPI.
 
-**البنية** (حسب وصفة vLLM الرسمية لـ Gemma 4):
+**البنية** (حسب وصفة vLLM الرسمية لـ Gemma 4، مع نسخ متوازية):
     ┌─────────────────────┐  HTTP   ┌──────────────────────────────┐
-    │ FastAPI (منفذ 8000) │ ──────► │ vLLM serve (منفذ 8001)       │
-    │ RAG + دروع + جلسات  │         │ gemma-iraqi-finetune-v2      │
-    └─────────────────────┘         │ continuous batching حقيقي    │
-                                    └──────────────────────────────┘
+    │ FastAPI (منفذ 8000) │ ──────► │ vLLM serve #0 (منفذ 18001)   │
+    │ RAG + دروع + جلسات  │  ─┐     │ gemma-iraqi-finetune-v2      │
+    └─────────────────────┘   │     └──────────────────────────────┘
+                               │     ┌──────────────────────────────┐
+                               └───► │ vLLM serve #1 (منفذ 18002)   │
+                                     │ نفس الموديل — نفس الكارت     │
+                                     └──────────────────────────────┘
 
 دعم Gemma4ForConditionalGeneration وصل لـ vLLM عبر PR #44429 (صورة
 vllm/vllm-openai:gemma4-unified أو nightly wheel) — انظر Dockerfile/start.sh.
 هذا يستبدل آلية transformers.generate() + micro-batching اليدوي السابقة
 بالكامل: vLLM يدير PagedAttention وcontinuous batching داخلياً، فمئات
 الطلبات المتزامنة تتقاسم الـ GPU تلقائياً بدون طوابير يدوية.
+
+**نسخ متعددة بالتوازي** (start.sh يشغّلهن حسب VLLM_REPLICAS، انظر
+app/config.py::resolved_vllm_base_urls): عملية vllm serve منفصلة لكل نسخة =
+جدولة/طابور مستقلان، فطلب طويل بنسخة وحدة ما يؤخر طابور الثانية. هذا الملف
+يوزّع كل طلب على النسخة الأقل ازدحاماً حالياً (least-outstanding-requests)
+عبر _pick_replica، ويتتبّع جاهزية كل نسخة بشكل مستقل — سقوط نسخة وحدة يحوّل
+كل الحمل تلقائياً للباقيات بدل رجوع كامل لوضع fallback.
 
 **قالب المحادثة يطبّقه vLLM بجهة الخادم** (/v1/chat/completions يستقبل
 messages مباشرة) — لذلك render_prompt/render_multimodal_prompt صارتا تمريراً
@@ -22,8 +33,8 @@ messages مباشرة) — لذلك render_prompt/render_multimodal_prompt صا�
 **التوليد حتمي دائماً** (temperature=0.0) — وصفة النوتبوك المعتمدة الوحيدة؛
 أي sampling أنتج انهيار مخرجات بالتجربة الفعلية. طلبات temperature تُتجاهل.
 
-محلياً بدون خادم vLLM يبقى `ready = False` والباك اند يرجع لوضع fallback
-(بدون توليد نموذج) — نفس السلوك السابق.
+محلياً بدون أي خادم vLLM جاهز يبقى `ready = False` والباك اند يرجع لوضع
+fallback (بدون توليد نموذج) — نفس السلوك السابق.
 """
 
 import asyncio
@@ -44,7 +55,7 @@ Message = Dict[str, object]
 # messages جاهزة، أو نص خام (توافقاً مع أي مستدعٍ قديم يمرر نصاً)
 PromptLike = Union[str, List[Message]]
 
-_READY_POLL_SECONDS = 10   # فترة إعادة فحص جاهزية خادم vLLM بالخلفية
+_READY_POLL_SECONDS = 10   # فترة إعادة فحص جاهزية خوادم vLLM بالخلفية
 _REQUEST_TIMEOUT = 120.0   # مهلة طلب توليد واحد (ثوانٍ)
 
 
@@ -65,8 +76,10 @@ def _image_to_data_uri(image) -> str:
 
 class LLMEngine:
     def __init__(self):
-        self._ready = False
-        self._client: Optional[httpx.AsyncClient] = None
+        self._base_urls: List[str] = list(settings.resolved_vllm_base_urls)
+        self._clients: List[httpx.AsyncClient] = []
+        self._replica_ready: List[bool] = [False] * len(self._base_urls)
+        self._inflight: List[int] = [0] * len(self._base_urls)
         self._poller_task: Optional["asyncio.Task"] = None
         self.metrics = {
             "requests_served": 0,
@@ -76,19 +89,22 @@ class LLMEngine:
 
     @property
     def ready(self) -> bool:
-        return self._ready
+        """جاهز إذا نسخة واحدة على الأقل تستجيب — سقوط نسخة لا يوقف الميزات
+        طالما نسخة ثانية بالتوازي شغّالة."""
+        return any(self._replica_ready)
 
     # ------------------------------------------------------------------
     # دورة الحياة
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """يفتح عميل HTTP ويشغّل فاحص جاهزية بالخلفية — ما ننتظر vLLM هنا
-        حتى لا نأخر إقلاع FastAPI (خادم vLLM يستغرق دقائق بتحميل الأوزان)؛
-        الفاحص يقلب ready=True أول ما يجهز."""
-        self._client = httpx.AsyncClient(
-            base_url=settings.vllm_base_url, timeout=_REQUEST_TIMEOUT
-        )
+        """يفتح عميل HTTP لكل نسخة vLLM ويشغّل فاحص جاهزية بالخلفية — ما
+        ننتظر vLLM هنا حتى لا نأخر إقلاع FastAPI (خادم vLLM يستغرق دقائق
+        بتحميل الأوزان)؛ الفاحص يقلب كل نسخة إلى ready=True أول ما تجهز."""
+        self._clients = [
+            httpx.AsyncClient(base_url=url, timeout=_REQUEST_TIMEOUT)
+            for url in self._base_urls
+        ]
         self._poller_task = asyncio.create_task(self._readiness_poller())
 
     async def shutdown(self) -> None:
@@ -98,30 +114,44 @@ class LLMEngine:
                 await self._poller_task
             except (asyncio.CancelledError, Exception):
                 pass
-        if self._client is not None:
-            await self._client.aclose()
-        self._ready = False
+        for client in self._clients:
+            await client.aclose()
+        self._replica_ready = [False] * len(self._base_urls)
 
-    async def _probe(self) -> bool:
-        """فحص واحد لجاهزية خادم vLLM (/v1/models يرجع 200 فقط بعد اكتمال
+    async def _probe(self, client: httpx.AsyncClient) -> bool:
+        """فحص واحد لجاهزية نسخة vLLM (/v1/models يرجع 200 فقط بعد اكتمال
         تحميل الموديل فعلياً)."""
         try:
-            resp = await self._client.get("/models", timeout=5.0)
+            resp = await client.get("/models", timeout=5.0)
             return resp.status_code == 200
         except Exception:
             return False
 
     async def _readiness_poller(self) -> None:
-        """يفحص الجاهزية دورياً: يلتقط إقلاع vLLM المتأخر عن FastAPI، ويكتشف
-        سقوط الخادم لاحقاً فيرجّع الميزات لوضع fallback بدل أخطاء 500."""
+        """يفحص جاهزية كل نسخة دورياً وباستقلالية: يلتقط إقلاع vLLM المتأخر
+        عن FastAPI، ويكتشف سقوط أي نسخة لاحقاً فيوقف توجيه طلبات إلها (بلا
+        ما يأثر على النسخ الباقية) — الرجوع لوضع fallback الكامل يصير فقط
+        لو كل النسخ سقطت معاً."""
         while True:
-            was_ready = self._ready
-            self._ready = await self._probe()
-            if self._ready and not was_ready:
-                logger.info("✅ خادم vLLM جاهز على %s", settings.vllm_base_url)
-            elif was_ready and not self._ready:
-                logger.warning("⚠️ خادم vLLM ما عاد يستجيب — الميزات رجعت لوضع fallback")
+            for i, client in enumerate(self._clients):
+                was_ready = self._replica_ready[i]
+                self._replica_ready[i] = await self._probe(client)
+                if self._replica_ready[i] and not was_ready:
+                    logger.info("✅ نسخة vLLM #%d جاهزة على %s", i, self._base_urls[i])
+                elif was_ready and not self._replica_ready[i]:
+                    logger.warning(
+                        "⚠️ نسخة vLLM #%d (%s) ما عادت تستجيب", i, self._base_urls[i]
+                    )
             await asyncio.sleep(_READY_POLL_SECONDS)
+
+    def _pick_replica(self) -> int:
+        """يختار النسخة الأقل ازدحاماً حالياً (least-outstanding-requests)
+        من بين النسخ الجاهزة فقط — توزيع أحمال بسيط لكنه يتأقلم تلقائياً مع
+        طلبات متفاوتة الطول (مقابل round-robin الأعمى)."""
+        ready_indices = [i for i, r in enumerate(self._replica_ready) if r]
+        if not ready_indices:
+            raise RuntimeError("لا توجد نسخة vLLM جاهزة حالياً")
+        return min(ready_indices, key=lambda i: self._inflight[i])
 
     # ------------------------------------------------------------------
     # صياغة البرومبت — تمرير مباشر (vLLM يطبّق قالب المحادثة بجهة الخادم)
@@ -211,14 +241,17 @@ class LLMEngine:
     ) -> dict:
         body = self._build_body(messages, max_tokens, stop, guided_json)
 
+        replica = self._pick_replica()
+        self._inflight[replica] += 1
         t0 = time.monotonic()
         try:
-            resp = await self._client.post("/chat/completions", json=body)
+            resp = await self._clients[replica].post("/chat/completions", json=body)
             resp.raise_for_status()
         except Exception:
             self.metrics["errors"] += 1
             raise
         finally:
+            self._inflight[replica] -= 1
             elapsed_ms = (time.monotonic() - t0) * 1000
             self.metrics["requests_served"] += 1
             self.metrics["request_latencies_ms"].append(elapsed_ms)
@@ -242,10 +275,12 @@ class LLMEngine:
         نقص أي دلتا نص فيها ونتجاهل الباقي (role وما شابه)."""
         body = self._build_body(messages, max_tokens, stop, guided_json=None, stream=True)
 
+        replica = self._pick_replica()
+        self._inflight[replica] += 1
         t0 = time.monotonic()
         got_any = False
         try:
-            async with self._client.stream("POST", "/chat/completions", json=body) as resp:
+            async with self._clients[replica].stream("POST", "/chat/completions", json=body) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
@@ -265,6 +300,7 @@ class LLMEngine:
             self.metrics["errors"] += 1
             raise
         finally:
+            self._inflight[replica] -= 1
             elapsed_ms = (time.monotonic() - t0) * 1000
             self.metrics["requests_served"] += 1
             self.metrics["request_latencies_ms"].append(elapsed_ms)
@@ -372,8 +408,13 @@ class LLMEngine:
 
         return {
             "mode": "vllm_openai_client",
-            "vllm_base_url": settings.vllm_base_url,
-            "vllm_ready": self._ready,
+            "vllm_replicas": [
+                {"base_url": url, "ready": ready, "inflight": inflight}
+                for url, ready, inflight in zip(
+                    self._base_urls, self._replica_ready, self._inflight
+                )
+            ],
+            "vllm_ready": self.ready,
             "requests_served": self.metrics["requests_served"],
             "errors": self.metrics["errors"],
             "request_latency_ms_p50": _pct(0.50),

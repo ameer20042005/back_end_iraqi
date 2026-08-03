@@ -65,14 +65,18 @@ docker push <username>/back-end-iraqi:latest
 |---|---|---|
 | `GET /health` | فحص الصحة | لا |
 | `GET /gpu` | معلومات GPU/CUDA وحالة محرك الموديل | لا |
+| `GET /metrics` | إحصاءات عميل vLLM (طلبات، أخطاء، أزمنة استجابة) | لا |
 | `POST /sales/chat` | وكيل مبيعات — رد كامل، يرجع `order` مملوءاً تلقائياً عند تثبيت الطلب | `sales_api_key` |
-| `POST /sales/chat/stream` | وكيل مبيعات — بث SSE (رد كامل بقطعة واحدة)، حدث `done` النهائي يحمل `order` | `sales_api_key` |
-| `POST /support/chat` | دعم عملاء — تتبع طلب برقم الطلب/الهاتف عبر أداة `get_order_status` | `support_api_key` |
-| `POST /orders/create` | إنشاء طلب من `text` أو `audio` (multipart) — يرجع JSON طلب مباشرة بدون محادثة | `orders_api_key` |
+| `POST /sales/chat/stream` | وكيل مبيعات — بث SSE حقيقي توكن-بتوكن، حدث `done` النهائي يحمل `order` | `sales_api_key` |
+| `POST /support/chat` | دعم عملاء — تتبع طلب برقم الطلب/الهاتف حتمياً، أو سؤال عام عبر أداة `get_order_status` | `support_api_key` |
+| `POST /support/chat/stream` | نفس `/support/chat` ببث SSE حقيقي توكن-بتوكن (المسار الحتمي يبقى فورياً) | `support_api_key` |
+| `POST /orders/create` | إنشاء طلب من `text`/`audio`/`image` (multipart، مدخل واحد بس) — يرجع JSON طلب مباشرة بدون محادثة | `orders_api_key` |
+| `POST /voice_followup/ask` | متابعة صوتية — يستقبل تفاصيل طلب (من باك اند السستم) ويرجع سؤالاً صوتياً WAV | `voice_followup_api_key` |
+| `POST /voice_followup/respond` | يستقبل رد الزبون الصوتي، يحلّل السبب ويرسله لباك اند السستم، يرجع صوت شكر WAV | `voice_followup_api_key` |
 | `GET /docs` | واجهة Swagger التفاعلية | لا |
 | `GET /test` | لوحة اختبار API تفاعلية (HTML/CSS/JS ثابتة، بدون تبعيات) — خانات مفاتيح API معبّأة مسبقاً بالشريط الجانبي — انظر [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md#لوحة-اختبار-api-test-console) |
 
-جسم الطلب لـ `/sales/chat`, `/sales/chat/stream`, `/support/chat`:
+جسم الطلب لـ `/sales/chat`, `/sales/chat/stream`, `/support/chat`, `/support/chat/stream`:
 
 ```json
 {"message": "شنو معنى شلونك؟", "session_id": "اختياري لاستمرار نفس المحادثة"}
@@ -158,9 +162,11 @@ guided decoding يضمن JSON صالحاً فعلياً وقت التوليد ن
 |---|---|---|
 | `MODEL_NAME` | `ameer4wisam/gemma-iraqi-finetune-v2` | الموديل المدموج (base + LoRA اللهجة العراقية مندمجين بالأوزان فعلياً، يشمل أبراج الرؤية/الصوت — ينزّله خادم vLLM تلقائياً من HF Hub) |
 | `HF_TOKEN` | (فارغ) | **مطلوب** — Gemma موديل بوابة (gated) والمستودع المدموج قد يكون خاصاً، بدون توكن صحيح يفشل التنزيل بخطأ 401/403 |
-| `VLLM_BASE_URL` | `http://127.0.0.1:8001/v1` | عنوان خادم vLLM من جهة الباك اند (`app/engine.py`) |
-| `VLLM_PORT` | `8001` | منفذ خادم vLLM (يقرأه `start.sh`) |
-| `GPU_MEMORY_UTILIZATION` | `0.90` | نسبة VRAM لموديل vLLM + KV cache (حسب الوصفة الرسمية) |
+| `VLLM_BASE_URL` | `http://127.0.0.1:8001/v1` | عنوان النسخة الأولى من خادم vLLM من جهة الباك اند (`app/engine.py`) — النسخ الإضافية (`VLLM_REPLICAS`) تُشتق منه تلقائياً بزيادة رقم المنفذ |
+| `VLLM_PORT` | `8001` | منفذ النسخة الأولى من خادم vLLM (يقرأه `start.sh`) |
+| `VLLM_REPLICAS` | `2` | عدد نسخ vLLM المتوازية على نفس كارت GPU (كل نسخة منفذها `VLLM_PORT+i` وحصتها من `GPU_MEMORY_UTILIZATION`/`MAX_NUM_SEQS` مقسومة على العدد) — الباك اند يوزّع الطلبات بينهن حسب الازدحام الحالي (least-outstanding) |
+| `VLLM_BASE_URLS` | (فارغ، يُشتق تلقائياً) | عناوين نسخ vLLM مفصولة بفواصل — عرّفه فقط لو تريد عناوين مخصّصة تخالف الاشتقاق التلقائي من `VLLM_BASE_URL`/`VLLM_REPLICAS` (لا يقرأه `start.sh`) |
+| `GPU_MEMORY_UTILIZATION` | `0.90` | نسبة VRAM الكلية (لكل النسخ مجتمعة) لموديل vLLM + KV cache (حسب الوصفة الرسمية) |
 | `MAX_MODEL_LEN` | `4096` | أقصى طول سياق — أقصر = KV cache يتسع لطلبات متزامنة أكثر |
 | `RAG_TOP_K` | `5` | عدد وثائق RAG المسترجَعة لكل سؤال |
 | `WHISPER_MODEL` | `ayoubkirouane/whisper-small-ar` | موديل تحويل الصوت لنص العربي (`app/features/order_intake/transcribe.py`) |

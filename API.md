@@ -9,7 +9,7 @@
 
 ## المصادقة — مفتاح API خاص لكل خدمة
 
-كل خدمة (المبيعات، الدعم، إنشاء الطلبات) محمية بمفتاحها الخاص المستقل تماماً عن غيرها. المفتاح يُرسَل بهيدر HTTP:
+كل خدمة (المبيعات، الدعم، إنشاء الطلبات، المتابعة الصوتية) محمية بمفتاحها الخاص المستقل تماماً عن غيرها. المفتاح يُرسَل بهيدر HTTP:
 
 ```
 X-API-Key: <المفتاح>
@@ -20,10 +20,11 @@ X-API-Key: <المفتاح>
 | المبيعات | `POST /sales/chat`, `POST /sales/chat/stream` | `sales_api_key` | `sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2` |
 | الدعم | `POST /support/chat` | `support_api_key` | `sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f` |
 | إنشاء الطلبات | `POST /orders/create` | `orders_api_key` | `sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c` |
+| المتابعة الصوتية | `POST /voice_followup/ask`, `POST /voice_followup/respond` | `voice_followup_api_key` | `sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b` |
 
 - **النقاط المفتوحة بلا مفتاح**: `GET /health`, `GET /gpu`, `GET /`, `GET /docs`.
 - **مفتاح خدمة لا يشتغل بخدمة ثانية** — مفتاح المبيعات مرفوض على `/support/chat` وبالعكس، كل خدمة تتحقق من مفتاحها هي حصراً (انظر `app/auth.py`).
-- **القيم مكتوبة ثابتة بالكود** (`app/config.py`) لتشتغل فوراً بلا أي إعداد `.env` — لو تحتاج قيماً مختلفة (مثلاً بيئة إنتاج منفصلة)، عرّف نفس الأسماء بمتغيرات بيئة (`SALES_API_KEY`, `SUPPORT_API_KEY`, `ORDERS_API_KEY`) وهي تتجاوز الثابتة بالكود تلقائياً (`.env` أو Environment Variables بإعدادات RunPod).
+- **القيم مكتوبة ثابتة بالكود** (`app/config.py`) لتشتغل فوراً بلا أي إعداد `.env` — لو تحتاج قيماً مختلفة (مثلاً بيئة إنتاج منفصلة)، عرّف نفس الأسماء بمتغيرات بيئة (`SALES_API_KEY`, `SUPPORT_API_KEY`, `ORDERS_API_KEY`, `VOICE_FOLLOWUP_API_KEY`) وهي تتجاوز الثابتة بالكود تلقائياً (`.env` أو Environment Variables بإعدادات RunPod).
 
 **أمثلة استدعاء:**
 
@@ -44,6 +45,13 @@ curl -X POST http://localhost:8000/support/chat \
 curl -X POST http://localhost:8000/orders/create \
   -H "X-API-Key: sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" \
   -F "text=أريد لابتوب لينوفو"
+
+# متابعة صوتية (يرجع ملف WAV، انظر تفصيل كامل بقسم المتابعة الصوتية أدناه)
+curl -X POST http://localhost:8000/voice_followup/ask \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
+  -d '{"order_id": "ORD-1001", "status": "ملغي"}' \
+  -o question.wav
 ```
 
 **أخطاء المصادقة:**
@@ -209,7 +217,14 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
   "session_id": "6ca92bdb-98fd-4843-a1e1-824b736c8587",
   "answer": "عندنا لابتوب لينوفو IdeaPad 15 بسعر 750000 دينار...",
   "order": null,
-  "engine": "vllm"
+  "engine": "vllm",
+  "tool_calls": [
+    {
+      "tool": "search_products",
+      "args": {"query": "لابتوب", "top_k": 5},
+      "result": [{"id": "p001", "name": "لابتوب لينوفو IdeaPad 15", "price": 750000, "currency": "IQD"}]
+    }
+  ]
 }
 ```
 
@@ -252,22 +267,29 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 | `answer` | string | رد الوكيل للعميل (نص المحادثة العادي، بدون أي علامات داخلية) |
 | `order` | object \| null | `null` إلا لو العميل أكّد الشراء بنفس هذا الرد — عندها كائن `OrderConfirmation` كامل (تفصيله بالأسفل) |
 | `engine` | string | `"vllm"` (توليد حقيقي) أو `"fallback"` (محلياً بدون GPU) |
+| `tool_calls` | array | سجل استدعاءات أداة `search_products` بهذا الدور فقط (`{tool, args, result}` لكل استدعاء) — للشفافية/التصحيح فقط، لا يدخل بأي منطق قرار. مصفوفة فارغة لو الموديل جاوب بلا أداة أو بوضع `fallback` |
 
 **ملاحظة مهمة**: `order` يظهر فقط بالرد اللي فيه العميل أكّد الشراء صراحة. أي رد بعده (لو رجع يسأل شي ثاني بنفس الجلسة) يرجّع `order: null` من جديد. القرار بالاكتمال يجيك من حقل `order_ready` داخلي بمخطط guided_json (انظر [README.md](README.md#آلية-الوكيل-يقرر-واستدعاء-الأدوات))، مو من علامة نصية بالرد.
 
 ### `POST /sales/chat/stream`
-نفس المدخل بالضبط، لكن بصيغة SSE (`Content-Type: text/event-stream`). **الرد يوصل كقطعة واحدة لا تدريجياً**: كل رد من الموديل مقيَّد بمخطط JSON صارم (`guided_json`) فلازم يكتمل بالكامل قبل ما يصير صالحاً للتحليل، فالبث هنا شكلي (توافقاً مع عملاء SSE موجودين) لا تدفقاً حقيقياً توكن-بتوكن.
+نفس المدخل بالضبط، لكن بصيغة SSE (`Content-Type: text/event-stream`) — **بث حقيقي توكن-بتوكن** (لا قطعة واحدة): جولة قرار مصغّرة أولاً وراءها بلا بث (استدعاء أداة `search_products` + تحديد `order_ready` عبر `guided_json` — لازم يكتمل هذا الجزء لأنه JSON مقيَّد)، ثم — إذا البوابة الحتمية لم تحجب تثبيت الطلب — جولة نص حرة تُبث فعلياً دلتا-بدلتا فور توليد كل توكن من vLLM (`stream: true`، بلا `guided_json`)، مستفيدة من prefix caching (نفس بادئة السياق محسوبة أصلاً بجولة القرار). أول توكن يصل العميل فور بدء جولة النص، بدل انتظار الرد كاملاً.
 
 **تدفق الأحداث:**
 ```
-data: {"delta": "عندنا لابتوب لينوفو IdeaPad 15 بسعر 750000 دينار..."}
+data: {"delta": "عندنا"}
 
-data: {"done": true, "session_id": "...", "order": null}
+data: {"delta": " لابتوب"}
+
+data: {"delta": " لينوفو IdeaPad 15 بسعر 750000 دينار..."}
+
+data: {"done": true, "session_id": "...", "order": null, "tool_calls": [...]}
 
 ```
 
-- حدث `delta` وحيد يحمل الرد كاملاً.
-- الحدث الأخير دايماً `{"done": true, ...}` ويحمل `order` (نفس شكل `/sales/chat` — `null` أو كائن `OrderConfirmation` كامل).
+- عدة أحداث `delta` متتالية، كل واحد يحمل جزءاً من الرد بترتيب وصوله من الموديل (اربطها بالتسلسل — النص الكامل = تجميعها).
+- استثناء: لو حُجب تثبيت الطلب لنقص بيانات (اسم/هاتف/عنوان)، يوصل سؤال حتمي واحد كدلتا وحيدة بدل توليد حر (أسرع وأدق من انتظار الموديل).
+- الحدث الأخير دايماً `{"done": true, ...}` ويحمل `order` (نفس شكل `/sales/chat` — `null` أو كائن `OrderConfirmation` كامل) و`tool_calls` (سجل استدعاء `search_products` بهذا الدور، نفس شكل `/sales/chat`).
+- محلياً بدون GPU (`engine` غير جاهز): دلتا واحدة بالرد الاحتياطي، ثم `done` بـ`tool_calls: []`.
 
 **مثال عميل (JavaScript، `fetch` + `ReadableStream`، أو `EventSource` لو عدّلت الطلب لـ GET — حالياً POST فتحتاج `fetch`):**
 ```js
@@ -313,9 +335,17 @@ while (true) {
 {
   "session_id": "edcfa5ad-18c3-4995-a96f-fb8ff9b3bf26",
   "answer": "طلبك ORD-1001 حالته: قيد التوصيل، متوقع يوصلك خلال يومين.",
-  "engine": "vllm"
+  "engine": "deterministic",
+  "tool_calls": []
 }
 ```
+
+| الحقل | النوع | الوصف |
+|---|---|---|
+| `session_id` | string | نفسه لو أرسلته، أو معرّف جديد تولّد تلقائياً |
+| `answer` | string | رد الوكيل للعميل |
+| `engine` | string | `"deterministic"` (رقم طلب/هاتف/حالة أُجيب مباشرة من `orders.json` بلا موديل — الحالة الأدق والأشيع)، `"vllm"` (سؤال عام أُجيب بالموديل+أداة `get_order_status`)، أو `"fallback"` (محلياً بدون GPU ولا تطابق حتمي) |
+| `tool_calls` | array | سجل استدعاء أداة `get_order_status` — يمتلئ فقط لما `engine == "vllm"` (المسار الحتمي لا يمر بحلقة الأدوات أصلاً فيبقى فارغاً حتى لو أجاب بنفس المعلومة) |
 
 بيانات الطلبات نفسها (Mock حالياً — `app/order_gateway.py`) بصيغة:
 ```json
@@ -327,6 +357,31 @@ while (true) {
   "eta": "خلال يومين"
 }
 ```
+
+### `POST /support/chat/stream`
+نفس مدخل `/support/chat` بالضبط، بصيغة SSE. **رقم طلب/هاتف/حالة صريحة بالرسالة** يُجاب حتمياً (`orders.json` مباشرة، بلا موديل) ويصل كدلتا واحدة فورية (بلا زمن استدلال). **أي سؤال عام آخر** يمر بجولة قرار مصغّرة (أداة `get_order_status` عند الحاجة) ثم بث حقيقي توكن-بتوكن لجولة النص الحرة — نفس بنية `/sales/chat/stream` تماماً.
+
+**تدفق الأحداث (سؤال عام):**
+```
+data: {"delta": "طلبك"}
+
+data: {"delta": " قيد التوصيل"}
+
+data: {"delta": "، متوقع يوصلك خلال يومين."}
+
+data: {"done": true, "session_id": "...", "tool_calls": [...]}
+
+```
+
+**تدفق الأحداث (رقم/حالة صريحة — مسار حتمي):**
+```
+data: {"delta": "طلبك ORD-1001 حالته: قيد التوصيل، متوقع يوصلك خلال يومين."}
+
+data: {"done": true, "session_id": "...", "tool_calls": []}
+
+```
+
+- الحدث الأخير دايماً `{"done": true, "session_id": ..., "tool_calls": [...]}` — بدون حقل `order` (هذا مختص بـ `/sales/chat*` فقط، الدعم لا يثبّت طلبات).
 
 ---
 
@@ -401,6 +456,108 @@ curl -X POST http://localhost:8000/orders/create -F "image=@order.jpg"
 | `503` | تحويل الصوت لنص غير متوفر بالسيرفر | "تحويل الصوت لنص غير متوفر محلياً..." |
 
 **ملاحظة**: مدخل `image` يستخدم نفس محرك vLLM ونفس أوزان الموديل المستخدَمة بـ `/sales/chat`/`/support/chat` — ماكو موديل ثانٍ يتحمّل ولا استهلاك ذاكرة إضافي.
+
+---
+
+## المتابعة الصوتية للطلبات
+
+مسار موجَّه لباك اند السستم (مو للزبون مباشرة): باك اند السستم يزوّدنا تفاصيل طلب بحالة معيّنة (ملغي، مرتجع...)، نولّد سؤالاً صوتياً عراقياً طبيعياً ونرجعه، باك اند السستم يشغّله للزبون ويسجّل رده، يرسل التسجيل لينا، نحلّل السبب ونرسله لباك اند السستم، ونرجع صوت شكر جاهز للزبون. **جسم الرد بكلا النقطتين ملف صوت WAV خام (`audio/wav`) — التفاصيل النصية (السؤال، النص المفرَّغ، الملخّص) توصل حصراً بهيدرات HTTP**، حتى يبقى جسم الرد صالحاً للتشغيل المباشر بلا أي تفكيك JSON مسبق.
+
+الجلسة (`session_id`) تعيش بالذاكرة فقط بين `/ask` و`/respond` (بلا تخزين دائم)، صالحة **30 دقيقة** وتُستهلك مرة واحدة (`/respond` يحذفها فور القراءة، حتى لو نجح الطلب) — استدعاء ثانٍ بنفس `session_id` يرجع `404`.
+
+⚠️ **هيدرات الرد نصوص عربية مرمَّزة percent-encoding (RFC 5987)** لأن هيدرات HTTP لازم Latin-1 فقط — فكّها بجهتك بـ `decodeURIComponent(...)` (JS) أو `urllib.parse.unquote(...)` (Python) قبل الاستخدام.
+
+### `POST /voice_followup/ask`
+
+**جسم الطلب** (`Content-Type: application/json`):
+```json
+{
+  "order_id": "ORD-1001",
+  "status": "ملغي",
+  "customer_name": "أحمد",
+  "customer_phone": "07701234567",
+  "customer_city": "بغداد",
+  "customer_district": "الكرادة",
+  "customer_address": "قرب مطعم كذا",
+  "items": [{"product_name": "لابتوب لينوفو IdeaPad 15", "quantity": 1}],
+  "reason_hint": "رفض الزبون الاستلام",
+  "notes": null
+}
+```
+
+| الحقل | النوع | إلزامي | الوصف |
+|---|---|---|---|
+| `order_id` | string | نعم | معرّف الطلب بنظام السستم |
+| `status` | string | نعم | حالة الطلب الحالية بالعربي (مثلاً "ملغي"، "مرتجع"، "لم يتم التسليم") — هي المحرّك الرئيسي لنوع السؤال المولَّد، بلا قائمة ثابتة بجهتنا |
+| `customer_name` / `customer_phone` / `customer_city` / `customer_district` / `customer_address` | string \| null | لا | بيانات الزبون من الطلب الأصلي — تُعاد لاحقاً كما هي مع نتيجة `/respond`، لا تُستنتَج من رد الزبون الصوتي |
+| `items` | array of `{product_name, quantity}` | لا | عناصر الطلب (`quantity` افتراضياً `1`) |
+| `reason_hint` | string \| null | لا | سبب أوّلي معروف بالسستم إن وُجد — يُستخدم كسياق إضافي بالسؤال |
+| `notes` | string \| null | لا | ملاحظات إضافية |
+
+**استجابة 200** — جسم صوت WAV خام + هيدرات:
+
+| الهيدر | الوصف |
+|---|---|
+| `X-Session-Id` | مرّره كما هو لـ `POST /voice_followup/respond` |
+| `X-Question-Text` | نص السؤال المولَّد (مرمَّز percent-encoding) — نفسه الذي حُوّل لصوت |
+
+```bash
+curl -X POST http://localhost:8000/voice_followup/ask \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
+  -d '{"order_id": "ORD-1001", "status": "ملغي", "customer_name": "أحمد"}' \
+  -o question.wav -D -
+```
+
+### `POST /voice_followup/respond`
+
+`multipart/form-data` + معامل استعلام `session_id` (من `/ask`).
+
+| المدخل | النوع | إلزامي | الوصف |
+|---|---|---|---|
+| `session_id` | query param | نعم | من هيدر `X-Session-Id` بردّ `/ask` |
+| `audio` | file (form) | نعم | تسجيل رد الزبون الصوتي — يتحول لنص عربي تلقائياً (نفس محرك Whisper المستخدَم بـ `/orders/create`) |
+
+**استجابة 200** — جسم صوت شكر WAV خام + هيدرات:
+
+| الهيدر | الوصف |
+|---|---|
+| `X-Reason-Summary` | ملخّص سبب الزبون كما فهمه الموديل (مرمَّز percent-encoding) |
+| `X-Customer-Transcript` | نص رد الزبون كاملاً بعد تحويل الصوت لنص (مرمَّز percent-encoding) |
+| `X-Query-Sent` | `"true"` لو انرسل الملخّص فعلاً لباك اند السستم، `"false"` لو فشل الإرسال (الصوت يرجع للزبون بكل الأحوال) |
+
+```bash
+curl -X POST "http://localhost:8000/voice_followup/respond?session_id=<من /ask>" \
+  -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
+  -F "audio=@customer_reply.wav" \
+  -o thanks.wav -D -
+```
+
+عند نجاح `/respond`، تُرسَل هذي الصيغة لباك اند السستم (`POST {SYSTEM_BACKEND_BASE_URL}/orders/{order_id}/feedback`، مسار مبدئي — TODO بالكود لحين توفر المسار الحقيقي):
+```json
+{
+  "order_id": "ORD-1001",
+  "status": "ملغي",
+  "customer_name": "أحمد",
+  "customer_phone": "07701234567",
+  "customer_city": "بغداد",
+  "customer_district": "الكرادة",
+  "customer_address": "قرب مطعم كذا",
+  "items": [{"product_name": "لابتوب لينوفو IdeaPad 15", "quantity": 1}],
+  "reason_summary": "الزبون يقول التوصيل تأخر وقرر يلغي الطلب",
+  "customer_transcript": "لا ماريده الحين، تأخر علي كثير..."
+}
+```
+
+**أخطاء محتملة:**
+
+| كود | السبب | الرسالة |
+|---|---|---|
+| `404` | `session_id` غير موجود أو منتهي (استُهلك بطلب `/respond` سابق، أو لم يصدر من `/ask` أصلاً) | "الجلسة غير موجودة أو انتهت صلاحيتها — استدعِ /ask من جديد." |
+| `422` | ملف صوتي مو مفهوم/فاضي | "ما كدرنا نفهم أي كلام بالملف الصوتي." |
+| `503` (على `/ask` أو `/respond`) | تحويل النص لصوت (`f5-tts`) أو الصوت لنص (`transformers`) غير مثبَّت محلياً | نص يوضح السبب |
+
+**ملاحظة**: بدون محرك vLLM جاهز (محلياً بدون GPU)، السؤال والتحليل يرجعان بنصوص احتياطية عامة ثابتة بدل توليد حقيقي — الميزة تبقى تشتغل بالكامل (توليد صوت فعلي، تحويل صوت لنص فعلي) إلا خطوة صياغة النص بالموديل.
 
 ---
 
