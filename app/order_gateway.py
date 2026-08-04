@@ -11,20 +11,43 @@
 مصادقاً بمفتاح API (انظر app/auth.py)، والنتيجة تُعالَج وتُرجَع للمتصل بلا
 أي احتفاظ بها هنا. البيانات تصل لحظياً وقت الاستدعاء فقط.
 
+**التحقق من الشكل (إخراج فقط)**: كل استجابة تمر عبر `SystemOrder`
+(`app/system_backend_schema.py`) — العقد الموثَّق رسمياً بـ
+API.md § "عقد باك اند السستم". طلب لا يطابق العقد يُستبعَد بصمت من القوائم
+(`search_by_phone`/`search_by_status`/`list_all`) أو يرجع None بـ
+`get_by_order_id`، بدل ما يمرر شكلاً غير متوقَّع للموديل أو للرد الحتمي.
+
 TODO: رابط ومسارات باك اند السستم الفعلية غير معروفة بعد — `SYSTEM_BACKEND_BASE_URL`
 (app/config.py) ومسارات `search`/`_headers` أدناه أفضل تخمين موثَّق. عدّلها
 فقط عند توفر التفاصيل الحقيقية؛ الواجهة (OrderStatusProvider/OrderSubmitter)
 والمستدعين (support/sales) لا يتغيّرون.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
 import httpx
+from pydantic import ValidationError
 
 from app.config import settings
 from app.order_schema import OrderConfirmation
 from app.system_backend import request as backend_request
+from app.system_backend_schema import SystemOrder
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_orders(raw_orders: list) -> List[dict]:
+    """يتحقق من كل طلب مقابل SystemOrder ويرجعه كـ dict. طلب لا يطابق
+    العقد يُستبعَد بصمت مع تحذير باللوق — انظر تعليق الملف أعلاه."""
+    parsed: List[dict] = []
+    for item in raw_orders:
+        try:
+            parsed.append(SystemOrder.model_validate(item).model_dump())
+        except ValidationError as exc:
+            logger.warning("عنصر طلب لا يطابق عقد SystemOrder، تم استبعاده: %s", exc)
+    return parsed
 
 # ---------------------------------------------------------------------------
 # إخراج (Outbound) — استعلام حالة طلب
@@ -73,19 +96,26 @@ class HttpOrderStatusProvider(OrderStatusProvider):
             return resp.json()
 
     async def get_by_order_id(self, order_id: str, api_key: str) -> Optional[dict]:
-        return await self._get(f"/orders/{order_id}", api_key)
+        data = await self._get(f"/orders/{order_id}", api_key)
+        if data is None:
+            return None
+        try:
+            return SystemOrder.model_validate(data).model_dump()
+        except ValidationError as exc:
+            logger.warning("طلب %s لا يطابق عقد SystemOrder: %s", order_id, exc)
+            return None
 
     async def search_by_phone(self, phone: str, api_key: str) -> List[dict]:
         data = await self._get("/orders/search", api_key, params={"phone": phone})
-        return (data or {}).get("orders", [])
+        return _parse_orders((data or {}).get("orders", []))
 
     async def search_by_status(self, status: str, api_key: str) -> List[dict]:
         data = await self._get("/orders/search", api_key, params={"status": status})
-        return (data or {}).get("orders", [])
+        return _parse_orders((data or {}).get("orders", []))
 
     async def list_all(self, api_key: str) -> List[dict]:
         data = await self._get("/orders", api_key)
-        return (data or {}).get("orders", [])
+        return _parse_orders((data or {}).get("orders", []))
 
 
 order_status_provider: OrderStatusProvider = HttpOrderStatusProvider()

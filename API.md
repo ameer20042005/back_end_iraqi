@@ -149,6 +149,74 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 
 ---
 
+## عقد باك اند السستم — الشكل الرسمي الثابت لاستجابات المنتجات والطلبات
+
+**هذا القسم موجّه لفريق باك اند السستم** (وليس للعميل المستهلك لـ `/sales/chat` أو `/support/chat`): يوثّق الشكل الرسمي المطلوب من نقاط باك اند السستم الخمس (`GET /products/search`، `GET /products/{id}`، `GET /orders/{order_id}`، `GET /orders/search`، `GET /orders`) — نفس العقد يُستخدم من **الميزات الثلاث بلا استثناء**: المبيعات (`search_products`)، الدعم (`get_order_status`)، والمتابعة الصوتية (تستهلك حقول الطلب نفسها عبر `VoiceFollowupOrderRequest`، انظر `app/features/voice_followup/schema.py`).
+
+### لماذا هذا العقد أُضيف
+
+قبله، `app/products.py`/`app/order_gateway.py` كانا يمرران `resp.json()` كما هو بلا أي تحقق برمجي — أي شكل يرجعه باك اند السستم فعلياً يمر للموديل حرفياً. الموديل **يقرأ** أي JSON كنص عربي عادي، لكن هذا لا يعني أنه **يتحقق** من اكتماله أو صحته؛ الانضباط الوحيد كان تعليمات البرومبت ("الأسعار والأرقام حصراً من نتيجة search_products كما هي حرفياً" — `app/features/sales/prompts.py`)، بلا أي شبكة أمان برمجية لو تغيّر شكل الحقول فعلياً. الآن كل استجابة تمر عبر Pydantic (`app/system_backend_schema.py`) قبل ما تصل لأي أداة أو مسار حتمي.
+
+### مصدر أسماء الحقول
+
+مبنية على أعمدة `catalog.products` / `catalog.stock_info` و`catalog.sells` / `catalog.sell_items` **الحقيقية** كما موثّقة بـ [assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md](<assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md>) — وليست أسماء مخترعة. مسطّحة لصيغة REST بسيطة بدل انعكاس الـ joins الداخلية حرفياً.
+
+### `SystemProduct` — عنصر واحد بـ `results` (`GET /products/search`) أو جسم `GET /products/{id}`
+
+| الحقل | النوع | إلزامي | يقابل عمود قاعدة البيانات | الوصف |
+|---|---|---|---|---|
+| `id` | string | **نعم** | `products.id` | معرّف المنتج |
+| `name` | string | **نعم** | `products.name` | اسم المنتج — يُذكر حرفياً بالرد |
+| `sku` | string \| null | لا | `products.sku` | رمز المخزون |
+| `barcode` | string \| null | لا | `products.barcode` | الباركود |
+| `description` | string \| null | لا | `products.description` | وصف — الموديل يستخرج منه المواصفات المذكورة بالرد فقط |
+| `category` | string \| null | لا | `categories.pretty_name` (عبر `product_categories`) | اسم الفئة — نفس ما يُمرَّر بفلتر `args.category` بأداة `search_products` |
+| `price` | number \| null | لا | سعر البيع (`products`) | numeric(19,2) — **المصدر الوحيد المسموح للأسعار بالرد** |
+| `currency` | string \| null | لا (افتراضي `"IQD"`) | — | رمز العملة |
+| `in_stock` | boolean \| null | لا | مشتق من مجموع `stock_info.qty` عبر المخازن | `true` إن وُجدت كمية > 0 بأي مخزن |
+| `stock_quantity` | integer \| null | لا | مجموع `stock_info.qty` | الكمية الكلية المتوفرة |
+| `photos` | string[] | لا (افتراضي `[]`) | `products.photos` (JSON) | روابط صور المنتج |
+| `deleted_at` | string \| null | لا | `products.deleted_at` | ISO 8601 — منتج محذوف منطقياً إن وُجدت قيمة |
+
+### `SystemOrder` — عنصر بـ `orders` (`GET /orders/search`, `GET /orders`) أو جسم `GET /orders/{order_id}`
+
+| الحقل | النوع | إلزامي | يقابل عمود قاعدة البيانات | الوصف |
+|---|---|---|---|---|
+| `order_id` | string | **نعم** | `sells.receipt_number` أو `sells.id` | مثلاً `ORD-1001` — نفس الصيغة التي يستخرجها `app/features/support/router.py::extract_order_id` من رسالة الموظف |
+| `status` | string \| null | لا | `sells.sell_status` (أو مرادفه العربي) | نص عربي حر — تُطابَق ضده مرادفات `_STATUS_SYNONYMS` وقت التشغيل، لا قائمة ثابتة بالعقد |
+| `customer_name` | string \| null | لا | `sells.customer_name` | |
+| `phone` | string \| null | لا | `sells.customer_phone_number` | صيغة عراقية `07XXXXXXXXX` |
+| `customer_city` | string \| null | لا | اسم المحافظة (`commondata.cities.name_arabic`) | |
+| `customer_district` | string \| null | لا | `delivery_info->>'districtId'` محلولاً لاسم | |
+| `address` | string \| null | لا | `delivery_info` (jsonb) | نص العنوان الكامل |
+| `items` | `SystemOrderItem[]` | لا (افتراضي `[]`) | `sell_items` | انظر الجدول التالي |
+| `total` | number \| null | لا | `sells.total_price` | |
+| `currency` | string \| null | لا (افتراضي `"IQD"`) | — | |
+| `eta` | string \| null | لا | `sells.estimated_delivery_date` | نص جاهز للعرض المباشر |
+| `created_at` | string \| null | لا | `sells.created_at` | ISO 8601 |
+
+### `SystemOrderItem` — عنصر واحد بمصفوفة `items`
+
+| الحقل | النوع | إلزامي | يقابل عمود قاعدة البيانات |
+|---|---|---|---|
+| `product_id` | string \| null | لا | `sell_items.product_id` |
+| `product_name` | string | **نعم** | اسم المنتج بسطر الطلب |
+| `quantity` | integer | لا (افتراضي `1`) | `sell_items.qty` |
+| `unit_price` | number \| null | لا | `sell_items.unit_price` |
+| `line_total` | number \| null | لا | `sell_items.net_amount` أو مكافئه |
+
+### سياسة التسامح (مقصودة)
+
+- **كل الحقول اختيارية عدا معرّف واحد لكل نموذج** (`id`/`name` للمنتج، `order_id`/`product_name` للطلب وسطوره). حقل ناقص بالاستجابة الفعلية **لا يفشّل الطلب بالكامل** — يتحوّل تلقائياً لـ `null`، والموديل مبرمج أصلاً (بالبرومبت) يقول "أتأكدلك من السعر" بدل ما يخترع قيمة لحقل ناقص، بدل ما نرفض الاستجابة كلها.
+- **عنصر واحد فاشل التحقق (نوع بيانات خاطئ تماماً، لا حقل ناقص فقط) يُستبعَد بصمت من القائمة** — تحذير باللوق (`logger.warning`)، بلا رمي استثناء يكسر باقي النتائج السليمة بنفس الاستدعاء. التطبيق: `app/products.py::_parse_products`، `app/order_gateway.py::_parse_orders`.
+- **حقول إضافية غير موثّقة هنا تمر بلا رفض** (`model_config = ConfigDict(extra="allow")`) — إضافة عمود جديد بباك اند السستم لا تكسر شيئاً، فقط لا تُتحقق ولا تصل تلقائياً للموديل إلا لو أُضيفت صراحة للعقد.
+
+### أين التعريف الرسمي بالكود
+
+`app/system_backend_schema.py` — `SystemProduct`, `SystemProductSearchResponse`, `SystemOrder`, `SystemOrderItem`, `SystemOrderListResponse` (Pydantic). هذا الملف هو **مصدر الحقيقة الوحيد**؛ الجداول أعلاه انعكاس مقروء بشرياً له. أي تعديل بشكل الاستجابة الفعلي من باك اند السستم يبدأ بتعديل هذا الملف، ثم `app/products.py`/`app/order_gateway.py` (نقاط الاستهلاك)، بلا حاجة لتغيير أي router.
+
+---
+
 ## فحص الحالة
 
 ### `GET /health`

@@ -192,16 +192,76 @@
   }
   .dot.ok { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .dot.bad { background: var(--err); box-shadow: 0 0 0 3px var(--err-soft); }
+  .dot.demo { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
   .dot.pulse { animation: pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   @media (prefers-reduced-motion: reduce) { .dot.pulse { animation: none; } }
+
+  /* ---------- Demo mode toggle ---------- */
+  .demo-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    padding: 8px 10px;
+    background: var(--panel-2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  .demo-toggle input { accent-color: var(--warn); cursor: pointer; }
+  .demo-toggle:has(input:checked) { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+
+  .demo-banner {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--warn);
+    background: var(--warn-soft);
+    border: 1px solid var(--warn);
+    border-radius: 8px;
+    padding: 9px 14px;
+    margin-bottom: 16px;
+  }
+  .demo-banner.show { display: flex; }
 
   nav.groups {
     display: flex;
     flex-direction: column;
     gap: 2px;
     overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 120px; /* يضمن مساحة عرض دنيا حتى لو باقي محتوى الشريط طويل */
   }
+
+  /* مفاتيح API مطوية افتراضياً — أربع حقول كانت تاخذ مساحة ثابتة كبيرة
+     وتدفع قائمة التنقّل (nav.groups) خارج الشاشة بشاشات قصيرة. مطوية هنا
+     تاخذ سطر واحد فقط، وتتمدد عند الحاجة الفعلية للمفاتيح. */
+  details.api-keys-details {
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+  }
+  details.api-keys-details summary {
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  details.api-keys-details summary::-webkit-details-marker { display: none; }
+  details.api-keys-details summary::before { content: "▸"; font-size: 10px; }
+  details.api-keys-details[open] summary::before { content: "▾"; }
+  details.api-keys-details summary:hover { color: var(--text); }
+  details.api-keys-details .base-url-box { padding: 0 10px 10px; gap: 8px; }
 
   .group-label {
     font-size: 11px;
@@ -490,6 +550,8 @@
   }
   .engine-pill.vllm { background: var(--accent-soft); color: var(--accent-strong); }
   .engine-pill.fallback { background: var(--warn-soft); color: var(--warn); }
+  .engine-pill.deterministic { background: var(--panel-2); color: var(--text-dim); }
+  .engine-pill.demo { background: var(--warn-soft); color: var(--warn); }
 
   .latency {
     font-size: 12px;
@@ -681,25 +743,32 @@
     <span id="statusText">لم يُفحص بعد</span>
   </div>
 
-  <div class="base-url-box" id="apiKeysBox">
-    <label>مفاتيح API (لكل خدمة مفتاحها الخاص — X-API-Key)</label>
-    <div class="base-url-row">
-      <input id="salesApiKey" type="text" placeholder="مفتاح المبيعات"
-             value="sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" spellcheck="false" />
+  <label class="demo-toggle" id="demoToggle" title="يفعّل بيانات تجريبية محلية بدل الاتصال الفعلي — جرّب الصفحة كاملة بلا سيرفر">
+    <input type="checkbox" id="demoModeCheck" />
+    <span>وضع تجريبي (بلا سيرفر)</span>
+  </label>
+
+  <details class="api-keys-details" id="apiKeysBox">
+    <summary>مفاتيح API (خاص بكل خدمة)</summary>
+    <div class="base-url-box">
+      <div class="base-url-row">
+        <input id="salesApiKey" type="text" placeholder="مفتاح المبيعات"
+               value="sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" spellcheck="false" />
+      </div>
+      <div class="base-url-row">
+        <input id="supportApiKey" type="text" placeholder="مفتاح الدعم"
+               value="sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f" spellcheck="false" />
+      </div>
+      <div class="base-url-row">
+        <input id="ordersApiKey" type="text" placeholder="مفتاح إنشاء الطلبات"
+               value="sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" spellcheck="false" />
+      </div>
+      <div class="base-url-row">
+        <input id="voiceFollowupApiKey" type="text" placeholder="مفتاح المتابعة الصوتية"
+               value="sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" spellcheck="false" />
+      </div>
     </div>
-    <div class="base-url-row">
-      <input id="supportApiKey" type="text" placeholder="مفتاح الدعم"
-             value="sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f" spellcheck="false" />
-    </div>
-    <div class="base-url-row">
-      <input id="ordersApiKey" type="text" placeholder="مفتاح إنشاء الطلبات"
-             value="sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" spellcheck="false" />
-    </div>
-    <div class="base-url-row">
-      <input id="voiceFollowupApiKey" type="text" placeholder="مفتاح المتابعة الصوتية"
-             value="sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" spellcheck="false" />
-    </div>
-  </div>
+  </details>
 
   <nav class="groups" id="navGroups"></nav>
 
@@ -780,11 +849,280 @@
     return key ? { "X-API-Key": key } : {};
   }
 
+  /* ---------------- وضع تجريبي (Demo Mode) — بلا سيرفر حقيقي ----------------
+     يفعّل بيانات وهمية محلية بدل الاتصال الفعلي، حتى تفتح الصفحة مباشرة
+     (file:// أو بأي استضافة ثابتة) وتجرّب كل الميزات بلا تشغيل uvicorn ولا
+     خادم vLLM. البيانات الوهمية (كتالوج المنتجات وسجل الطلبات) مبنية حرفياً
+     على عقد باك اند السستم الموثَّق بـ app/system_backend_schema.py وAPI.md
+     § "عقد باك اند السستم" (SystemProduct/SystemOrder) — نفس أسماء الحقول
+     تماماً، فالصفحة تتصرف بنفس الشكل سواء كانت البيانات حقيقية أو تجريبية. */
+  var demoModeCheck = document.getElementById("demoModeCheck");
+  var demoToggle = document.getElementById("demoToggle");
+  try {
+    demoModeCheck.checked = localStorage.getItem("iraqi_demo_mode") === "1";
+  } catch (e) {}
+  function isDemoMode() { return demoModeCheck.checked; }
+  demoModeCheck.addEventListener("change", function () {
+    try { localStorage.setItem("iraqi_demo_mode", demoModeCheck.checked ? "1" : "0"); } catch (e) {}
+    pingServer();
+  });
+
+  // كتالوج منتجات وهمي — كل عنصر يطابق حقول SystemProduct حرفياً (id, name,
+  // sku, barcode, description, category, price, currency, in_stock,
+  // stock_quantity, photos, deleted_at).
+  var DEMO_PRODUCTS = [
+    { id: "P-1001", name: "لابتوب لينوفو IdeaPad 15", sku: "LEN-IP15-8GB", barcode: "8801643214567",
+      description: "معالج Core i5، رام 8 جيجا، تخزين SSD 512 جيجا، شاشة 15.6 انج.",
+      category: "لابتوبات", price: 750000, currency: "IQD", in_stock: true, stock_quantity: 14,
+      photos: [], deleted_at: null },
+    { id: "P-1002", name: "لابتوب Asus VivoBook 14", sku: "ASU-VB14-16GB", barcode: "8801643214789",
+      description: "معالج Core i7، رام 16 جيجا، تخزين SSD 1 تيرا، كارت شاشة منفصل.",
+      category: "لابتوبات", price: 980000, currency: "IQD", in_stock: true, stock_quantity: 5,
+      photos: [], deleted_at: null },
+    { id: "P-2001", name: "مكيف سبلت LG انفرتر 1.5 طن", sku: "LG-SPL-15T", barcode: "8801643298001",
+      description: "بارد فقط، توفير طاقة انفرتر، تبريد سريع.",
+      category: "مكيفات", price: 620000, currency: "IQD", in_stock: true, stock_quantity: 9,
+      photos: [], deleted_at: null },
+    { id: "P-2002", name: "مكيف سبلت سامسونك 2 طن", sku: "SAM-SPL-2T", barcode: "8801643298045",
+      description: "بارد وحار، فلتر تنقية هواء.",
+      category: "مكيفات", price: 890000, currency: "IQD", in_stock: false, stock_quantity: 0,
+      photos: [], deleted_at: null },
+    { id: "P-3001", name: "ماوس لوجيتك لاسلكي", sku: "LOG-M185", barcode: "8801643255012",
+      description: "لاسلكي 2.4G، بطارية تدوم سنة، تصميم مريح.",
+      category: "ملحقات", price: 15000, currency: "IQD", in_stock: true, stock_quantity: 40,
+      photos: [], deleted_at: null },
+    { id: "P-4001", name: "غسالة اتوماتيك سامسونك 8 كغم", sku: "SAM-WM8KG", barcode: "8801643277003",
+      description: "تحميل امامي، برامج غسيل متعددة، توفير مياه.",
+      category: "غسالات", price: 540000, currency: "IQD", in_stock: true, stock_quantity: 3,
+      photos: [], deleted_at: null }
+  ];
+
+  // سجل طلبات وهمي — كل عنصر يطابق حقول SystemOrder حرفياً (order_id, status,
+  // customer_name, phone, customer_city, customer_district, address, items,
+  // total, currency, eta, created_at).
+  var DEMO_ORDERS = [
+    { order_id: "ORD-1001", status: "قيد التوصيل", customer_name: "أحمد كاظم", phone: "07701234567",
+      customer_city: "بغداد", customer_district: "الكرادة", address: "بغداد - الكرادة - قرب مطعم النخيل",
+      items: [{ product_id: "P-1001", product_name: "لابتوب لينوفو IdeaPad 15", quantity: 1, unit_price: 750000, line_total: 750000 }],
+      total: 750000, currency: "IQD", eta: "خلال يومين", created_at: "2026-08-02T10:15:00Z" },
+    { order_id: "ORD-1002", status: "تم التسليم", customer_name: "زينب علي", phone: "07801122334",
+      customer_city: "البصرة", customer_district: "العشار", address: "البصرة - العشار - شارع الكورنيش",
+      items: [{ product_id: "P-3001", product_name: "ماوس لوجيتك لاسلكي", quantity: 2, unit_price: 15000, line_total: 30000 }],
+      total: 30000, currency: "IQD", eta: null, created_at: "2026-07-28T09:00:00Z" },
+    { order_id: "ORD-1003", status: "قيد التجهيز", customer_name: "مصطفى جبار", phone: "07709988776",
+      customer_city: "اربيل", customer_district: "عنكاوا", address: "اربيل - عنكاوا",
+      items: [{ product_id: "P-2001", product_name: "مكيف سبلت LG انفرتر 1.5 طن", quantity: 1, unit_price: 620000, line_total: 620000 }],
+      total: 620000, currency: "IQD", eta: "خلال ٣ أيام", created_at: "2026-08-03T14:30:00Z" },
+    { order_id: "ORD-1004", status: "ملغي", customer_name: "نور حيدر", phone: "07901112233",
+      customer_city: "بغداد", customer_district: "المنصور", address: "بغداد - المنصور",
+      items: [{ product_id: "P-4001", product_name: "غسالة اتوماتيك سامسونك 8 كغم", quantity: 1, unit_price: 540000, line_total: 540000 }],
+      total: 540000, currency: "IQD", eta: null, created_at: "2026-07-20T11:00:00Z" }
+  ];
+
+  function demoSearchProducts(query, topK, category, inStockOnly) {
+    var q = (query || "").trim();
+    var results = DEMO_PRODUCTS.filter(function (p) {
+      if (category && p.category !== category) return false;
+      if (inStockOnly && !p.in_stock) return false;
+      if (!q) return true;
+      var hay = (p.name + " " + p.category + " " + p.description).toLowerCase();
+      return hay.indexOf(q.toLowerCase()) !== -1 || q.split(/\s+/).some(function (w) {
+        return w && hay.indexOf(w.toLowerCase()) !== -1;
+      });
+    });
+    return results.slice(0, topK || 5);
+  }
+
+  function demoAnswerFor(message, kind) {
+    // رد وكيل مبسّط لكن واقعي — يبحث بكتالوج الديمو فعلياً (نفس منطق أداة
+    // search_products) ويبني جملة عراقية من النتيجة، بدل نص ثابت واحد.
+    var hits = demoSearchProducts(message, 3, null, false);
+    if (kind === "support") {
+      var orderMatch = /ORD[\s\-_]*(\d+)/i.exec(message);
+      if (orderMatch) {
+        var order = DEMO_ORDERS.find(function (o) { return o.order_id === "ORD-" + orderMatch[1]; });
+        if (order) {
+          return "هلا بيك، طلبك " + order.order_id + " حالته: " + order.status +
+            (order.eta ? "، والوصول المتوقع " + order.eta : "") + ". [بيانات تجريبية]";
+        }
+        return "والله ماكو طلب بهذا الرقم بالبيانات التجريبية — جرّب ORD-1001 لين ORD-1004.";
+      }
+      var phoneMatch = /07\d{9}/.exec(message.replace(/[\s\-]/g, ""));
+      if (phoneMatch) {
+        var byPhone = DEMO_ORDERS.filter(function (o) { return o.phone === phoneMatch[0]; });
+        if (byPhone.length) {
+          return "هلا بيك، هذي طلباتك: " + byPhone.map(function (o) {
+            return o.order_id + " (" + o.status + ")";
+          }).join(" | ") + ". [بيانات تجريبية]";
+        }
+      }
+      return "عطيني رقم الطلب (مثل ORD-1001) أو رقم الهاتف حتى اكدر اكَولك وين وصل. [بيانات تجريبية]";
+    }
+    if (!hits.length) {
+      return "عذراً حبيبي، ماكو منتج مطابق بالكتالوج التجريبي هسه — جرّب تسأل عن لابتوب أو مكيف أو غسالة. [بيانات تجريبية]";
+    }
+    var p = hits[0];
+    var alt = hits.slice(1).map(function (a) { return "- " + a.name + " — " + a.price.toLocaleString() + " دينار"; });
+    return "هلا بيك، عدنا " + p.name + " بسعر " + p.price.toLocaleString() + " دينار (" +
+      (p.in_stock ? "متوفر بالمخزون" : "غير متوفر حالياً") + ").\nبإيجاز عن الجهاز:\n- " + p.description +
+      (alt.length ? "\n\nبدائل متوفرة:\n" + alt.join("\n") : "") +
+      "\nتحب أحجزلك وحدة أو أساعدك تختار الأنسب؟ [بيانات تجريبية]";
+  }
+
+  var demoSessionCounter = 0;
+  function demoSessionId() { return "demo-session-" + (++demoSessionCounter) + "-" + Date.now(); }
+
+  // يحاكي fetch لكل نقطة تُستخدم بالصفحة — يرجع Response حقيقي (عبر
+  // Response constructor) حتى بقية الكود (res.json/res.ok/res.status) يشتغل
+  // بلا أي تعديل بمكان ثاني.
+  async function mockFetch(url, options) {
+    options = options || {};
+    var path = url.replace(baseUrl(), "").split("?")[0];
+    var delay = 250 + Math.random() * 350;
+    await new Promise(function (r) { setTimeout(r, delay); });
+
+    function jsonResponse(body, status) {
+      return new Response(JSON.stringify(body), {
+        status: status || 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (path === "/health") return jsonResponse({ status: "healthy" });
+    if (path === "/gpu") {
+      return jsonResponse({
+        torch: "2.8.0", cuda: true, vllm_ready: true, device_count: 1,
+        device_name: "NVIDIA A100-SXM4-80GB (تجريبي)", cuda_version: "12.8",
+        vram_total_gb: 80.0, vram_free_gb: 61.2
+      });
+    }
+    if (path === "/") return jsonResponse({ status: "ok", service: "back_end_iraqi", docs: "/docs" });
+
+    // منطق مشترك بين /sales/chat و/support/chat (الكامل والمبثوث): يبني
+    // toolCalls + answer من نفس كتالوج/سجل الديمو، مرة واحدة بدل تكرارها
+    // بكل مسار من الأربعة.
+    function demoChatTurn(path, body) {
+      var isSupport = path.indexOf("/support/") === 0;
+      var message = body.message || "";
+      var hits = demoSearchProducts(message, 5, null, false);
+      var toolCalls = [];
+      if (!isSupport && hits.length) {
+        toolCalls.push({
+          tool: "search_products",
+          args: { query: message, top_k: 5 },
+          result: hits.length ? { results: hits } : { results: [], message: "ماكو منتج مطابق بالكتالوج." }
+        });
+      }
+      if (isSupport) {
+        var orderMatch = /ORD[\s\-_]*(\d+)/i.exec(message);
+        if (orderMatch) {
+          var found = DEMO_ORDERS.find(function (o) { return o.order_id === "ORD-" + orderMatch[1]; });
+          toolCalls.push({
+            tool: "get_order_status",
+            args: { order_id: "ORD-" + orderMatch[1] },
+            result: found || { error: "ماكو طلب بهذا الرقم" }
+          });
+        }
+      }
+      return {
+        session_id: body.session_id || demoSessionId(),
+        answer: demoAnswerFor(message, isSupport ? "support" : "sales"),
+        toolCalls: toolCalls
+      };
+    }
+
+    if (path === "/sales/chat" || path === "/support/chat") {
+      var body = JSON.parse(options.body || "{}");
+      var turn = demoChatTurn(path, body);
+      return jsonResponse({
+        session_id: turn.session_id,
+        answer: turn.answer,
+        engine: "demo",
+        order: null,
+        tool_calls: turn.toolCalls
+      });
+    }
+
+    if (path === "/sales/chat/stream" || path === "/support/chat/stream") {
+      // نبني رد SSE نصي حقيقي (نفس تنسيق "data: {...}\n\n" الذي يرسله
+      // الخادم الحقيقي) داخل ReadableStream — حتى renderChatStreamForm
+      // (اللي تستهلك res.body.getReader() مباشرة) تشتغل بلا أي تعديل، سواء
+      // كان الرد حقيقياً أو تجريبياً.
+      var streamBody = JSON.parse(options.body || "{}");
+      var streamTurn = demoChatTurn(path, streamBody);
+      var words = streamTurn.answer.split(/(\s+)/); // يحافظ على الفراغات كأجزاء
+      var encoder = new TextEncoder();
+
+      var readable = new ReadableStream({
+        async start(controller) {
+          for (var i = 0; i < words.length; i++) {
+            await new Promise(function (r) { setTimeout(r, 25 + Math.random() * 35); });
+            controller.enqueue(encoder.encode(
+              "data: " + JSON.stringify({ delta: words[i] }) + "\n\n"
+            ));
+          }
+          controller.enqueue(encoder.encode(
+            "data: " + JSON.stringify({
+              done: true,
+              session_id: streamTurn.session_id,
+              tool_calls: streamTurn.toolCalls
+            }) + "\n\n"
+          ));
+          controller.close();
+        }
+      });
+      return new Response(readable, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    }
+
+    if (path === "/orders/create") {
+      // multipart — لا نقرأ options.body (FormData) بتفصيل، نرجع طلباً
+      // تجريبياً كاملاً يطابق شكل OrderConfirmation الحقيقي.
+      return jsonResponse({
+        order_id: "ORD-DEMO-" + Math.floor(1000 + Math.random() * 9000),
+        created_at: new Date().toISOString(),
+        customer_name: "زبون تجريبي",
+        customer_phone: "07701234567",
+        customer_phone2: null,
+        customer_address: "بغداد - الكرادة",
+        customer_city: "بغداد",
+        customer_district: "الكرادة",
+        state_code: "BGD",
+        items: [
+          { product_id: "P-1001", product_name: "لابتوب لينوفو IdeaPad 15", quantity: 1, unit_price: 750000, currency: "IQD", line_total: 750000, matched: true },
+          { product_id: "P-3001", product_name: "ماوس لوجيتك لاسلكي", quantity: 1, unit_price: 15000, currency: "IQD", line_total: 15000, matched: true }
+        ],
+        suggested_product: null,
+        subtotal: 765000,
+        total: 765000,
+        currency: "IQD",
+        quoted_price: null,
+        notes: null,
+        confirmation_message: "تم تثبيت الطلب (بيانات تجريبية) — هذا رد وهمي لا يُرسل لأي باك اند حقيقي."
+      });
+    }
+
+    return jsonResponse({ detail: "مسار غير مدعوم بالوضع التجريبي: " + path }, 404);
+  }
+
+  // بديل موحّد لـ fetch: يوجّه لـ mockFetch وقت الوضع التجريبي، وإلا fetch
+  // الحقيقي كالمعتاد. كل نقاط JSON العادية (health/gpu/root/sales/support/
+  // orders create) تمر من هنا بلا أي تغيير بمنطقها. مسارات voice_followup
+  // (صوت حقيقي داخل/خارج) لها معالجة تجريبية منفصلة داخل renderVoiceFollowupForm
+  // لأنها ترجع audio/wav لا JSON.
+  function apiFetch(url, options) {
+    return isDemoMode() ? mockFetch(url, options) : fetch(url, options);
+  }
+
   /* ---------------- Server status ping ---------------- */
   var statusDot = document.getElementById("statusDot");
   var statusText = document.getElementById("statusText");
 
   async function pingServer() {
+    if (isDemoMode()) {
+      statusDot.className = "dot demo";
+      statusText.textContent = "وضع تجريبي — بلا سيرفر حقيقي";
+      return;
+    }
     statusDot.className = "dot pulse";
     statusText.textContent = "جاري الفحص...";
     try {
@@ -894,6 +1232,16 @@
       desc: "تتبع حالة طلب برقم الطلب (مثل ORD-1001) أو رقم الهاتف، أو أي سؤال عام. يحتاج مفتاح API الدعم (X-API-Key).",
       apiKeyService: "support",
       render: renderSupportForm
+    },
+    {
+      group: "دعم العملاء",
+      id: "supportChatStream",
+      method: "POST",
+      path: "/support/chat/stream",
+      title: "POST /support/chat/stream",
+      desc: "نفس مدخل /support/chat، لكن بث Server-Sent Events — طلبات التتبع الحتمية (رقم طلب/هاتف/حالة) تصل كدلتا واحدة فورية، وأسئلة الدعم العامة (موديل+أداة get_order_status) تُبث توكن-بتوكن. يحتاج مفتاح API الدعم.",
+      apiKeyService: "support",
+      render: renderChatStreamForm
     },
     {
       group: "إنشاء طلب",
@@ -1051,12 +1399,13 @@
       body.innerHTML = '<div class="empty-state">جاري الإرسال...</div>';
       var t0 = performance.now();
       try {
-        var res = await fetch(baseUrl() + ep.path);
+        var res = await apiFetch(baseUrl() + ep.path);
         var ms = Math.round(performance.now() - t0);
         var json = await res.json().catch(function () { return null; });
         meta.innerHTML =
           '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
-          '<span class="latency">' + ms + " ms</span>";
+          '<span class="latency">' + ms + " ms</span>" +
+          (isDemoMode() ? '<span class="engine-pill demo">تجريبي</span>' : "");
         body.innerHTML = "";
         var pre = document.createElement("pre");
         pre.className = "json-view";
@@ -1262,7 +1611,7 @@
 
       var t0 = performance.now();
       try {
-        var res = await fetch(baseUrl() + ep.path, {
+        var res = await apiFetch(baseUrl() + ep.path, {
           method: "POST",
           headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
           body: JSON.stringify(payload)
@@ -1316,7 +1665,7 @@
     msgField.className = "field";
     msgField.innerHTML = '<label>رسالة العميل</label>';
     var msgInput = document.createElement("textarea");
-    msgInput.value = "عندكم غسالات اتوماتيك؟";
+    msgInput.value = ep.id === "supportChatStream" ? "وين طلبي ORD-1001؟" : "عندكم غسالات اتوماتيك؟";
     msgField.appendChild(msgInput);
     grid.appendChild(msgField);
     panel.appendChild(grid);
@@ -1377,7 +1726,7 @@
       orderBox.innerHTML = "";
 
       try {
-        var res = await fetch(baseUrl() + ep.path, {
+        var res = await apiFetch(baseUrl() + ep.path, {
           method: "POST",
           headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
           body: JSON.stringify(payload)
@@ -1484,7 +1833,7 @@
       var payload = { message: message, session_id: sessionId };
       var t0 = performance.now();
       try {
-        var res = await fetch(baseUrl() + ep.path, {
+        var res = await apiFetch(baseUrl() + ep.path, {
           method: "POST",
           headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
           body: JSON.stringify(payload)
@@ -1609,7 +1958,7 @@
       body.innerHTML = '<div class="empty-state">جاري المعالجة (قد تأخذ وقتاً أطول للصوت/الصورة)...</div>';
       var t0 = performance.now();
       try {
-        var res = await fetch(baseUrl() + ep.path, { method: "POST", headers: apiKeyHeader(ep.apiKeyService), body: form });
+        var res = await apiFetch(baseUrl() + ep.path, { method: "POST", headers: apiKeyHeader(ep.apiKeyService), body: form });
         var ms = Math.round(performance.now() - t0);
         var json = await res.json().catch(function () { return null; });
         meta.innerHTML =
@@ -1903,23 +2252,57 @@
   // SalesChatResponse.tool_calls / SupportChatResponse.tool_calls. تُعرض
   // كبطاقة صغيرة بين فقاعة العميل وفقاعة الوكيل: اسم الأداة + المعاملات
   // مباشرة، والنتيجة الكاملة مطويّة افتراضياً.
+  //
+  // ملخّص سطر واحد لكل عنصر نتيجة مبني على عقد باك اند السستم الموثَّق
+  // (SystemProduct/SystemOrder — انظر app/system_backend_schema.py وAPI.md
+  // § "عقد باك اند السستم") حتى تنقرأ صحة الحقول (سعر/توفر/حالة) بنظرة
+  // بلا فتح الـ JSON الكامل.
+  function summarizeToolResult(call) {
+    var result = call.result;
+    if (!result) return "";
+    if (result.error) return " · خطأ: " + result.error;
+    if (Array.isArray(result.results)) {
+      // search_products → SystemProduct[]
+      if (!result.results.length) return " · 0 نتيجة";
+      var lines = result.results.slice(0, 3).map(function (p) {
+        var price = p.price != null ? p.price.toLocaleString() + " " + (p.currency || "") : "بلا سعر";
+        var stock = p.in_stock === true ? "متوفر" : p.in_stock === false ? "غير متوفر" : "؟";
+        return "- " + (p.name || p.id) + " — " + price + " (" + stock + ")";
+      });
+      var more = result.results.length > 3 ? "\n… و" + (result.results.length - 3) + " أكثر" : "";
+      return { count: result.results.length + " نتيجة", lines: lines.join("\n") + more };
+    }
+    if (Array.isArray(result.orders)) {
+      // get_order_status (all/status/phone) → SystemOrder[]
+      if (!result.orders.length) return " · 0 طلب";
+      var oLines = result.orders.slice(0, 3).map(function (o) {
+        return "- " + o.order_id + " — " + (o.status || "؟") + (o.phone ? " (" + o.phone + ")" : "");
+      });
+      var oMore = result.orders.length > 3 ? "\n… و" + (result.orders.length - 3) + " أكثر" : "";
+      return { count: result.orders.length + " طلب", lines: oLines.join("\n") + oMore };
+    }
+    if (result.order_id) {
+      // get_order_status (order_id) → SystemOrder واحد
+      return { count: "طلب واحد", lines: "- " + result.order_id + " — " + (result.status || "؟") };
+    }
+    return "";
+  }
+
   function renderToolCalls(chatLog, toolCalls) {
     if (!toolCalls || !toolCalls.length) return;
     toolCalls.forEach(function (call) {
       var box = document.createElement("div");
       box.className = "tool-call";
-      var resultCount = "";
-      if (call.result && Array.isArray(call.result.results)) {
-        resultCount = " · " + call.result.results.length + " نتيجة";
-      } else if (call.result && call.result.error) {
-        resultCount = " · خطأ";
-      }
+      var summary = summarizeToolResult(call);
+      var countLabel = typeof summary === "string" ? summary : " · " + summary.count;
+      var previewLines = typeof summary === "object" ? summary.lines : "";
       box.innerHTML =
         '<div class="head">🔧 استدعى الأداة ' +
         '<span class="tool-name">' + escapeHtml(call.tool || "؟") + "</span>" +
         '<span class="tool-args">' + escapeHtml(JSON.stringify(call.args || {})) + "</span>" +
-        '<span>' + resultCount + "</span></div>" +
-        "<details><summary>عرض نتيجة الأداة كاملة</summary>" +
+        '<span>' + escapeHtml(countLabel) + "</span></div>" +
+        (previewLines ? '<pre class="json-view" style="margin-top:6px;">' + escapeHtml(previewLines) + "</pre>" : "") +
+        "<details><summary>عرض نتيجة الأداة كاملة (JSON)</summary>" +
         '<pre class="json-view">' + highlightJson(call.result) + "</pre></details>";
       chatLog.appendChild(box);
     });

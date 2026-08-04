@@ -8,15 +8,38 @@
 
 كل استدعاء يحمل مفتاح API الخاص بالخدمة (انظر app/auth.py) — باك اند السستم
 هو من يحدد أي كتالوج منتجات يخص هذا المفتاح.
-"""
 
+**التحقق من الشكل**: الاستجابة تُمرَّر عبر `SystemProduct`
+(`app/system_backend_schema.py`) — العقد الموثَّق رسمياً بـ
+API.md § "عقد باك اند السستم". عنصر لا يطابق العقد (نوع بيانات خاطئ، لا مجرد
+حقل ناقص — الحقول اختيارية أصلاً) يُستبعَد بصمت بدل ما يكسر الاستعلام كله؛
+باقي العناصر السليمة تصل للموديل كالعادة."""
+
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
 import httpx
+from pydantic import ValidationError
 
 from app.config import settings
 from app.system_backend import request as backend_request
+from app.system_backend_schema import SystemProduct
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_products(raw_results: list) -> List[dict]:
+    """يتحقق من كل عنصر مقابل SystemProduct ويرجعه كـ dict. عنصر لا يطابق
+    العقد (نوع بيانات خاطئ، لا حقل ناقص فقط — كلها اختيارية) يُستبعَد بصمت
+    مع تحذير باللوق، بدل ما يكسر الاستعلام كامله."""
+    parsed: List[dict] = []
+    for item in raw_results:
+        try:
+            parsed.append(SystemProduct.model_validate(item).model_dump())
+        except ValidationError as exc:
+            logger.warning("عنصر منتج لا يطابق عقد SystemProduct، تم استبعاده: %s", exc)
+    return parsed
 
 
 class ProductRepository(ABC):
@@ -78,7 +101,7 @@ class HttpProductRepository(ProductRepository):
                 headers=self._headers(api_key),
             )
             resp.raise_for_status()
-            return resp.json().get("results", [])
+            return _parse_products(resp.json().get("results", []))
 
     async def get_by_id(self, product_id: str, api_key: str) -> Optional[dict]:
         async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
@@ -88,7 +111,11 @@ class HttpProductRepository(ProductRepository):
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
-            return resp.json()
+            try:
+                return SystemProduct.model_validate(resp.json()).model_dump()
+            except ValidationError as exc:
+                logger.warning("منتج %s لا يطابق عقد SystemProduct: %s", product_id, exc)
+                return None
 
 
 product_repository: ProductRepository = HttpProductRepository()
