@@ -1,25 +1,20 @@
 # خطوات الرفع على RunPod
 
-هذا الملف دليل تفصيلي خطوة بخطوة لرفع `back_end_iraqi` على RunPod. للتوثيق المرجعي لنقاط الـ API نفسها انظر [API.md](API.md)، وللوحة اختبار تفاعلية بالمتصفح انظر قسم [لوحة اختبار API](#لوحة-اختبار-api-test-console) بالأسفل.
-
-اختر إحدى الطريقتين:
-
-- **الطريقة 1 — Pod مباشر** (أسرع، مناسبة للتجربة والتطوير)
-- **الطريقة 2 — صورة Docker مخصصة** (أفضل لبيئة إنتاج ثابتة وقابلة لإعادة الاستخدام)
+هذا الملف دليل تفصيلي خطوة بخطوة لرفع `back_end_iraqi` على RunPod عبر **Pod مباشر بصورة Ubuntu 22.04 خام** (الطريقة الوحيدة المعتمدة — لا حاجة لبناء أي صورة Docker مخصصة ولا حتى صورة vLLM جاهزة: `start.sh` يثبّت كل شي لازم من الصفر بأول إقلاع — Python/pip، vLLM nightly بدعم Gemma 4 مع torch المتوافق، ffmpeg/libsndfile1 — انظر [start.sh](start.sh)). للتوثيق المرجعي لنقاط الـ API نفسها انظر [API.md](API.md)، وللوحة اختبار تفاعلية بالمتصفح انظر قسم [لوحة اختبار API](#لوحة-اختبار-api-test-console) بالأسفل.
 
 ---
 
 ## 🚀 التشغيل السريع — Pod جديد من الصفر
 
-كل الخطوات بالترتيب، من إنشاء الـ Pod لحد أول رد من الوكيل. للتفاصيل والشروحات انزل لـ [الطريقة 1](#الطريقة-1-pod-مباشر-بالقالب-الجاهز).
+كل الخطوات بالترتيب، من إنشاء الـ Pod لحد أول رد من الوكيل. للتفاصيل والشروحات انزل لـ [خطوات النشر بالتفصيل](#خطوات-النشر-pod-مباشر-بالقالب-الجاهز).
 
 ### 1) أنشئ الـ Pod (من لوحة RunPod)
 
 | الحقل | القيمة |
 |---|---|
 | **GPU** | A40 (48GB) أو أي GPU بـ 40GB+ |
-| **Container Image** | `vllm/vllm-openai:gemma4-unified` |
-| **Container Disk** | 50GB+ |
+| **Container Image** | `ubuntu:22.04` |
+| **Container Disk** | 60GB+ |
 | **Expose HTTP Ports** | `8000` |
 
 اضغط **Deploy**، وانتظر حتى تصير الحالة **Running**.
@@ -59,7 +54,7 @@ tmux new-session -d -s api 'bash start.sh > /tmp/api.log 2>&1'
 tail -f /tmp/api.log
 ```
 
-أول تشغيل ياخذ **دقائق** (تحميل الموديل ~24GB). اخرج من المراقبة بـ `Ctrl+C` — يوقف `tail` بس، ما يمس السيرفر.
+أول تشغيل ياخذ **دقائق أطول من المعتاد** (صورة Ubuntu خام: تثبيت Python/pip + vLLM nightly + torch أولاً، ثم تحميل الموديل ~24GB). اخرج من المراقبة بـ `Ctrl+C` — يوقف `tail` بس، ما يمس السيرفر.
 
 ### 7) تأكد إنه جاهز
 
@@ -129,16 +124,16 @@ Gemma موديل بوابة (gated) ومستودع محوّل اللهجة ال�
 
 ---
 
-## الطريقة 1: Pod مباشر بالقالب الجاهز
+## خطوات النشر: Pod مباشر بالقالب الجاهز
 
 ### الخطوة 1 — إنشاء الـ Pod
 
 1. من لوحة RunPod، اضغط **Deploy** → **GPU Pod**.
-2. الأفضل: قالب مخصص بصورة **`vllm/vllm-openai:gemma4-unified`** — نفس صورة [Dockerfile](Dockerfile) (خادم vLLM الرسمي بدعم Gemma 4). بديل: أي قالب PyTorch حديث — `start.sh` يثبّت vLLM nightly تلقائياً إذا كان ناقصاً (دعم Gemma 4 لم يصدر بعد بإصدار vLLM مستقر).
+2. قالب بصورة **`ubuntu:22.04`** خام (بدون Python ولا CUDA ولا PyTorch مسبقاً) — `start.sh` يبني كل شي لازم من الصفر بأول إقلاع: Python/pip، أدوات بناء، ffmpeg/libsndfile1، ثم vLLM nightly بدعم Gemma 4 مع torch المتوافق (دعم Gemma 4 لم يصدر بعد بإصدار vLLM مستقر). أي قالب ثاني فيه بعض هذي المكونات مسبقاً (صورة vLLM الرسمية، قالب PyTorch) يشتغل بنفس الموثوقية — كل خطوة تتخطى نفسها لو لقت الأداة موجودة أصلاً.
 3. اختر GPU مناسب (انظر التوصية أعلاه).
 4. تحت **Edit Template** (أو أثناء الإنشاء):
    - أضف `8000` إلى حقل **Expose HTTP Ports**.
-   - تأكد أن حجم القرص (Disk / Container Disk) كافٍ (**50GB+** موصى به) لأن الموديل والمحوّل يُنزَّلان تلقائياً بأول تشغيل.
+   - تأكد أن حجم القرص (Disk / Container Disk) كافٍ (**60GB+** موصى به) — يشمل مساحة torch/vLLM المثبَّتة بأول إقلاع (~10-15GB) بالإضافة للموديل والمحوّل المُنزَّلين تلقائياً (~24GB).
 5. اضغط **Deploy**.
 
 ### الخطوة 2 — نسخ المشروع للـ Pod
@@ -194,7 +189,7 @@ ValueError: Fast download using 'hf_transfer' is enabled ... but 'hf_transfer' p
 
 #### متابعة الإقلاع
 
-**أول تشغيل ياخذ وقت أطول** (تحميل الموديل المدموج ~24GB من Hugging Face + تجهيز vLLM):
+**أول تشغيل ياخذ وقت أطول** (تجهيز نظام التشغيل: Python/pip + vLLM nightly + torch على Ubuntu الخام، ثم تحميل الموديل المدموج ~24GB من Hugging Face):
 
 ```bash
 tail -f /tmp/api.log          # لوج FastAPI + خطوات start.sh
@@ -205,7 +200,7 @@ tail -f /tmp/vllm_boot.log    # لوج خادم vLLM نفسه (تحميل الأ
 
 الـ API يشتغل فوراً بوضع fallback ويتحول تلقائياً لوضع الموديل أول ما يجهز vLLM — راقب حتى تشوف:
 ```
-✅ خادم vLLM جاهز على http://127.0.0.1:18001/v1
+✅ vLLM ready at http://127.0.0.1:18001/v1
 ```
 
 #### أوامر tmux اللي تحتاجها
@@ -230,7 +225,7 @@ curl -s http://127.0.0.1:8000/health
 
 لو طلعت `api: 1 windows` ورد `{"status":"healthy"}` — تمام.
 
-> **حدود tmux**: يحمي من غلق الطرفية فقط، **مو** من إيقاف الـ Pod أو إعادة تشغيله. لو أوقفت الـ Pod من لوحة RunPod تنفقد الجلسة ولازم تعيد أوامر الخطوة 4. للبقاء عبر إعادة التشغيل استخدم [الطريقة 2](#الطريقة-2-صورة-docker-مخصصة) (الحاوية تشغّل `start.sh` تلقائياً).
+> **حدود tmux**: يحمي من غلق الطرفية فقط، **مو** من إيقاف الـ Pod أو إعادة تشغيله. لو أوقفت الـ Pod من لوحة RunPod تنفقد الجلسة ولازم تعيد أوامر الخطوة 4 يدوياً بعد إعادة التشغيل.
 
 #### تحديث الكود لاحقاً
 
@@ -259,54 +254,6 @@ curl https://<POD_ID>-8000.proxy.runpod.net/gpu
 ```
 
 `/gpu` يجب يرجع `"vllm_ready": true` بعد اكتمال تحميل الموديل.
-
----
-
-## الطريقة 2: صورة Docker مخصصة
-
-أفضل لو تريد بيئة ثابتة قابلة لإعادة النشر بدون خطوات يدوية (CI/CD، فرق عمل، إعادة تشغيل متكررة).
-
-### الخطوة 1 — بناء الصورة محلياً
-
-يتطلب Docker مثبَّت وحساب على Docker Hub (أو أي container registry آخر).
-
-```bash
-docker build -t <username>/back-end-iraqi:latest .
-```
-
-> ملاحظة: الصورة الأساسية (`vllm/vllm-openai:gemma4-unified`) كبيرة الحجم — البناء قد ياخذ وقتاً حسب سرعة الاتصال. على مضيف CUDA 12.9 استخدم الوسم `gemma4-unified-cu129`.
-
-### الخطوة 2 — رفع الصورة
-
-```bash
-docker login
-docker push <username>/back-end-iraqi:latest
-```
-
-### الخطوة 3 — إنشاء Template على RunPod
-
-من لوحة RunPod: **Templates** → **New Template**:
-
-| الحقل | القيمة |
-|---|---|
-| **Container Image** | `<username>/back-end-iraqi:latest` |
-| **Container Disk** | 50GB+ (لتحميل الموديل) |
-| **Expose HTTP Ports** | `8000` |
-| **Environment Variables** | نفس متغيرات `.env.example` — خصوصاً `HF_TOKEN` |
-
-### الخطوة 4 — نشر Pod من القالب
-
-**Deploy** → اختر القالب اللي أنشأته → اختر GPU → **Deploy**.
-
-الحاوية تُشغِّل تلقائياً `start.sh` (معرَّف بآخر سطر بـ [Dockerfile](Dockerfile)) — خادم vLLM على 18001 بالخلفية + FastAPI على 8000 — بدون أي أمر يدوي إضافي، وبدون حاجة لـ tmux (الحاوية نفسها تضل شغالة، وترجع تشتغل تلقائياً بعد إعادة تشغيل الـ Pod).
-
-### الخطوة 5 — التحقق
-
-نفس خطوة التحقق بالطريقة 1:
-```bash
-curl https://<POD_ID>-8000.proxy.runpod.net/health
-curl https://<POD_ID>-8000.proxy.runpod.net/gpu
-```
 
 ---
 
@@ -347,8 +294,8 @@ https://<POD_ID>-8000.proxy.runpod.net/test   (على RunPod)
 | `git pull` يفشل بـ `no such ref was fetched` | الـ Pod على فرع محذوف من الريموت | `git fetch origin && git checkout main && git reset --hard origin/main` |
 | `bash start.sh` يطلع Nginx/SSH/Jupyter و«Pod is ready to use» | شغّلت سكربت إقلاع RunPod مو سكربت المشروع (كنت بمسار غلط) | `cd /workspace/app` أولاً، بعدين `bash start.sh` |
 | خطأ 401/403 عند التشغيل | `HF_TOKEN` مفقود أو غير صحيح، أو لم تقبل ترخيص Gemma | راجع قسم "قبل البدء" أعلاه |
-| `/gpu` يرجع `vllm_ready: false` باستمرار | خادم vLLM لسا يحمّل الموديل (~24GB أول مرة)، أو فشل إقلاعه | راقب لوج الـ Pod؛ تأكد أن نسخة vLLM تدعم Gemma 4 (صورة `gemma4-unified` أو nightly — الإصدارات المستقرة الحالية لا تدعمه) |
-| نفاد ذاكرة GPU (CUDA OOM) | GPU المختار صغير جداً، أو `GPU_MEMORY_UTILIZATION`/`MAX_MODEL_LEN` مرتفعة جداً، أو `VLLM_REPLICAS` كثيرة لحجم الكارت (كل نسخة تحمّل أوزان الموديل كاملة من جديد) | اختر GPU أكبر (40GB+)، أو قلّل `MAX_MODEL_LEN`/`GPU_MEMORY_UTILIZATION`، أو قلّل `VLLM_REPLICAS` إلى 1 في `.env` |
+| `/gpu` يرجع `vllm_ready: false` باستمرار | خادم vLLM لسا يحمّل الموديل (~24GB أول مرة)، أو لسا بمرحلة تثبيت vLLM/torch nightly على Ubuntu الخام (أول إقلاع فقط)، أو فشل إقلاعه | راقب لوج الـ Pod (`tail -f /tmp/api.log`)؛ تأكد أن نسخة vLLM المثبَّتة تدعم Gemma 4 (الإصدارات المستقرة الحالية لا تدعمه — لازم nightly) |
+| نفاد ذاكرة GPU (CUDA OOM) | GPU المختار صغير جداً، أو `GPU_MEMORY_UTILIZATION`/`MAX_MODEL_LEN` مرتفعة جداً | اختر GPU أكبر (40GB+)، أو قلّل `MAX_MODEL_LEN`/`GPU_MEMORY_UTILIZATION` في `.env` |
 | الصفحة `/test` ما تتصل بالسيرفر (CORS) | نادراً — الـ CORS مفتوح للجميع افتراضياً بـ `app/main.py` | تأكد إن رابط السيرفر بحقل "رابط السيرفر" صحيح ويتضمن `https://` |
 | أول طلب بطيء جداً | طبيعي — تحميل الموديل والمحوّل أول مرة | انتظر اكتمال التحميل (راقب اللوج)؛ الطلبات اللاحقة أسرع بكثير |
 

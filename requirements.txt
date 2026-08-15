@@ -1,11 +1,17 @@
-# ملاحظة: لا نثبّت torch/vllm هنا — موجودة مسبقاً في صورة
-# vllm/vllm-openai:gemma4-unified (انظر Dockerfile). httpx أدناه هو قناة
-# الاتصال بخادم vLLM (app/engine.py).
-fastapi>=0.115
-uvicorn[standard]>=0.30
-python-multipart>=0.0.9
-pydantic>=2.7
-pydantic-settings>=2.3
-httpx>=0.27
-python-dotenv>=1.0
-
+# ملاحظة: لا نثبّت torch/vllm هنا — start.sh يثبّتهم تلقائياً (نسخة vLLM
+# nightly بدعم Gemma4، تجيب معها torch المتوافق) عند أول إقلاع على Ubuntu
+# 22.04 خام (انظر RUNPOD_DEPLOY.md). httpx أدناه هو قناة الاتصال بخادم vLLM
+# (app/engine.py).
+#
+# كل الإصدارات أدناه مثبَّتة (==) وليست حداً أدنى (>=) عمداً — إقلاع
+# start.sh يشغّل pip install بكل مرة، فسقف مفتوح يعني ترقية صامتة محتملة
+# تكسر الإنتاج بلا أي تغيير بالكود (نفس الدرس اللي تعلمناه من أزمة
+# transformers بـ requirements-gpu.txt، انظر تعليقها). لترقية عمدية: بدّل
+# الرقم هنا بعد اختبار محلي، لا تفتح السقف لـ >=.
+fastapi==0.141.1
+uvicorn[standard]==0.52.3
+python-multipart==0.0.32
+pydantic==2.13.4
+pydantic-settings==2.15.0
+httpx==0.28.1
+python-dotenv==1.2.2

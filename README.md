@@ -1,7 +1,8 @@
 # back_end_iraqi — FastAPI على RunPod
 
-باكند FastAPI جاهز للعمل محلياً وعلى RunPod بصورة:
-`vllm/vllm-openai:gemma4-unified` (خادم vLLM الرسمي بدعم Gemma 4 — انظر [Dockerfile](Dockerfile))
+باكند FastAPI جاهز للعمل محلياً وعلى RunPod بصورة `ubuntu:22.04` خام —
+`start.sh` يبني كل شي لازم من الصفر بأول إقلاع (Python/pip، vLLM nightly
+بدعم Gemma 4 مع torch المتوافق، ffmpeg/libsndfile1).
 
 ثلاث ميزات، كل وحدة براوترها ونصوصها الخاصة تحت `app/features/`:
 
@@ -22,16 +23,14 @@ uvicorn app.main:app --reload --port 8000
 
 ثم افتح: http://localhost:8000/docs
 
-> ملاحظة: محلياً ماكو خادم vLLM (يحتاج GPU/Linux — موجود مسبقاً بصورة vLLM على RunPod).
+> ملاحظة: محلياً ماكو خادم vLLM (يحتاج GPU/Linux — `start.sh` يجهّزه تلقائياً على RunPod).
 > `/gpu` سترجع `vllm_ready: false`، وكل نقاط `/sales/*` و`/support/*` ترجع "[وضع محلي بدون GPU]" بدل توليد حقيقي — يكفي لاختبار الـ API نفسها.
 
-## الرفع على RunPod — طريقتان
+## الرفع على RunPod — Pod مباشر بصورة Ubuntu 22.04 خام
 
-> دليل تفصيلي كامل خطوة بخطوة (مع حل المشاكل الشائعة) في [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md).
+> دليل تفصيلي كامل خطوة بخطوة (مع حل المشاكل الشائعة) في [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md). لا حاجة لبناء أي صورة Docker مخصصة ولا حتى صورة vLLM جاهزة — `start.sh` يبني كل شي من الصفر.
 
-### الطريقة 1: Pod مباشر بالقالب الجاهز (الأسرع)
-
-1. أنشئ Pod من قالب **RunPod PyTorch 2.8.0** (الصورة أعلاه).
+1. أنشئ Pod من قالب بصورة **`ubuntu:22.04`** (الصورة أعلاه) — Container Disk **60GB+** موصى به (torch/vLLM المثبَّتين بأول إقلاع + الموديل المُنزَّل).
 2. في إعدادات القالب أضف `8000` إلى **Expose HTTP Ports**.
 3. انسخ المشروع للـ Pod (عبر Jupyter/SSH أو git clone) إلى `/workspace/back_end_iraqi`.
 4. انسخ `.env.example` إلى `.env` واملأ `HF_TOKEN` (إلزامي) وبقية المفاتيح الاختيارية — أو أضفها كـ Environment Variables بإعدادات الـ Pod مباشرة.
@@ -40,20 +39,6 @@ uvicorn app.main:app --reload --port 8000
    cd /workspace/back_end_iraqi && bash start.sh
    ```
 6. الرابط يكون بالشكل: `https://<POD_ID>-8000.proxy.runpod.net`
-
-### الطريقة 2: صورة Docker مخصصة (قالب خاص بك)
-
-```bash
-docker build -t <username>/back-end-iraqi:latest .
-docker push <username>/back-end-iraqi:latest
-```
-
-ثم في RunPod أنشئ **Template** جديد:
-- **Container Image**: `<username>/back-end-iraqi:latest`
-- **Expose HTTP Ports**: `8000`
-- أضف نفس متغيرات `.env.example` كـ Environment Variables بالـ Template.
-
-> يتطلب البناء والدفع Docker مثبتاً وحساب Docker Hub (أو أي registry).
 
 ## نقاط الـ API
 
@@ -125,7 +110,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 البنية: **FastAPI (منفذ 8000) عميل HTTP رفيع ← خادم vLLM OpenAI-متوافق (منفذ 8001)** يخدم الموديل المدموج بـ continuous batching حقيقي — مئات الطلبات المتزامنة تتقاسم الـ GPU تلقائياً (PagedAttention) بدون طوابير يدوية.
 
-دعم معمارية `Gemma4ForConditionalGeneration` وصل لـ vLLM عبر [PR #44429](https://github.com/vllm-project/vllm/pull/44429) — متوفر حالياً فقط بالصورة المثبَّتة `vllm/vllm-openai:gemma4-unified` (انظر [Dockerfile](Dockerfile)) أو nightly wheel، ولم يصدر بعد بإصدار مستقر. (هذا حلّ الباغ القديم [#44788](https://github.com/vllm-project/vllm/issues/44788) الذي فرض علينا سابقاً محرك transformers + micro-batching يدوي — حُذف ذلك المسار بالكامل.)
+دعم معمارية `Gemma4ForConditionalGeneration` وصل لـ vLLM عبر [PR #44429](https://github.com/vllm-project/vllm/pull/44429) — متوفر حالياً فقط بنسخة nightly (يثبّتها `start.sh` تلقائياً، انظر [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md))، ولم يصدر بعد بإصدار مستقر. (هذا حلّ الباغ القديم [#44788](https://github.com/vllm-project/vllm/issues/44788) الذي فرض علينا سابقاً محرك transformers + micro-batching يدوي — حُذف ذلك المسار بالكامل.)
 
 - **قالب المحادثة بجهة الخادم**: `/v1/chat/completions` يستقبل `messages` مباشرة وvLLM يطبّق chat template الموديل الفعلي — `render_prompt()` صارت تمريراً مباشراً.
 - **Structured outputs**: كل رد (سواء استخراج طلب أو حلقة أدوات) عبر `guided_json` → `response_format: json_schema` — vLLM يقيّد التوليد بالمخطط فعلياً (guided decoding)، مو مجرد تلميح بالبرومبت.
@@ -162,11 +147,9 @@ guided decoding يضمن JSON صالحاً فعلياً وقت التوليد ن
 |---|---|---|
 | `MODEL_NAME` | `ameer4wisam/gemma-iraqi-finetune-v2` | الموديل المدموج (base + LoRA اللهجة العراقية مندمجين بالأوزان فعلياً، يشمل أبراج الرؤية/الصوت — ينزّله خادم vLLM تلقائياً من HF Hub) |
 | `HF_TOKEN` | (فارغ) | **مطلوب** — Gemma موديل بوابة (gated) والمستودع المدموج قد يكون خاصاً، بدون توكن صحيح يفشل التنزيل بخطأ 401/403 |
-| `VLLM_BASE_URL` | `http://127.0.0.1:18001/v1` | عنوان النسخة الأولى من خادم vLLM من جهة الباك اند (`app/engine.py`) — النسخ الإضافية (`VLLM_REPLICAS`) تُشتق منه تلقائياً بزيادة رقم المنفذ |
-| `VLLM_PORT` | `18001` | منفذ النسخة الأولى من خادم vLLM (يقرأه `start.sh`) |
-| `VLLM_REPLICAS` | `2` | عدد نسخ vLLM المتوازية على نفس كارت GPU (كل نسخة منفذها `VLLM_PORT+i` وحصتها من `GPU_MEMORY_UTILIZATION`/`MAX_NUM_SEQS` مقسومة على العدد) — الباك اند يوزّع الطلبات بينهن حسب الازدحام الحالي (least-outstanding) |
-| `VLLM_BASE_URLS` | (فارغ، يُشتق تلقائياً) | عناوين نسخ vLLM مفصولة بفواصل — عرّفه فقط لو تريد عناوين مخصّصة تخالف الاشتقاق التلقائي من `VLLM_BASE_URL`/`VLLM_REPLICAS` (لا يقرأه `start.sh`) |
-| `GPU_MEMORY_UTILIZATION` | `0.90` | نسبة VRAM الكلية (لكل النسخ مجتمعة) لموديل vLLM + KV cache (حسب الوصفة الرسمية) |
+| `VLLM_BASE_URL` | `http://127.0.0.1:18001/v1` | عنوان خادم vLLM من جهة الباك اند (`app/engine.py`) |
+| `VLLM_PORT` | `18001` | منفذ خادم vLLM (يقرأه `start.sh`) — لازم يطابق رقم المنفذ بـ `VLLM_BASE_URL` |
+| `GPU_MEMORY_UTILIZATION` | `0.90` | نسبة VRAM لموديل vLLM + KV cache (حسب الوصفة الرسمية) |
 | `MAX_MODEL_LEN` | `10000` | أقصى طول سياق — أقصر = KV cache يتسع لطلبات متزامنة أكثر |
 | `RAG_TOP_K` | `5` | عدد وثائق RAG المسترجَعة لكل سؤال |
 | `WHISPER_MODEL` | `ayoubkirouane/whisper-small-ar` | موديل تحويل الصوت لنص العربي (`app/features/order_intake/transcribe.py`) |
@@ -179,7 +162,7 @@ guided decoding يضمن JSON صالحاً فعلياً وقت التوليد ن
 
 كل شي يتنزّل وحده عند أول إقلاع، بدون أي أمر يدوي:
 
-- **المكتبات**: الـ `Dockerfile` (المبني على صورة vLLM الرسمية) يثبّت متطلبات FastAPI و`ffmpeg` (لازم لتحويل الصوت لنص) — vllm/torch/transformers موجودة مسبقاً بالصورة.
+- **المكتبات**: `start.sh` يبني كل شي من الصفر على Ubuntu 22.04 خام بأول إقلاع — Python/pip وأدوات بناء، متطلبات FastAPI (`requirements.txt`/`requirements-gpu.txt`، بإصدارات مثبَّتة بالضبط)، `ffmpeg`/`libsndfile1`، وأخيراً vLLM nightly بدعم Gemma 4 (يجيب معه torch المتوافق تلقائياً).
 - **الموديل المدموج** (`MODEL_NAME`): ينزّله خادم vLLM من Hugging Face Hub أول إقلاع ([start.sh](start.sh))، ويُخزَّن بذاكرة التخزين المؤقت (`~/.cache/huggingface` أو `HF_HOME`) فيُعاد استخدامه بالتشغيلات اللاحقة على نفس الـ pod/volume بدون إعادة تنزيل.
 - **موديل تحويل الصوت** (`WHISPER_MODEL`): ينزّله `transformers.pipeline` تلقائياً أول استخدام لـ `/orders/create` بصوت (أول طلب أبطأ بسبب التنزيل، بعدها من الكاش). يُحمَّل على الـ GPU بنصف الدقة إن توفّر (وإلا CPU)، ويشتغل بخيط منفصل حتى ما يجمّد باقي الطلبات، مع تقطيع تلقائي كل 30 ثانية للرسائل الصوتية الطويلة.
 
