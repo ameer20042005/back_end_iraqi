@@ -154,6 +154,37 @@ _fix_cuda_lib_path() {
     fi
 }
 
+_fix_cuda_nvcc_path() {
+    # flashinfer (يستخدمه vLLM لعمليات sampling) يجمّع كيرنلات CUDA وقت
+    # التشغيل الفعلي (JIT، أول استدعاء حقيقي — يحدث بعد تحميل الأوزان بكثير،
+    # فلا يظهر إلا متأخراً جداً بمرحلة تشغيل المحرك الفعلي) ويحتاج nvcc قابل
+    # للتنفيذ + CUDA_HOME صحيح. عندنا nvcc مثبَّت كحزمة pip
+    # (nvidia-cuda-nvcc-cu12) لا كتثبيت نظام تقليدي بـ/usr/local/cuda، فـ
+    # flashinfer يفشل بـ"Could not find nvcc and default cuda_home=... doesn't
+    # exist" رغم أن nvcc موجود فعلاً بعمق site-packages. نفس فكرة
+    # _fix_cuda_lib_path أعلاه، بس لملف تنفيذي (nvcc) بدل مكتبة مشتركة.
+    local nvcc_path cuda_home
+    nvcc_path=$(python3 -c "
+import importlib.util, os
+spec = importlib.util.find_spec('nvidia.cuda_nvcc')
+if spec and spec.submodule_search_locations:
+    print(spec.submodule_search_locations[0])
+" 2>/dev/null)
+    if [ -z "${nvcc_path}" ]; then
+        echo "==> nvidia-cuda-nvcc-cu12 pip package not found — skipping nvcc path fix"
+        return
+    fi
+    nvcc_path=$(find "${nvcc_path}" -maxdepth 2 -type f -name nvcc 2>/dev/null | head -1)
+    if [ -z "${nvcc_path}" ]; then
+        echo "==> No nvcc executable found under the nvidia-cuda-nvcc-cu12 package — this fix doesn't apply here"
+        return
+    fi
+    cuda_home=$(dirname "$(dirname "${nvcc_path}")")
+    export CUDA_HOME="${cuda_home}"
+    export PATH="${cuda_home}/bin:${PATH}"
+    echo "==> Found nvcc at ${nvcc_path} — set CUDA_HOME=${cuda_home}"
+}
+
 _start_vllm() {
     # يخلّف العملية بالخلفية بالشل الحالي نفسه (لا command substitution:
     # subshell $(...) يفقد ملكية العملية الخلفية بمجرد خروجه ببعض بيئات
@@ -172,6 +203,15 @@ _start_vllm() {
         > "${VLLM_LOG}" 2>&1 &
     VLLM_LAST_PID=$!
 }
+
+
+# نطبّق إصلاحي مسار CUDA بشكل استباقي (لا رجعي فقط) قبل أول محاولة تشغيل:
+# فشل flashinfer بالذات (nvcc) قد يحدث متأخراً جداً — بعد تحميل الأوزان
+# بالكامل وبعد ما start.sh يكون تجاوز نافذة فحص "مات فوراً" أدناه ويعتبر
+# vLLM شغّالاً — فما يُكتشف تلقائياً لو انتظرنا رد فعل بعد الانهيار فقط.
+# كل من الدالتين آمنة تماماً لو ما احتاجتها البيئة (تتحقق وتخرج بصمت).
+_fix_cuda_lib_path
+_fix_cuda_nvcc_path
 
 echo "==> Starting vLLM on port ${VLLM_PORT} (model: ${MODEL_NAME})..."
 _start_vllm
