@@ -88,8 +88,7 @@ if ! python3 -c "import vllm.entrypoints.openai.api_server" 2>/dev/null; then
     echo "==> vLLM (with Gemma4 support) not found — installing the nightly wheel before first launch..."
     python3 -m pip install -U vllm --pre \
         --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
-        --extra-index-url https://download.pytorch.org/whl/cu129 \
-        --index-strategy unsafe-best-match
+        --extra-index-url https://download.pytorch.org/whl/cu129
 fi
 
 # 8001 مستخدَم أحياناً من خدمة نظام على قوالب RunPod العامة (لاحظنا nginx
@@ -179,8 +178,7 @@ if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
         echo "==> Cause: the current vllm version doesn't support the Gemma4 architecture (or isn't installed) — installing nightly wheel..."
         python3 -m pip install -U vllm --pre \
             --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
-            --extra-index-url https://download.pytorch.org/whl/cu129 \
-            --index-strategy unsafe-best-match
+            --extra-index-url https://download.pytorch.org/whl/cu129
     elif grep -qi "libcudart\|libcublas\|cannot open shared object file" "${VLLM_LOG}"; then
         echo "==> Cause: CUDA runtime library path is missing — fixing LD_LIBRARY_PATH..."
         _fix_cuda_lib_path
