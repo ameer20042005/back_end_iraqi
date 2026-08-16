@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     # أبراج الرؤية/الصوت كاملة. يخدمه خادم vLLM منفصل (انظر start.sh) —
     # القيمة هنا تُستخدم باسم الموديل بطلبات /v1/chat/completions ويقرأها
     # start.sh لتمريرها لـ `vllm serve`.
+    # ⚠️ لازم يطابق MODEL_NAME بـ start.sh حرفياً — القيمتان مصدر واحد فقط
+    # عملياً عبر متغير بيئة MODEL_NAME (تقرآه start.sh مباشرة، وتقرآه هنا
+    # pydantic-settings تلقائياً)؛ الافتراضي هنا مجرد نسخة احتياطية لو ما
+    # كان المتغير مضبوطاً — راح يفشل بـ404 "model does not exist" من vLLM
+    # لو اختلف عن الاسم الفعلي اللي شُغِّل فيه خادم vLLM.
     model_name: str = "ameer4wisam/gemma-iraqi-10k-merged"
 
     # عنوان خادم vLLM OpenAI-متوافق — الباك اند عميل HTTP رفيع فقط (انظر

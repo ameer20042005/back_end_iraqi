@@ -24,16 +24,38 @@
 #   --limit-mm-per-prompt: صورة وحدة (order_intake)، بلا صوت (الصوت عبر Whisper
 #     داخل FastAPI، ما يمر بـ vLLM)
 #
-# MAX_NUM_SEQS محسوبة على A100/H100 80GB (moved من A40 48GB): الأوزان
-# (bf16, 12B) تأخذ ~24.4GB من أصل ~72GB متاحة (90% من 80GB)، فيتبقى ~47.6GB
-# لـ KV cache — مقابل ~17GB على A40. بنفس MAX_MODEL_LEN=10000 (٠.375MB/توكن
-# لكل طلب × 10000 ≈ 3.7GB/طلب)، هذا يتسع لـ ~12 طلباً متزامناً بالسياق
-# الأقصى فعلياً، لكن أغلب المحادثات أقصر بكثير من الأقصى فتتقاسم عدة طلبات
-# نفس صفحات الـ KV cache — عملياً ~350 طلباً متزامناً بأحمال الإنتاج
-# الفعلية (نفس منطق --max-num-seqs بوصفة vLLM: سقف الجدولة لا حجزاً ثابتاً).
+# MAX_NUM_SEQS / GPU_MEMORY_UTILIZATION محسوبتان على A40 48GB (~44.43GB
+# فعلياً حسب nvidia-smi على Pods RunPod) — النشر الفعلي الحالي، لا A100/H100.
+# ⚠️ هذا الكرت يتقاسمه vLLM مع Whisper وF5-TTS (يُحمَّلان داخل عملية FastAPI
+# نفسها، انظر app/features/voice_followup) على نفس الـGPU الواحد — فحجز نسبة
+# عالية جداً لـvLLM (كانت 0.90 سابقاً) يترك عملياً VRAM شبه صفر لهذول، وأي
+# طلب توليد فعلي (مو مجرد /health) ينهار المحرك بـCUDA OOM (لاحظناه بالضبط:
+# vram_free_gb: 0.95 تقريباً صفر رغم أن 0.90 يفترض يترك ~4.4GB).
+# الحساب: الأوزان (bf16, 12B) ~24.4GB. نحجز ~6GB هامش لـWhisper/F5-TTS +
+# overhead سياقات CUDA المتعددة بنفس الكرت + أمان إضافي → 0.85 من 44.43GB
+# (~37.8GB لـvLLM) يترك ~6.6GB فعلياً. الباقي لـKV cache: 37.8-24.4≈13.4GB.
+# بنفس MAX_MODEL_LEN=10000 (٠.375MB/توكن×10000≈3.7GB/طلب بالسياق الأقصى)،
+# نفس منطق تحجيم H100 (47.6GB KV cache→~350 عملياً بأحمال إنتاج فعلية، أغلبها
+# أقصر من الأقصى وتتقاسم صفحات الكاش): 13.4/47.6×350 ≈ 98، مقرَّبة لأسفل لـ90
+# لهامش أمان إضافي (تقدير حجز Whisper/F5-TTS تقريبي لا مقيس بالضبط).
 
 set -e
 cd "$(dirname "$0")"
+
+# نحمّل .env (لو موجود) لنفس شل السكربت — بدون هذا، أي متغير بيئة يُكتب بملف
+# .env (HF_TOKEN، MODEL_NAME...) يبقى غير مرئي إطلاقاً لأمر vllm serve أدناه
+# ولا لعملية FastAPI (exec uvicorn بنهاية السكربت)، لأن bash لا يقرأ ملفات
+# .env تلقائياً كمتغيرات بيئة — يبقى مجرد ملف نصي عادي بدون set -a/source.
+# هذا يفسّر سابقاً: تحذير "unauthenticated requests to the HF Hub" رغم وجود
+# HF_TOKEN بالملف، وتعارض اسم الموديل بين app/config.py (يقرأ .env عبر
+# pydantic-settings من عملية بايثون منفصلة) وبين MODEL_NAME الافتراضي هنا.
+if [ -f .env ]; then
+    echo "==> Loading .env"
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
 
 # ── تجهيز نظام التشغيل من الصفر (Ubuntu 22.04 خام) ──────────────────────────
 # بدون صورة جاهزة فيها Python/pip أصلاً، لازم نثبّتهم قبل أي أمر pip/python3
@@ -104,12 +126,12 @@ fi
 # داخلي ماسكه بالفعل على بعض الـ Pods) — 18001 منفذ داخلي (بين الحاويتين
 # فقط، ما يحتاج Expose من لوحة RunPod) أقل عرضة للتصادم. غيّره بـ VLLM_PORT
 # لو لسا يتصادم بمنفذك.
-MODEL_NAME="${MODEL_NAME:-ameer4wisam/gemma-iraqi-finetune-v2}"
+MODEL_NAME="${MODEL_NAME:-ameer4wisam/gemma-iraqi-10k-merged}"
 VLLM_PORT="${VLLM_PORT:-18001}"
 API_PORT="${API_PORT:-8000}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-10000}"
-GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
-MAX_NUM_SEQS="${MAX_NUM_SEQS:-350}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.85}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-90}"
 VLLM_LOG="/tmp/vllm_boot.log"
 
 # حزمة pip nvidia-cuda-nvcc-cu12 (المُثبَّتة تبعاً لـvllm) لا توفّر nvcc
