@@ -364,7 +364,8 @@ async def _bulk_query_answer(
 
 
 async def _deterministic_status_answer(
-    message: str, api_key: str, history: Optional[List[dict]] = None, session_id: str = ""
+    message: str, api_key: str, history: Optional[List[dict]] = None, session_id: str = "",
+    tool_calls: Optional[List[dict]] = None,
 ) -> Optional[str]:
     """توجيه حتمي لطلبات التتبع: إذا الرسالة فيها رقم طلب أو هاتف، نستعلم
     من المصدر مباشرة (استدعاء حي، بلا تخزين محلي) ونبني الرد من البيانات
@@ -376,10 +377,22 @@ async def _deterministic_status_answer(
 
     ⚠️ استثناء عمدي: رقم هاتف مع إشارة فترة تاريخ («من الشهر الماضي») يتجاوز
     هذا المسار الحتمي (ما يقدر يفهم فترات نسبية) ويذهب لمسار الموديل+الأداة
-    — انظر _mentions_date_range وget_order_status."""
+    — انظر _mentions_date_range وget_order_status.
+
+    `tool_calls` (اختياري): لو تم تمرير قائمة، نلحق فيها سجل الاستعلام
+    (نفس شكل tool_calls اللي يبنيها run_with_tools) حتى لو الرد جا من هذا
+    المسار الحتمي لا من حلقة أدوات الموديل — بلا هذا، صفحة /test ما تعرض أي
+    بطاقة "🔧 استدعى الأداة" لطلبات التتبع المباشرة (الحالة الأشيع فعلياً)،
+    فيبدو وكأن ماكو استعلام حصل رغم إنه صار فعلاً — انظر لقطة اختبار حقيقية:
+    الموظف يسأل برقم هاتف، الرد يوصل صحيح لكن بلا أي إشارة استعلام بالواجهة."""
     order_id = extract_order_id(message)
     if order_id:
         order = await order_status_provider.get_by_order_id(order_id, api_key)
+        if tool_calls is not None:
+            tool_calls.append({
+                "tool": "get_order_status", "args": {"order_id": order_id},
+                "result": order or {"error": "ماكو طلب بهذا الرقم"},
+            })
         if order:
             return _format_order_reply(order)
         return "والله ماكو طلب بهذا الرقم عدنا — دقّق الرقم وگلي مرة ثانية."
@@ -387,6 +400,11 @@ async def _deterministic_status_answer(
     phone = extract_phone(message)
     if phone and not _mentions_date_range(message):
         orders = await order_status_provider.search_by_phone(phone, api_key)
+        if tool_calls is not None:
+            tool_calls.append({
+                "tool": "get_order_status", "args": {"phone": phone},
+                "result": {"orders": orders} if orders else {"error": "ماكو طلبات بهذا الرقم"},
+            })
         if orders:
             return "هلا بيك، هذي طلباتك: " + " | ".join(_format_order_reply(o) for o in orders)
         return "والله ماكو طلبات مسجلة بهذا الرقم — تأكد من الرقم وگلي."
@@ -397,11 +415,28 @@ async def _deterministic_status_answer(
     return await _bulk_query_answer(message, api_key, history, session_id)
 
 
+def _attempted_lookup_args(message: str) -> Optional[dict]:
+    """شنو كان المفروض يُستعلَم عنه (رقم طلب أو هاتف) من الرسالة — يُستخدم
+    لبناء سجل tool_calls صناعي لما يفشل الاتصال بباك اند السستم (Exception
+    تُرمى من داخل استدعاء المزوّد نفسه، فتقفز فوق سطر tool_calls.append
+    الطبيعي بـ_deterministic_status_answer)."""
+    order_id = extract_order_id(message)
+    if order_id:
+        return {"order_id": order_id}
+    phone = extract_phone(message)
+    if phone:
+        return {"phone": phone}
+    return None
+
+
 async def _fallback_support_answer(
-    message: str, api_key: str, history: Optional[List[dict]] = None, session_id: str = ""
+    message: str, api_key: str, history: Optional[List[dict]] = None, session_id: str = "",
+    tool_calls: Optional[List[dict]] = None,
 ) -> str:
     """يُستخدم فقط إذا لم يكن الموديل متوفراً (محلياً بدون GPU)."""
-    deterministic = await _deterministic_status_answer(message, api_key, history, session_id)
+    deterministic = await _deterministic_status_answer(
+        message, api_key, history, session_id, tool_calls=tool_calls
+    )
     if deterministic:
         return "[وضع محلي بدون GPU] " + deterministic
     return "[وضع محلي بدون GPU] عطيني رقم الطلب أو رقم الهاتف حتى اكدر اكَولك وين وصل."
@@ -421,11 +456,19 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
     # هذا المسار يستدعي order_status_provider مباشرة (خارج run_with_tools،
     # اللي يلتقط استثناءات الأدوات بنفسه) — فباك اند السستم غير المتاح هنا
     # لازم يُلتقط صراحةً بدل ما يطلع 500 عارية للعميل.
+    tool_calls: List[dict] = []
     try:
-        deterministic = await _deterministic_status_answer(req.message, api_key, history, key)
+        deterministic = await _deterministic_status_answer(
+            req.message, api_key, history, key, tool_calls=tool_calls
+        )
     except SystemBackendUnavailable:
         deterministic = "معذرة، تعذّر الوصول لبيانات الطلبات حالياً — جرّب بعد شوي."
-    tool_calls: List[dict] = []
+        lookup_args = _attempted_lookup_args(req.message)
+        if lookup_args:
+            tool_calls.append({
+                "tool": "get_order_status", "args": lookup_args,
+                "result": {"error": "تعذّر الاتصال بباك اند السستم"},
+            })
     if deterministic is not None:
         answer = deterministic
         engine_name = "deterministic"
@@ -436,7 +479,7 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
         engine_name = "vllm"
         tool_calls = data.get("tool_calls") or []
     else:
-        answer = await _fallback_support_answer(req.message, api_key, history, key)
+        answer = await _fallback_support_answer(req.message, api_key, history, key, tool_calls=tool_calls)
         engine_name = "fallback"
 
     sessions.append(key, "user", req.message)
@@ -459,12 +502,20 @@ async def support_chat_stream(req: SupportChatRequest, api_key: str = Depends(re
     history = sessions.get(key)
 
     async def event_source():
+        tool_calls: List[dict] = []
         try:
-            deterministic = await _deterministic_status_answer(req.message, api_key, history, key)
+            deterministic = await _deterministic_status_answer(
+                req.message, api_key, history, key, tool_calls=tool_calls
+            )
         except SystemBackendUnavailable:
             deterministic = "معذرة، تعذّر الوصول لبيانات الطلبات حالياً — جرّب بعد شوي."
+            lookup_args = _attempted_lookup_args(req.message)
+            if lookup_args:
+                tool_calls.append({
+                    "tool": "get_order_status", "args": lookup_args,
+                    "result": {"error": "تعذّر الاتصال بباك اند السستم"},
+                })
 
-        tool_calls: List[dict] = []
         if deterministic is not None:
             answer = deterministic
             yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
@@ -481,7 +532,7 @@ async def support_chat_stream(req: SupportChatRequest, api_key: str = Depends(re
                 answer = EXHAUSTED_FALLBACK
                 yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
         else:
-            answer = await _fallback_support_answer(req.message, api_key, history, key)
+            answer = await _fallback_support_answer(req.message, api_key, history, key, tool_calls=tool_calls)
             yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
 
         sessions.append(key, "user", req.message)
