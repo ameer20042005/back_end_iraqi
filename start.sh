@@ -86,7 +86,14 @@ ldconfig -p 2>/dev/null | grep -q libsndfile.so || {
 # Gemma4 فعلياً — لا يظهر إلا وقت التشغيل الحقيقي).
 if ! python3 -c "import vllm.entrypoints.openai.api_server" 2>/dev/null; then
     echo "==> vLLM (with Gemma4 support) not found — installing the nightly wheel before first launch..."
-    python3 -m pip install -U vllm --pre \
+    # torch وtorchvision يُذكَران صراحةً هنا (لا نكتفي بترك pip يحلّهما كتبعية
+    # ضمنية لـvllm): بدون هذا، pip يترك torch الموجودة أصلاً بالصورة الأساسية
+    # (غالباً بنسخة CUDA مختلفة، مثلاً cu130) كما هي طالما "تُشبع" شرط الإصدار،
+    # بينما يجيب torchvision جديدة من مؤشر cu129 — فتتصادم نسختا CUDA بين
+    # المكتبتين ويفشل vLLM باستيراد فاشل بصمت (RuntimeError: PyTorch and
+    # torchvision were compiled with different CUDA major versions)، وهذا يحدث
+    # غالباً بعد نافذة فحص _start_vllm أدناه فما يُكتشف تلقائياً.
+    python3 -m pip install -U vllm torch torchvision --pre \
         --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
         --extra-index-url https://download.pytorch.org/whl/cu129
 fi
@@ -174,9 +181,9 @@ sleep 8
 if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
     echo "🛑 vLLM died immediately — boot log:"
     tail -n 40 "${VLLM_LOG}"
-    if grep -qi "Gemma4ForConditionalGeneration\|is not supported for now\|ValueError: Model architectures\|ModuleNotFoundError\|No module named" "${VLLM_LOG}"; then
+    if grep -qi "Gemma4ForConditionalGeneration\|is not supported for now\|ValueError: Model architectures\|ModuleNotFoundError\|No module named\|different CUDA major versions" "${VLLM_LOG}"; then
         echo "==> Cause: the current vllm version doesn't support the Gemma4 architecture (or isn't installed) — installing nightly wheel..."
-        python3 -m pip install -U vllm --pre \
+        python3 -m pip install -U vllm torch torchvision --pre \
             --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
             --extra-index-url https://download.pytorch.org/whl/cu129
     elif grep -qi "libcudart\|libcublas\|cannot open shared object file" "${VLLM_LOG}"; then
