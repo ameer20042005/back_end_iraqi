@@ -57,6 +57,23 @@ def _get_instance() -> "F5TTS":
         ckpt_file = hf_hub_download(repo_id=_HF_REPO_ID, filename=_HF_CKPT_PATH)
         vocab_file = hf_hub_download(repo_id=_HF_REPO_ID, filename=_HF_VOCAB_PATH)
         _tts_instance = F5TTS(ckpt_file=ckpt_file, vocab_file=vocab_file)
+
+        # إصلاح تعارض دقة (dtype) داخل مكتبة f5_tts نفسها (1.1.22): الموديل
+        # الرئيسي (self.ema_model) يُرقّى تلقائياً لـfloat16 على أي GPU بقدرة
+        # حوسبة ≥6 (utils_infer.py::load_checkpoint، شرط torch.cuda
+        # .get_device_properties(device).major >= 6 — يشمل A40/A100/H100)،
+        # ومخرَج التوليد (mel spectrogram) يُحوَّل صراحةً لfloat32 قبل الـ
+        # vocoder (utils_infer.py:519) — لكن self.vocoder (Vocos) نفسه يبقى
+        # كما حُمِّل بدون أي تحويل دقة صريح بـload_vocoder، فيطلع أحياناً
+        # float16 هو الآخر (حسب كيف يحمّله Vocos.from_pretrained داخلياً)،
+        # فيتعارض مع مدخل float32 المضمون صراحةً: RuntimeError: mat1 and
+        # mat2 must have the same dtype, but got Float and Half. لا خيار
+        # dtype مكشوف بواجهة F5TTS العامة (__init__) لضبط هذا من الخارج،
+        # فنفرضه هنا صراحة بعد التحميل مباشرة على self.vocoder وحده — الموديل
+        # الرئيسي يبقى float16 كما صمَّمته المكتبة (أسرع، ومطابق لما يتوقعه
+        # بقية الأنبوب).
+        if hasattr(_tts_instance, "vocoder"):
+            _tts_instance.vocoder = _tts_instance.vocoder.float()
     return _tts_instance
 
 
