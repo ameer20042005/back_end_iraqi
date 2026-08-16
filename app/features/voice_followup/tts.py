@@ -77,8 +77,15 @@ def warmup() -> bool:
 
 def synthesize(text: str) -> Optional[bytes]:
     """يحوّل نصاً عراقياً لملف صوتي WAV (بايتات) بصوت المرجع المرفق. يرجع
-    None إذا مكتبة f5_tts غير مثبَّتة (محلياً بدون GPU) — المستدعي (router)
-    يقرر كيف يتعامل مع الحالة (503 للزبون بدل توليد صوت فارغ)."""
+    None إذا مكتبة f5_tts غير مثبَّتة (محلياً بدون GPU) أو فشل التوليد فعلياً
+    (تعارض إصدار numpy، نفاد ذاكرة GPU...) — المستدعي (router) يقرر كيف
+    يتعامل مع الحالة (503 واضح للزبون بدل انهيار 500 خام بلا رسالة).
+
+    ⚠️ استثناءات infer() تُلتقط هنا صراحةً وتُسجَّل بالتفصيل (traceback كامل)
+    بدل ما تتسرّب كـ500 غير مفسَّر لـFastAPI — لقطة إنتاج حقيقية: /ask كان
+    يرجع 500 بلا أي تفصيل، والسبب الفعلي (numpy 2.x مثبَّتة عبر تبعيات vLLM
+    بينما f5-tts يتطلب <=1.26.4، أو OOM لأن vLLM يحجز أغلب VRAM على A40)
+    ما كان يظهر بأي مكان — هذا يخلي السبب الحقيقي يظهر بـ/tmp/api.log فوراً."""
     if not _F5_TTS_AVAILABLE:
         return None
     if not text.strip():
@@ -88,11 +95,15 @@ def synthesize(text: str) -> Optional[bytes]:
 
     import soundfile as sf
 
-    wav, sr, _spec = _get_instance().infer(
-        ref_file=str(_REF_AUDIO_PATH),
-        ref_text=_REF_TEXT,
-        gen_text=text,
-    )
-    buf = io.BytesIO()
-    sf.write(buf, wav, sr, format="WAV")
-    return buf.getvalue()
+    try:
+        wav, sr, _spec = _get_instance().infer(
+            ref_file=str(_REF_AUDIO_PATH),
+            ref_text=_REF_TEXT,
+            gen_text=text,
+        )
+        buf = io.BytesIO()
+        sf.write(buf, wav, sr, format="WAV")
+        return buf.getvalue()
+    except Exception:
+        logger.exception("فشل توليد الصوت (F5-TTS) — النص: %r", text[:100])
+        return None
