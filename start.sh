@@ -112,6 +112,17 @@ GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-350}"
 VLLM_LOG="/tmp/vllm_boot.log"
 
+# حزمة pip nvidia-cuda-nvcc-cu12 (المُثبَّتة تبعاً لـvllm) لا توفّر nvcc
+# فعلياً بهذا الإصدار — فيها ptxas وlibnvvm.so بس، بدون الملف التنفيذي nvcc
+# نفسه. flashinfer (يستخدمه vLLM افتراضياً لتسريع sampling) يحتاج nvcc
+# لتجميع كيرنلاته وقت التشغيل (JIT، أول استدعاء توليد فعلي)، فينهار كامل
+# محرك vLLM لاحقاً جداً (بعد تحميل الأوزان) بخطأ "Could not find nvcc".
+# تركيب CUDA toolkit كامل حل ثقيل غير ضروري: عندنا مسار بديل مبني بـPyTorch
+# العادي لا يحتاج JIT إطلاقاً — نعطّل flashinfer sampler صراحة بمتغير البيئة
+# الرسمي لـvLLM (VLLM_USE_FLASHINFER_SAMPLER=0) بدل الاعتماد على افتراضه
+# التلقائي (يحاول flashinfer إذا "موجود" حتى لو تجميعه سيفشل عملياً).
+export VLLM_USE_FLASHINFER_SAMPLER=0
+
 # تنظيف عمليات لنا عالقة من تشغيلة سابقة (start.sh انقطع بمنتصف الطريق أو
 # أُعيد تشغيله يدوياً بنفس الجلسة)، ثم تحقق أن منفذ vLLM فاضي فعلاً — لو لسا
 # محجوز فمن خدمة نظام (لاحظنا nginx داخلي ماسك 8001 على بعض قوالب RunPod
