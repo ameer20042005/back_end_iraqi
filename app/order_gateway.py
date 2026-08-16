@@ -25,6 +25,7 @@ TODO: رابط ومسارات باك اند السستم الفعلية غير �
 
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import List, Optional
 
 import httpx
@@ -36,6 +37,27 @@ from app.system_backend import request as backend_request
 from app.system_backend_schema import SystemOrder
 
 logger = logging.getLogger(__name__)
+
+
+def _created_at_in_range(
+    created_at: Optional[str], date_from: Optional[str], date_to: Optional[str]
+) -> bool:
+    """هل تاريخ إنشاء الطلب (ISO 8601) يقع بفترة [date_from, date_to]؟
+
+    نتساهل عمداً مع أي خطأ تحليل (تنسيق غير متوقَّع من باك اند السستم
+    الحقيقي، أو created_at مفقود): **نُبقي** الطلب بدل ما نخفيه — إخفاء طلب
+    حقيقي عن الموظف بسبب فلتر تاريخ فشل تحليله أسوأ من عرضه بلا فلترة."""
+    if not created_at:
+        return True
+    try:
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        if date_from and created < datetime.fromisoformat(date_from):
+            return False
+        if date_to and created > datetime.fromisoformat(date_to + "T23:59:59"):
+            return False
+        return True
+    except ValueError:
+        return True
 
 
 def _parse_orders(raw_orders: list) -> List[dict]:
@@ -60,8 +82,17 @@ class OrderStatusProvider(ABC):
         """يرجع حالة طلب واحد بمعرّفه، أو None إذا غير موجود."""
 
     @abstractmethod
-    async def search_by_phone(self, phone: str, api_key: str) -> List[dict]:
-        """يرجع كل الطلبات المرتبطة برقم هاتف."""
+    async def search_by_phone(
+        self,
+        phone: str,
+        api_key: str,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[dict]:
+        """يرجع كل الطلبات المرتبطة برقم هاتف، بفلترة اختيارية بفترة تاريخ
+        (ISO 8601، مثل "2026-07-01") — البحث الأساسي بميزة الدعم صار برقم
+        الهاتف (الزبون يتذكره، لا رقم الطلب)، مع مرونة تحديد فترة زمنية
+        («طلبات هذا الرقم من الشهر الماضي»)."""
 
     @abstractmethod
     async def search_by_status(self, status: str, api_key: str) -> List[dict]:
@@ -105,9 +136,30 @@ class HttpOrderStatusProvider(OrderStatusProvider):
             logger.warning("طلب %s لا يطابق عقد SystemOrder: %s", order_id, exc)
             return None
 
-    async def search_by_phone(self, phone: str, api_key: str) -> List[dict]:
-        data = await self._get("/orders/search", api_key, params={"phone": phone})
-        return _parse_orders((data or {}).get("orders", []))
+    async def search_by_phone(
+        self,
+        phone: str,
+        api_key: str,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[dict]:
+        # نمرر فترة التاريخ لباك اند السستم (تخمين موثَّق — TODO أعلى الملف)
+        # **و**نفلتر محلياً كمان على created_at: باك اند السستم قد يتجاهل
+        # فلاتر غير معروفة له، فالفلترة المحلية شبكة أمان تضمن النتيجة صحيحة
+        # بغض النظر هل الباك اند الحقيقي يدعم هذا الفلتر أصلاً أم لا.
+        params = {"phone": phone}
+        if date_from:
+            params["date_from"] = date_from
+        if date_to:
+            params["date_to"] = date_to
+        data = await self._get("/orders/search", api_key, params=params)
+        orders = _parse_orders((data or {}).get("orders", []))
+        if date_from or date_to:
+            orders = [
+                o for o in orders
+                if _created_at_in_range(o.get("created_at"), date_from, date_to)
+            ]
+        return orders
 
     async def search_by_status(self, status: str, api_key: str) -> List[dict]:
         data = await self._get("/orders/search", api_key, params={"status": status})

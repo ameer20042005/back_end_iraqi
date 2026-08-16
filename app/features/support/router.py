@@ -78,6 +78,21 @@ _CONTACT_REQUEST_WORDS = (
     "الهواتف", "هواتف",
 )
 
+# إشارة فترة تاريخ («من الشهر الماضي»، «من تاريخ ... لين ...») — رسالة فيها
+# رقم هاتف **و**إشارة فترة زمنية تتجاوز مسار الرد الحتمي (_deterministic_
+# status_answer يرجع كل الطلبات بلا فلترة) وتذهب لمسار الموديل+الأداة، اللي
+# يقدر يحسب date_from/date_to الفعليين من الكلام الدارج (انظر get_order_status
+# بـSUPPORT_SYSTEM_PROMPT) — رد حتمي بسيط ما يقدر يفهم «الشهر الماضي».
+_DATE_RANGE_HINTS = (
+    "من تاريخ", "من يوم", "لين تاريخ", "لغاية", "الى تاريخ", "إلى تاريخ",
+    "الشهر الماضي", "الاسبوع الماضي", "الأسبوع الماضي", "الاسبوع اللي طاف",
+    "من الشهر", "من الاسبوع", "بين تاريخ", "خلال الفترة", "بفترة",
+)
+
+
+def _mentions_date_range(message: str) -> bool:
+    return any(h in message for h in _DATE_RANGE_HINTS)
+
 # أرقام الهواتف العراقية: 07XXXXXXXXX (11 خانة). الزبون يكتبها بصيغ كثيرة —
 # بأرقام عربية-هندية، بفواصل/شرطات، بمقدمة دولية (+964 / 00964 / 964) اللي
 # تستبدل الصفر الأول. نطبّع أولاً بالطبقة ١ (أرقام لاتينية) ثم نلتقط الصيغ.
@@ -126,16 +141,24 @@ async def _get_order_status_tool(args: dict, api_key: str, session_id: str = "")
 
     `api_key` تُربط بالدالة عبر functools.partial وقت التسجيل بـ
     run_with_tools (انظر support_chat أدناه)، فما تمر بـ args التي يرسلها
-    النموذج — نفس مبدأ search_products_tool بالمبيعات."""
+    النموذج — نفس مبدأ search_products_tool بالمبيعات.
+
+    رقم الهاتف هو معيار البحث الأساسي (يُفحص قبل order_id): الزبون يتذكره
+    دايماً بعكس رقم الطلب الداخلي، ويدعم فلترة اختيارية بفترة تاريخ
+    (date_from/date_to، ISO "YYYY-MM-DD") يحسبها الموديل من كلام الموظف
+    الدارج — انظر SUPPORT_SYSTEM_PROMPT."""
     order_id = args.get("order_id")
     phone = args.get("phone")
     status = args.get("status")
+    if phone:
+        orders = await order_status_provider.search_by_phone(
+            str(phone), api_key,
+            date_from=args.get("date_from"), date_to=args.get("date_to"),
+        )
+        return {"orders": orders} if orders else {"error": "ماكو طلبات بهذا الرقم بالفترة المطلوبة"}
     if order_id:
         order = await order_status_provider.get_by_order_id(str(order_id), api_key)
         return order or {"error": "ماكو طلب بهذا الرقم"}
-    if phone:
-        orders = await order_status_provider.search_by_phone(str(phone), api_key)
-        return {"orders": orders} if orders else {"error": "ماكو طلبات بهذا الرقم"}
     if status:
         orders = await order_status_provider.search_by_status(str(status), api_key)
         return {"orders": orders} if orders else {"error": f"ماكو طلبات بحالة {status}"}
@@ -145,13 +168,17 @@ async def _get_order_status_tool(args: dict, api_key: str, session_id: str = "")
 
 
 def _format_order_reply(order: dict) -> str:
-    """يبني رداً عراقياً حتمياً من بيانات الطلب الحقيقية — بدون موديل."""
+    """يبني رداً عراقياً حتمياً من بيانات الطلب الحقيقية — بدون موديل.
+
+    يذكر **المنتجات** لا رقم الطلب الداخلي (نفس مبدأ voice_followup —
+    الزبون/الموظف يتعرف على طلبه بالمنتج، مو برقم ORD-#### الداخلي). رقم
+    الطلب يبقى محفوظاً بالبيانات ومتاحاً لمن يحتاجه (تتبع داخلي)، بس ما
+    يتصدّر الرد المنطوق/المكتوب للزبون."""
     items = "، ".join(
         f"{it['product_name']} ×{it.get('quantity', 1)}" for it in order.get("items", [])
     )
-    reply = f"هلا بيك، طلبك {order['order_id']} حالته: {order['status']}"
-    if items:
-        reply += f" ({items})"
+    subject = items or "طلبك"
+    reply = f"هلا بيك، {subject} حالته: {order['status']}"
     if order.get("eta"):
         reply += f"، والوصول المتوقع {order['eta']}"
     return reply + "."
@@ -345,7 +372,11 @@ async def _deterministic_status_answer(
     الموديل الحالي لا يستدعي الأداة بموثوقية ويخترع حالات طلب من خياله
     («قيد التجهيز يوصل خلال يوم» لطلب حالته الحقيقية «قيد التوصيل خلال
     يومين») — hallucination خطير بميزة دعم. يرجع None إذا الرسالة ما فيها
-    معرّف، فتذهب لمسار الموديل+الأدوات."""
+    معرّف، فتذهب لمسار الموديل+الأدوات.
+
+    ⚠️ استثناء عمدي: رقم هاتف مع إشارة فترة تاريخ («من الشهر الماضي») يتجاوز
+    هذا المسار الحتمي (ما يقدر يفهم فترات نسبية) ويذهب لمسار الموديل+الأداة
+    — انظر _mentions_date_range وget_order_status."""
     order_id = extract_order_id(message)
     if order_id:
         order = await order_status_provider.get_by_order_id(order_id, api_key)
@@ -354,7 +385,7 @@ async def _deterministic_status_answer(
         return "والله ماكو طلب بهذا الرقم عدنا — دقّق الرقم وگلي مرة ثانية."
 
     phone = extract_phone(message)
-    if phone:
+    if phone and not _mentions_date_range(message):
         orders = await order_status_provider.search_by_phone(phone, api_key)
         if orders:
             return "هلا بيك، هذي طلباتك: " + " | ".join(_format_order_reply(o) for o in orders)

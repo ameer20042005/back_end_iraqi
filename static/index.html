@@ -942,7 +942,10 @@
       if (orderMatch) {
         var order = DEMO_ORDERS.find(function (o) { return o.order_id === "ORD-" + orderMatch[1]; });
         if (order) {
-          return "هلا بيك، طلبك " + order.order_id + " حالته: " + order.status +
+          // نفس منطق _format_order_reply (app/features/support/router.py):
+          // نذكر المنتجات لا رقم الطلب الداخلي بالرد.
+          var demoSubject = (order.items || []).map(function (it) { return it.product_name; }).join("، ") || "طلبك";
+          return "هلا بيك، " + demoSubject + " حالته: " + order.status +
             (order.eta ? "، والوصول المتوقع " + order.eta : "") + ". [بيانات تجريبية]";
         }
         return "والله ماكو طلب بهذا الرقم بالبيانات التجريبية — جرّب ORD-1001 لين ORD-1004.";
@@ -952,7 +955,8 @@
         var byPhone = DEMO_ORDERS.filter(function (o) { return o.phone === phoneMatch[0]; });
         if (byPhone.length) {
           return "هلا بيك، هذي طلباتك: " + byPhone.map(function (o) {
-            return o.order_id + " (" + o.status + ")";
+            var subject = (o.items || []).map(function (it) { return it.product_name; }).join("، ") || o.order_id;
+            return subject + " (" + o.status + ")";
           }).join(" | ") + ". [بيانات تجريبية]";
         }
       }

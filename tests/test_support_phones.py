@@ -55,7 +55,7 @@ class _FakeOrderStatusProvider:
     async def get_by_order_id(self, order_id, api_key):
         return self._by_id.get(str(order_id).upper())
 
-    async def search_by_phone(self, phone, api_key):
+    async def search_by_phone(self, phone, api_key, date_from=None, date_to=None):
         return list(self._by_phone.get(str(phone), []))
 
     async def search_by_status(self, status, api_key):
