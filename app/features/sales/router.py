@@ -29,6 +29,7 @@ from app.auth import require_sales_api_key
 from app.features.order_intake.prompts import build_order_intake_prompt
 from app.features.sales.prompts import build_sales_prompt
 from app.features.sales.service import resolve_order
+from app.guards import check_product_names, redact_bad_numbers
 from app.order_extraction import correct_location, state_code_for
 from app.order_schema import (
     OrderConfirmation,
@@ -154,6 +155,26 @@ def _customer_name(history: List[dict], user_message: str = "") -> Optional[str]
     return None
 
 
+def _invented_phone_in_reply(reply: str, history: List[dict], user_message: str) -> bool:
+    """هل الرد يذكر رقم هاتف ما ذكره العميل نفسه بالمحادثة؟
+
+    ليش موجود: app/guards.py يستثني أرقام الهاتف عمداً من فحص الأرقام
+    (check_numbers/redact_bad_numbers) لأنها بيانات عميل موثوقة أصلاً لا
+    سعراً — فرقم هاتف **مختلَق بالكامل** يمر بلا أي فحص من ذاك الحارس. لقطة
+    إنتاج حقيقية: عميل سأل سؤال منتج عام بلا أي بيانات تواصل، والموديل رد
+    بملخّص "طلب جاهز للتثبيت" فيه اسم ورقم هاتف وعنوان مُختلَقين بالكامل —
+    وrder_ready تقنياً false (العميل لسا ما أكّد) فبوابة _missing_order_fields
+    ما تفعّلت لأنها مشروطة بـorder_ready=true فقط، فوصل الرد المضلّل للعميل.
+
+    الفحص هنا مستقل عن order_ready عمداً ويشتغل على **كل** رد."""
+    reply_phones = set(_PHONE_IN_TEXT_RE.findall(reply))
+    if not reply_phones:
+        return False
+    customer_blob = " ".join(_user_messages(history, user_message))
+    customer_phones = set(_PHONE_IN_TEXT_RE.findall(customer_blob))
+    return bool(reply_phones - customer_phones)
+
+
 def _missing_order_fields(
     history: List[dict], user_message: str, session_key: str
 ) -> List[str]:
@@ -184,6 +205,61 @@ def _missing_order_fields(
         missing.append("location")
 
     return [f for f in _FIELD_ORDER if f in missing]
+
+
+_SAFE_REDIRECT = (
+    "عذراً حبيبي، خليني أتأكدلك من التفاصيل الدقيقة قبل لا أگلك شي — "
+    "تحب أدورلك عليه هسه؟"
+)
+
+
+def _tool_reference_text(tool_calls: List[dict]) -> str:
+    """يبني نص مرجعي من نتائج search_products بهذا الدور — هو "الكتالوج"
+    اللي تقيس عليه حرّاس app/guards.py (check_product_names/redact_bad_numbers)
+    صحة أي اسم منتج أو سعر بالرد. فارغ إذا الموديل ما استدعى الأداة إطلاقاً
+    بهذا الدور — وهذا صحيح ومقصود: بلا استدعاء فعلي، أي اسم منتج أو سعر
+    بالرد مختلَق بالتعريف (الحرّاس تتعامل مع مرجع فارغ بأمان، انظر اختباراتها)."""
+    parts = []
+    for call in tool_calls:
+        if call.get("tool") != "search_products":
+            continue
+        result = call.get("result") or {}
+        for item in result.get("results") or []:
+            parts.append(json.dumps(item, ensure_ascii=False))
+    return "\n".join(parts)
+
+
+def _apply_number_and_name_guards(
+    answer: str, tool_calls: List[dict], session_id: str
+) -> tuple:
+    """يطبّق حرّاس الأرقام وأسماء المنتجات (app/guards.py) على رد المبيعات.
+
+    ليش موجود: الحرّاس هذي مبنية ومختبَرة بـapp/guards.py من زمان لكنها ما
+    كانت مربوطة بأي مسار طلب فعلي — lقطة إنتاج حقيقية: عميل سأل سؤالاً عاماً
+    ("عندكم غسالات اتوماتيك؟") بلا ما يذكر أي تفصيل، والموديل رد بمنتج وسعر
+    وزبون كامل مختلَقين بالكامل بلا حتى استدعاء search_products. الحرّاس
+    تمسك هذا تلقائياً: مرجع فارغ (ماكو استدعاء أداة) يعني أي اسم/سعر بالرد
+    مختلَق بالتعريف.
+
+    ترجع (الرد بعد التنقيح، order_ready يُجبَر False لو انمسح اسم منتج)."""
+    reference_text = _tool_reference_text(tool_calls)
+
+    answer, redacted_numbers = redact_bad_numbers(answer, reference_text)
+    if redacted_numbers:
+        logger.warning(
+            "حارس الأرقام: أرقام محذوفة=%s (session=%s)",
+            redacted_numbers, session_id,
+        )
+
+    invented_names = check_product_names(answer, reference_text)
+    if invented_names:
+        logger.warning(
+            "حارس أسماء المنتجات: اسم/ماركة مختلَقة=%s (session=%s) — الرد الأصلي: %r",
+            invented_names, session_id, answer[:300],
+        )
+        return _SAFE_REDIRECT, True
+
+    return answer, False
 
 
 def _remember_user_location(session_key: str, user_message: str) -> None:
@@ -341,7 +417,25 @@ async def _complete_sales_turn(
     الطلب) — مشترك بين /chat و /chat/stream حتى لا يتكرر منطق البوابة."""
     answer, order_ready, engine_name, tool_calls = await _run_sales_turn(key, req, history, api_key)
 
+    # حارسا الأرقام وأسماء المنتجات (app/guards.py) — يسبقان كل شي ويغلبان
+    # قرار الموديل: اسم/سعر مختلَق يُنقَّح أو يستبدل الرد كاملاً بغض النظر عن
+    # order_ready. انظر _apply_number_and_name_guards.
+    answer, names_blocked = _apply_number_and_name_guards(answer, tool_calls, session_id)
+    if names_blocked:
+        order_ready = False
+
     _remember_user_location(key, req.message)
+
+    # حارس رقم الهاتف المختلَق — مستقل عن order_ready عمداً. انظر
+    # _invented_phone_in_reply.
+    if not names_blocked and _invented_phone_in_reply(answer, history, req.message):
+        logger.warning(
+            "حارس الهاتف: رقم مختلَق بالرد (session=%s) — الرد الأصلي: %r",
+            session_id, answer[:300],
+        )
+        order_ready = False
+        missing = _missing_order_fields(history, req.message, key) or ["phone"]
+        answer = _FIELD_QUESTIONS[missing[0]]
 
     # بوابة الاكتمال: تسبق كل شي وتغلب قرار الموديل نفسه — الموديل يثبّت
     # طلباً ناقصاً ويخترع الفراغات. انظر _missing_order_fields.
@@ -438,6 +532,24 @@ async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(requir
                 # بحفظه بالجلسة بصمت.
                 answer = EXHAUSTED_FALLBACK
                 yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
+
+        # حراس الأرقام/أسماء المنتجات/الهاتف المختلَق (انظر
+        # _apply_number_and_name_guards و_invented_phone_in_reply) بعد اكتمال
+        # البث: ⚠️ ما تقدر تسحب توكنات وصلت العميل فعلاً (البث حرف-بحرف بلا
+        # guided_json)، فالفائدة هنا محصورة بحماية **الجلسة المحفوظة** وقرار
+        # بناء الطلب الفعلي (order_ready) — يمنع رقم/اسم مختلَق من التلوّث
+        # لجولات لاحقة أو من الدخول بطلب حقيقي، حتى لو النص الظاهر للعميل
+        # بهذا الدور بالذات وصله كما هو. الحماية الكاملة (منع الظهور أصلاً)
+        # متوفرة فقط بمسار /chat غير المتدفق (_complete_sales_turn).
+        guarded_answer, names_blocked = _apply_number_and_name_guards(answer, tool_calls, session_id)
+        if names_blocked:
+            order_ready = False
+            answer = guarded_answer
+        elif order_ready and _invented_phone_in_reply(answer, history, req.message):
+            logger.warning(
+                "حارس الهاتف (بث): رقم مختلَق بالرد (session=%s)", session_id,
+            )
+            order_ready = False
 
         sessions.append(key, "user", req.message)
         sessions.append(key, "assistant", answer)
