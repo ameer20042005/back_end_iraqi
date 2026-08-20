@@ -1,0 +1,261 @@
+{
+  "info": {
+    "name": "Order/Sales/Voice API — order_intake, sales, voice_followup",
+    "description": "مجموعة Postman جاهزة للاستيراد المباشر لاختبار الميزات الثلاث الموثّقة في docs/api-order-sales-voice.md. استوردها في Postman (File > Import > اختر هذا الملف)، ثم شغّل الطلبات مباشرة — القيم (الرابط والمفاتيح) معبّأة مسبقاً كمتغيرات على مستوى الـ Collection.\n\n⚠️ تحذير أمني: هذا الملف يحتوي مفاتيح API حقيقية (نفس القيم الموجودة في api-order-sales-voice.md). لا تشاركه أو ترفعه لمستودع عام.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://jshdv4wtjlgg9n-8000.proxy.runpod.net", "type": "string" },
+    { "key": "orders_api_key", "value": "sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c", "type": "string" },
+    { "key": "sales_api_key", "value": "sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2", "type": "string" },
+    { "key": "voice_api_key", "value": "sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b", "type": "string" },
+    { "key": "sales_session_id", "value": "", "type": "string" },
+    { "key": "voice_session_id", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "0) Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "فحص أن الخادم شغّال — بلا مفتاح API."
+      }
+    },
+    {
+      "name": "1) Orders — Create Order",
+      "item": [
+        {
+          "name": "Create Order — Text",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{orders_api_key}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "text", "value": "اريد اطلب غسالة اتوماتيك، اسمي احمد، رقمي 07701234567، بغداد الكرادة", "type": "text" }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/create",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "create"]
+            },
+            "description": "إرسال حقل text فقط — لا ترسل audio أو image بنفس الطلب (400 لو أكثر من حقل)."
+          }
+        },
+        {
+          "name": "Create Order — Audio",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{orders_api_key}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "audio", "type": "file", "src": "" }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/create",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "create"]
+            },
+            "description": "بعد استيراد المجموعة، اضغط على حقل audio > Select Files واختر ملف صوت (wav/mp3/m4a/ogg) من جهازك — Postman لا يقدر يعبّئ مسار ملف محلي تلقائياً عند الاستيراد."
+          }
+        },
+        {
+          "name": "Create Order — Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{orders_api_key}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "image", "type": "file", "src": "" }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/create",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "create"]
+            },
+            "description": "اضغط على حقل image > Select Files واختر صورة (jpg/png). يحتاج بيئة GPU على الخادم، غير ذلك يرجع 501."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2) Sales — Chat",
+      "item": [
+        {
+          "name": "Sales Chat — أول رسالة",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// يحفظ session_id تلقائياً من الرد بمتغيّر الـ Collection حتى تستخدمه الرسائل التالية",
+                  "const body = pm.response.json();",
+                  "if (body.session_id) {",
+                  "    pm.collectionVariables.set('sales_session_id', body.session_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{sales_api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"عندكم غسالات اتوماتيك؟\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["sales", "chat"]
+            },
+            "description": "أول رسالة بلا session_id — الخادم ينشئ جلسة جديدة ويرجعها بالاستجابة. سكربت الـ Tests يحفظها تلقائياً بمتغيّر sales_session_id."
+          }
+        },
+        {
+          "name": "Sales Chat — تكملة المحادثة",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.session_id) {",
+                  "    pm.collectionVariables.set('sales_session_id', body.session_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{sales_api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"اريدها، اسمي سارة\",\n  \"session_id\": \"{{sales_session_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["sales", "chat"]
+            },
+            "description": "شغّل الطلب اللي فوقه (أول رسالة) أولاً حتى يتعبّى sales_session_id تلقائياً."
+          }
+        },
+        {
+          "name": "Sales Chat — Streaming (SSE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{sales_api_key}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "text/event-stream" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"عندكم غسالات اتوماتيك؟\",\n  \"session_id\": \"{{sales_session_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/chat/stream",
+              "host": ["{{baseUrl}}"],
+              "path": ["sales", "chat", "stream"]
+            },
+            "description": "الاستجابة text/event-stream — Postman يعرضها بتبويب Response كنص متدفّق (سطور data: {...}) لا JSON واحد."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3) Voice Followup",
+      "item": [
+        {
+          "name": "Step 1 — Ask",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// يحفظ X-Session-Id من الهيدرات تلقائياً حتى تستخدمه خطوة Respond",
+                  "const sid = pm.response.headers.get('X-Session-Id');",
+                  "if (sid) {",
+                  "    pm.collectionVariables.set('voice_session_id', sid);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{voice_api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_id\": \"ORD-000123456\",\n  \"status\": \"لم يتم التسليم\",\n  \"customer_name\": \"احمد\",\n  \"customer_phone\": \"07701234567\",\n  \"customer_city\": \"بغداد\",\n  \"customer_district\": \"الكرادة\",\n  \"items\": [{\"product_name\": \"غسالة اتوماتيك\", \"quantity\": 1}],\n  \"reason_hint\": null,\n  \"notes\": null\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/voice_followup/ask",
+              "host": ["{{baseUrl}}"],
+              "path": ["voice_followup", "ask"]
+            },
+            "description": "الاستجابة ملف audio/wav خام — بتبويب Response اضغط Save Response > Save to a file لسماعه. الهيدر X-Session-Id يُحفظ تلقائياً بمتغيّر voice_session_id لاستخدامه بالخطوة 2."
+          }
+        },
+        {
+          "name": "Step 2 — Respond",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{voice_api_key}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "audio", "type": "file", "src": "" }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/voice_followup/respond?session_id={{voice_session_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["voice_followup", "respond"],
+              "query": [
+                { "key": "session_id", "value": "{{voice_session_id}}" }
+              ]
+            },
+            "description": "شغّل Step 1 أولاً حتى يتعبّى voice_session_id تلقائياً. اضغط على حقل audio > Select Files واختر تسجيل رد الزبون الصوتي. الاستجابة ملف audio/wav + هيدرات X-Reason-Summary / X-Customer-Transcript / X-Query-Sent (Percent-encoded)."
+          }
+        }
+      ]
+    }
+  ]
+}
