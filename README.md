@@ -67,6 +67,8 @@ uvicorn app.main:app --reload --port 8000
 {"message": "شنو معنى شلونك؟", "session_id": "اختياري لاستمرار نفس المحادثة"}
 ```
 
+`/sales/chat` و`/sales/chat/stream` فقط: حقل إضافي اختياري `image_base64` (صورة منتج، base64 خام بلا بادئة data URI) — الموديل يحللها ويطابقها مع الكتالوج المحقون. تفصيل كامل بـ [API.md](API.md#post-saleschat).
+
 `/orders/create` مختلفة (multipart/form-data) — مدخل واحد بس من الثلاثة:
 
 ```bash
@@ -83,8 +85,10 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 | `app/config.py` | إعدادات مشتركة عبر متغيرات بيئة (موديل، RAG، أدوات) — **بدون أي سر مكتوب بالكود** |
 | `app/engine.py` | عميل vLLM: يتصل بخادم vLLM OpenAI-متوافق منفصل (منفذ 8001) عبر `/v1/chat/completions`، مع دعم `stop`/`result_holder`/`guided_json`/صور — vLLM يدير continuous batching وPagedAttention داخلياً |
 | `app/tool_loop.py` | حلقة استدعاء أدوات عامة بمخطط JSON صارم (`action: tool_call \| final_answer`) — مستخدمة من `sales` (`search_products`) و`support` (`get_order_status`) |
-| `app/tools/products.py` | أداة `search_products` — تستدعيها المبيعات عبر tool_call بدل حقن كتالوج تلقائي |
-| `app/context_blocks.py` | صياغة نتائج RAG (لهجة/مواقع) كمقاطع نصية — تُستخدم فقط باستخراج الطلب (`plane.md`)، لا برد المبيعات/الدعم المباشر |
+| `app/tools/products.py` | أداة `search_products` — تجيب الكتالوج **كاملاً مرة وحدة لكل جلسة** (لا بحث لكل منتج)، تخزّنه بكاش الجلسة، وتُرجعه من الكاش بالاستدعاءات اللاحقة بلا HTTP جديد |
+| `app/context_blocks.py` | صياغة نتائج RAG (لهجة/مواقع) لاستخراج الطلب (`plane.md`)، **و**بناء مقطع الكتالوج/دفتر الطلبات الكامل المحقون بردود المبيعات/الدعم المباشرة (`catalog_context_block`/`orders_context_block`) + سقف الحقن المشترك (`cap_for_model`) |
+| `app/intent_router.py` | راوتر نية محافظ (regex محلي، بلا موديل) — رسالة تحية/شكر/هوية بحتة تتجاوز حلقة الأدوات كاملاً بدل ما يستدعي الموديل أداة غير لازمة |
+| `app/vision_utils.py` | فك ترميز/تصغير الصور المشترك بين `/orders/create` (نص من صورة) و`/sales/chat*` (تحليل صورة منتج) |
 | `app/sessions.py` | ذاكرة محادثة بالذاكرة (in-memory)، مفاتيحها مسبوقة باسم الميزة (`sales:...`, `support:...`) |
 | `app/rag/` | بحث BM25 محلي للهجة العراقية والمواقع الجغرافية — يُستدعى فقط عند استخراج الطلب النهائي، لا بكل رد |
 | `app/products.py` | كتالوج المنتجات: `ProductRepository` (واجهة) + `HttpProductRepository` (استعلام حي على باك اند السستم، بلا أي بيانات محلية). يُستعلَم عنه عبر أداة `search_products` |
@@ -97,7 +101,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 لا يوجد أي كتالوج منتجات أو سجل طلبات مخزّن بهذا المستودع (`app/data/` غير موجود عمداً) — كل بيانات المنتجات والطلبات تُستعلَم **لحظياً** من نظام خارجي ("باك اند السستم")، تُعالَج، ولا تُحفظ محلياً بأي شكل:
 
-- **كتالوج المنتجات** (`app/products.py`) — `HttpProductRepository.search()` يرسل الاستعلام النصي (`query`) حرفياً لباك اند السستم عبر `GET /products/search` ويرجع نتيجته كما هي؛ البحث/الترتيب الدلالي مسؤولية باك اند السستم بالكامل، لا فهرسة محلية هنا. تستدعيها أداة `search_products` (`app/tools/products.py`) اللي يطلبها النموذج بنفسه عبر `tool_call` وقت المحادثة (انظر § آلية "الوكيل يقرر").
+- **كتالوج المنتجات** (`app/products.py`) — `HttpProductRepository.list_all()` يجيب الكتالوج كاملاً عبر `GET /products/search` (بلا فلتر `q`) — لا فهرسة/بحث محلي هنا، باك اند السستم هو مصدر الحقيقة الوحيد. تستدعيها أداة `search_products` (`app/tools/products.py`) اللي يطلبها النموذج **مرة وحدة لكل جلسة محادثة** (انظر § آلية "الوكيل يقرر")؛ الكتالوج بعدها يُحقن تلقائياً بكل رسالة لاحقة (`app/context_blocks.py::catalog_context_block`) بدل استدعاء أداة جديد لكل منتج.
 - **نظام إدارة الطلبات** (`app/order_gateway.py`):
   - **إخراج** — `HttpOrderStatusProvider.get_by_order_id()`/`.search_by_phone()`/`.search_by_status()`/`.list_all()`: كل استدعاء طلب HTTP حقيقي لباك اند السستم. تستخدمه ميزة `support` (مباشرة بالمسار الحتمي، وعبر أداة `get_order_status` بمسار الموديل).
   - **إدخال** — `HttpOrderSubmitter.submit()`: يرسل الطلب المؤكَّد لباك اند السستم عبر `POST /orders`. تستدعيه `sales/service.py` تلقائياً بعد كل طلب مؤكَّد.
@@ -134,10 +138,11 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 ```
 
 - الموديل يقرر بنفسه: يحتاج بيانات؟ يرجع `action="tool_call"` باسم الأداة ومعاملاتها. الباك اند ينفّذها (استعلام حقيقي من البيانات) ويعيد النتيجة برسالة جديدة، والموديل يحلّلها بجولة توليد ثانية حتى يرجع `action="final_answer"`.
-- **المبيعات** (`app/features/sales/router.py`): أداة `search_products` (بدل حقن كتالوج RAG تلقائي بكل رسالة)، وحقل إضافي `order_ready: bool` بالمخطط (بدل علامة `[ORDER_READY]` النصية القديمة) — الموديل يعلن اكتمال الطلب صراحةً بحقل مقيَّد guided decoding، وتغلبه بوابة `_missing_order_fields` الحتمية إذا كانت بيانات التواصل ناقصة.
-- **الدعم** (`app/features/support/router.py`): أداة `get_order_status` وحدها (`web_search` حُذفت).
+- **المبيعات** (`app/features/sales/router.py`): أداة `search_products` — تُستدعى **مرة وحدة لكل جلسة** فتجيب الكتالوج كاملاً (بدل بحث ضيّق لكل منتج)، يُحقن بعدها تلقائياً بكل رسالة لاحقة (`app/context_blocks.py`) فيدوّر الموديل بالكتالوج الكامل بنفسه — بضمنه اقتراح بديل مشابه وتحليل صورة منتج يرفقها العميل (`image_base64` بجسم `/sales/chat*`، انظر `app/vision_utils.py`). حقل إضافي `order_ready: bool` بالمخطط (بدل علامة `[ORDER_READY]` النصية القديمة) — الموديل يعلن اكتمال الطلب صراحةً بحقل مقيَّد guided decoding، وتغلبه بوابة `_missing_order_fields` الحتمية إذا كانت بيانات التواصل ناقصة.
+- **الدعم** (`app/features/support/router.py`): أداة `get_order_status` — نفس مبدأ "حمّل مرة وحدة" لدفتر الطلبات الكامل بمسار الأسئلة العامة (بعد التتبع الحتمي برقم طلب/هاتف)، يسمح بالبحث باسم الزبون مباشرة بلا دالة مخصَّصة له.
+- **راوتر نية محافظ** (`app/intent_router.py`، كلا الميزتين): رسالة تحية/شكر/هوية بحتة (بلا رقم ولا كلمة منتج/طلب) تتجاوز حلقة الأدوات كاملاً وتُجاب بتوليد حر مباشر (`app/tool_loop.py::answer_without_tools`) — فحص محلي رخيص قبل الموديل، أضمن من الاعتماد على انضباطه بالتمييز.
 
-guided decoding يضمن JSON صالحاً فعلياً وقت التوليد نفسه — بدل تحليل نص حر (`[TOOL_CALL]{...}[/TOOL_CALL]`) عرضة للانحراف عن الصيغة. التغطية بـ `tests/test_tool_loop.py`.
+guided decoding يضمن JSON صالحاً فعلياً وقت التوليد نفسه — بدل تحليل نص حر (`[TOOL_CALL]{...}[/TOOL_CALL]`) عرضة للانحراف عن الصيغة. التغطية بـ `tests/test_tool_loop.py`، `tests/test_intent_router.py`، `tests/test_search_products_tool.py`، `tests/test_sales_catalog_guards.py`.
 
 **استعلامات الموظفين التشغيلية** (`app/features/support/router.py`): بوت الدعم **داخلي للموظفين**، فكل بيانات الطلبات متاحة إلهم. الاستعلام بالحالة («شنو الطلبات قيد التوصيل؟») والجرد العام وأرقام الهواتف — كلها تُجاب حتمياً من `orders.json` مباشرة، لا بالموديل: الموديل مرصود إنه يخترع معرّفات ويسند لها حالات غلط. الاستعلام بالحالة يجي **بعد** فحص المعرّفات عمداً، حتى «حالة ORD-1001» ترجع ذاك الطلب بالذات. التغطية بـ `tests/test_support_queries.py`.
 

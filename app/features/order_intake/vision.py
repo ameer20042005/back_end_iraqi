@@ -13,24 +13,11 @@
 الراوتر 501 واضحة.
 """
 
-import io
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
 from app.engine import llm_engine
-
-try:
-    from PIL import Image
-
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-
-
-# أقصى بُعد للصورة قبل الإرسال. لقطات شاشة الهواتف تجي بعرض 1080-1440px،
-# وتصغيرها لـ 896 يقلّل توكنات الرؤية وزمن الترميز محسوساً بدون ما يضر
-# قراءة النص العربي بلقطات المحادثات (النص يبقى واضحاً فوق ~700px).
-_MAX_IMAGE_DIM = 896
+from app.vision_utils import PIL_AVAILABLE, decode_image_bytes
 
 _IMAGE_INSTRUCTION = (
     "هذي صورة طلب من زبون (قائمة مكتوبة بخط اليد، أو لقطة شاشة محادثة، أو صورة "
@@ -46,23 +33,6 @@ _IMAGE_INSTRUCTION = (
     "\"وطريقة الاستعمال\") ليست منتجات — لا تدخلها بـ orders.\n"
     "أرجع JSON فقط."
 )
-
-
-def _downscale(image: "Image.Image") -> "Image.Image":
-    """يصغّر الصورة لأقصى بُعد _MAX_IMAGE_DIM مع حفظ النسبة — أهم مكسب سرعة
-    بمسار الصور: توكنات الرؤية تتناسب مع مساحة الصورة.
-
-    `reducing_gap` يخلي Pillow يسوي تصغيراً تقريبياً سريعاً أولاً (draft) ثم
-    LANCZOS على النتيجة الأصغر، بدل تمرير LANCZOS على الأصل كاملاً. صورة
-    12 ميجابكسل من كاميرا الهاتف كانت تكلّف مئات الميلي-ثانية بالتصغير وحده."""
-    w, h = image.size
-    longest = max(w, h)
-    if longest <= _MAX_IMAGE_DIM:
-        return image
-    scale = _MAX_IMAGE_DIM / longest
-    return image.resize(
-        (int(w * scale), int(h * scale)), Image.LANCZOS, reducing_gap=2.0
-    )
 
 
 class OrderImageReader(ABC):
@@ -88,12 +58,7 @@ class VllmOrderImageReader(OrderImageReader):
             raise NotImplementedError(
                 "محرك الموديل غير جاهز (طبيعي محلياً بدون GPU؛ يجب أن يكون جاهزاً على RunPod)."
             )
-        raw = Image.open(io.BytesIO(image_bytes))
-        # `draft` يخلي فاكّ ترميز JPEG نفسه يقرأ الصورة بدقة أقل مباشرة (1/2،
-        # 1/4، 1/8) بدل فكّها كاملة ثم تصغيرها — أرخص مرحلة نقدر نحذفها بمسار
-        # الصور، وصور الهواتف كلها JPEG عملياً. لا أثر على الصيغ الأخرى.
-        raw.draft("RGB", (_MAX_IMAGE_DIM, _MAX_IMAGE_DIM))
-        image = _downscale(raw.convert("RGB"))
+        image = decode_image_bytes(image_bytes)
 
         # نحقن الصورة برسالة المستخدم الأخيرة (اللي تحمل تعليمة الاستخراج
         # النهائية) — الصورة أولاً ثم النص.

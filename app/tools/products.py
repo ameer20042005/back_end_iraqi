@@ -1,31 +1,40 @@
 # -*- coding: utf-8 -*-
-"""أداة استعلام منتجات — متاحة لوكيل المبيعات عبر app/tool_loop.py.
+"""أداة تحميل كتالوج المنتجات — متاحة لوكيل المبيعات عبر app/tool_loop.py.
 
-النموذج نفسه يقرر متى يحتاج معلومة منتج ويطلبها صراحةً بـ tool_call؛ الأداة
-هنا استعلام لحظي حقيقي على باك اند السستم (app/products.py) — بلا أي تخزين
-أو فهرسة محلية، والنتيجة تُعالَج وتُرجَع للنموذج بلا احتفاظ بها هنا (عدا
-كاش نتائج بحدود الجلسة، انظر _cache_key أدناه).
+**تصميم "حمّل مرة وحدة"** (بدل بحث ضيّق لكل منتج): أول استدعاء بأي جلسة
+مبيعات يجيب الكتالوج **كاملاً** من باك اند السستم (app/products.py::list_all)
+ويخزّنه بكاش الجلسة (app/sessions.py::cache_catalog) — استدعاءات لاحقة
+بنفس الجلسة تلگى الكاش مباشرة بلا أي طلب HTTP جديد. الموديل نفسه يدوّر
+بالكتالوج الكامل (محقوناً بكل رسالة لاحقة عبر
+app/features/sales/prompts.py::build_sales_prompt، انظر
+app/context_blocks.py::catalog_context_block) بدل ما يستدعي بحثاً جديداً
+لكل صنف يُسأل عنه — هذا هو الغرض من الأداة، لا فهرسة/بحث محلي هنا.
 
 الفلاتر (category/in_stock_only) مبنية على سكيما جيني ستورز الحقيقية —
 catalog.categories وcatalog.stock_info — انظر
-assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER.md. هذا الباك اند لا يعرف
-شكل قيمها ولا يطابقها محلياً؛ يمررها كما هي لباك اند السستم الذي يملك
-الكتالوج الحقيقي ويحدد معناها."""
+assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER.md. تُطبَّق محلياً على
+الكتالوج المخزَّن (لا فلترة بجهة باك اند السستم بعد الآن) لتقصير رد **هذا
+الدور تحديداً** فقط — الكتالوج المحقون بالجولات القادمة يبقى كاملاً بلا
+مساس."""
 
-import json
 from typing import List
 
 from app import sessions
+from app.config import settings
+from app.context_blocks import cap_for_model
 from app.products import product_repository
 
 
-def _cache_key(query: str, top_k: int, category: str, in_stock_only: bool) -> str:
-    """مفتاح كاش حتمي لنفس تركيبة (استعلام + فلاتر) — استدعاءان بنفس
-    المعاملات يطابقان نفس المفتاح بغض النظر عن ترتيب args بجسم tool_call."""
-    return json.dumps(
-        {"q": query, "top_k": top_k, "category": category, "in_stock": in_stock_only},
-        ensure_ascii=False, sort_keys=True,
-    )
+def _filter_catalog(catalog: List[dict], category: str, in_stock_only: bool) -> List[dict]:
+    """تضييق محلي اختياري على الكتالوج المخزَّن — لا يمس الكاش نفسه، فقط
+    رد هذا الدور. `query` **لا** يضيّق النتيجة (يُقرأ ويُهمَل عمداً — قرار
+    تصميم: الموديل هو من يفلتر من الكتالوج الكامل المحقون، لا الأداة)."""
+    filtered = catalog
+    if category:
+        filtered = [p for p in filtered if (p.get("category") or "") == category]
+    if in_stock_only:
+        filtered = [p for p in filtered if p.get("in_stock") is not False]
+    return filtered
 
 
 async def search_products_tool(args: dict, api_key: str, session_id: str = "") -> dict:
@@ -35,31 +44,24 @@ async def search_products_tool(args: dict, api_key: str, session_id: str = "") -
     التي يرسلها النموذج.
 
     args:
-      - query: نص البحث (اسم منتج، وصف، فئة...) — إلزامي.
-      - top_k: عدد النتائج (افتراضي 5).
-      - category: اسم فئة (catalog.categories) لتضييق البحث — اختياري.
-      - in_stock_only: true لعرض المتوفر بالمخزون فقط (catalog.stock_info) —
-        اختياري، افتراضياً false (كل الكتالوج بغض النظر عن الكمية).
+      - query: نص البحث — **يُقرأ ويُهمَل** (انظر تعليق الملف/_filter_catalog).
+      - top_k: غير مستخدَم بعد الآن — الكتالوج الكامل هو الناتج، مقصوصاً
+        فقط بسقف settings.max_injected_records (حماية ميزانية التوكِن، لا
+        رغبة الموديل بعدد نتائج).
+      - category: اسم فئة (catalog.categories) لتضييق رد هذا الدور — اختياري.
+      - in_stock_only: true لعرض المتوفر بالمخزون فقط بهذا الدور — اختياري.
     """
-    query = args.get("query")
-    if not query:
-        return {"error": "لازم تحدد query للبحث عن المنتج."}
-    top_k = int(args.get("top_k", 5))
+    catalog = sessions.cached_catalog(session_id) if session_id else None
+    if catalog is None:
+        catalog = await product_repository.list_all(api_key)
+        if session_id:
+            sessions.cache_catalog(session_id, catalog)
+
     category = str(args.get("category") or "").strip()
     in_stock_only = bool(args.get("in_stock_only", False))
+    result = _filter_catalog(catalog, category, in_stock_only)
+    result = cap_for_model(result, settings.max_injected_records, label="search_products_tool")
 
-    cache_key = _cache_key(str(query), top_k, category, in_stock_only)
-    if session_id:
-        cached = sessions.cached_product_search(session_id, cache_key)
-        if cached is not None:
-            return {"results": cached} if cached else {"results": [], "message": "ماكو منتج مطابق بالكتالوج."}
-
-    results: List[dict] = await product_repository.search(
-        str(query), api_key, top_k=top_k,
-        category=category or None, in_stock_only=in_stock_only,
-    )
-    if session_id:
-        sessions.cache_product_search(session_id, cache_key, results)
-    if not results:
+    if not result:
         return {"results": [], "message": "ماكو منتج مطابق بالكتالوج."}
-    return {"results": results}
+    return {"results": result}

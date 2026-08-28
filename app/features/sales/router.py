@@ -13,6 +13,7 @@ order_ready (بدل حقن كتالوج RAG تلقائي وعلامة [ORDER_REA
 app/order_extraction.py)، فما تختلف حسب مصدر الطلب.
 """
 
+import base64
 import json
 import logging
 import re
@@ -20,16 +21,19 @@ import uuid
 from functools import partial
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import sessions
 from app.auth import require_sales_api_key
+from app.config import settings
+from app.context_blocks import cap_for_model
 from app.features.order_intake.prompts import build_order_intake_prompt
 from app.features.sales.prompts import build_sales_prompt
 from app.features.sales.service import resolve_order
 from app.guards import check_product_names, redact_bad_numbers
+from app.intent_router import is_pure_chitchat
 from app.order_extraction import correct_location, state_code_for
 from app.order_schema import (
     OrderConfirmation,
@@ -43,6 +47,7 @@ from app.rag import search_locations
 from app.rag import search as search_words
 from app.tool_loop import (
     EXHAUSTED_FALLBACK,
+    answer_without_tools,
     build_decision_schema,
     build_schema,
     run_decision_rounds,
@@ -50,6 +55,7 @@ from app.tool_loop import (
     stream_final_answer,
 )
 from app.tools.products import search_products_tool
+from app.vision_utils import PIL_AVAILABLE, decode_image_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -212,13 +218,61 @@ _SAFE_REDIRECT = (
     "تحب أدورلك عليه هسه؟"
 )
 
+# تعليمة تُلحَق برسالة العميل الحالية لمّا يرفق صورة منتج — انظر
+# _attach_image_to_last_message. تحيل على قواعد "المرونة بالبدائل والصور"
+# بـ SALES_SYSTEM_PROMPT بدل تكرارها هنا.
+_IMAGE_ANALYSIS_INSTRUCTION = (
+    "صورة مرفقة من العميل — افحصها وطابقها مع الكتالوج المرفق فوق حسب "
+    "قواعد \"المرونة بالبدائل والصور\" بالتعليمات أعلاه (مطابقة تامة، أو "
+    "بديل مشابه صريح، أو نفي واضح إذا ماكو أي تشابه)."
+)
 
-def _tool_reference_text(tool_calls: List[dict]) -> str:
-    """يبني نص مرجعي من نتائج search_products بهذا الدور — هو "الكتالوج"
-    اللي تقيس عليه حرّاس app/guards.py (check_product_names/redact_bad_numbers)
-    صحة أي اسم منتج أو سعر بالرد. فارغ إذا الموديل ما استدعى الأداة إطلاقاً
-    بهذا الدور — وهذا صحيح ومقصود: بلا استدعاء فعلي، أي اسم منتج أو سعر
-    بالرد مختلَق بالتعريف (الحرّاس تتعامل مع مرجع فارغ بأمان، انظر اختباراتها)."""
+
+def _decode_request_image(image_base64: Optional[str]):
+    """يفكّ صورة base64 من جسم طلب /sales/chat*، أو None إذا ماكو صورة.
+
+    نفس أسلوب app/features/order_intake/router.py: خطأ HTTP واضح بدل
+    تجاهل الصورة بصمت أو انهيار غامض — العميل/الواجهة يحتاجون يعرفون فوراً
+    لو الصورة ما انقرت."""
+    if not image_base64:
+        return None
+    if not PIL_AVAILABLE:
+        raise HTTPException(501, "تحليل صور المنتج غير متوفر بهذه البيئة — Pillow غير مثبَّتة.")
+    try:
+        raw_bytes = base64.b64decode(image_base64, validate=True)
+    except ValueError as exc:
+        raise HTTPException(400, "صورة base64 غير صالحة.") from exc
+    try:
+        return decode_image_bytes(raw_bytes)
+    except Exception as exc:
+        raise HTTPException(422, "ما كدرنا نقرأ الصورة — جرّب صورة أوضح.") from exc
+
+
+def _attach_image_to_last_message(messages: List[dict], image) -> None:
+    """يحوّل محتوى آخر رسالة (رسالة العميل الحالية، آخر ما بنته
+    build_sales_prompt) لصيغة multimodal — نفس نمط
+    app/features/order_intake/vision.py::VllmOrderImageReader.extract
+    (الصورة أولاً ثم النص، حسب توصية Gemma 4)."""
+    last = messages[-1]
+    last["content"] = [
+        {"type": "image"},
+        {"type": "text", "text": f"{last['content']}\n{_IMAGE_ANALYSIS_INSTRUCTION}"},
+    ]
+
+
+def _tool_reference_text(tool_calls: List[dict], catalog: Optional[List[dict]] = None) -> str:
+    """يبني نص مرجعي من نتائج search_products بهذا الدور **+ الكتالوج
+    الكامل المحقون من كاش الجلسة** (لو موجود) — هو "الكتالوج" اللي تقيس
+    عليه حرّاس app/guards.py (check_product_names/redact_bad_numbers) صحة
+    أي اسم منتج أو سعر بالرد.
+
+    ليش `catalog` ضروري هنا: بعد الانتقال لتحميل الكتالوج مرة وحدة بالجلسة
+    (انظر app/tools/products.py)، أغلب الأدوار ما فيها استدعاء أداة إطلاقاً
+    (الكتالوج محقون بالبرومبت مسبقاً، انظر app/features/sales/prompts.py) —
+    فـtool_calls تطلع فاضية رغم إن الرد صحيح 100% من الكتالوج المحقون. بلا
+    دمج `catalog` هنا، الحرّاس كانت تحجب **كل** رد بعد الدور الأول معتبرة
+    إياه مختلَقاً. فاضٍ (لا tool_calls ولا catalog) يبقى يعني "ماكو مرجع
+    إطلاقاً" — نفس السلوك الأصلي بالضبط."""
     parts = []
     for call in tool_calls:
         if call.get("tool") != "search_products":
@@ -226,11 +280,13 @@ def _tool_reference_text(tool_calls: List[dict]) -> str:
         result = call.get("result") or {}
         for item in result.get("results") or []:
             parts.append(json.dumps(item, ensure_ascii=False))
+    for item in catalog or []:
+        parts.append(json.dumps(item, ensure_ascii=False))
     return "\n".join(parts)
 
 
 def _apply_number_and_name_guards(
-    answer: str, tool_calls: List[dict], session_id: str
+    answer: str, tool_calls: List[dict], session_id: str, catalog: Optional[List[dict]] = None
 ) -> tuple:
     """يطبّق حرّاس الأرقام وأسماء المنتجات (app/guards.py) على رد المبيعات.
 
@@ -238,11 +294,14 @@ def _apply_number_and_name_guards(
     كانت مربوطة بأي مسار طلب فعلي — lقطة إنتاج حقيقية: عميل سأل سؤالاً عاماً
     ("عندكم غسالات اتوماتيك؟") بلا ما يذكر أي تفصيل، والموديل رد بمنتج وسعر
     وزبون كامل مختلَقين بالكامل بلا حتى استدعاء search_products. الحرّاس
-    تمسك هذا تلقائياً: مرجع فارغ (ماكو استدعاء أداة) يعني أي اسم/سعر بالرد
-    مختلَق بالتعريف.
+    تمسك هذا تلقائياً: مرجع فارغ (ماكو استدعاء أداة ولا كتالوج محقون) يعني
+    أي اسم/سعر بالرد مختلَق بالتعريف.
+
+    `catalog`: الكتالوج الكامل من كاش الجلسة (sessions.cached_catalog) —
+    انظر _tool_reference_text لسبب وجوده.
 
     ترجع (الرد بعد التنقيح، order_ready يُجبَر False لو انمسح اسم منتج)."""
-    reference_text = _tool_reference_text(tool_calls)
+    reference_text = _tool_reference_text(tool_calls, catalog)
 
     answer, redacted_numbers = redact_bad_numbers(answer, reference_text)
     if redacted_numbers:
@@ -291,6 +350,11 @@ class SalesChatRequest(BaseModel):
     session_id: Optional[str] = None
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
+    # صورة منتج اختيارية (JPEG/PNG...، مُرمَّزة base64 — بلا بادئة data URI)
+    # — تحليلها ومطابقتها مع الكتالوج المحقون، انظر
+    # app/features/sales/router.py::_decode_request_image و
+    # SALES_SYSTEM_PROMPT § "المرونة بالبدائل والصور". None = رسالة نصية عادية.
+    image_base64: Optional[str] = None
 
 
 class SalesChatResponse(BaseModel):
@@ -390,14 +454,33 @@ async def _maybe_build_order(session_key: str, api_key: str) -> Optional[OrderCo
 
 
 async def _run_sales_turn(
-    key: str, req: SalesChatRequest, history: List[dict], api_key: str
+    key: str, req: SalesChatRequest, history: List[dict], api_key: str,
+    catalog: Optional[List[dict]], image=None,
 ) -> tuple:
     """يولّد رد المبيعات عبر حلقة الأدوات (search_products) ويرجع
-    (answer, order_ready, engine_name, tool_calls)."""
-    messages = build_sales_prompt(history, req.message)
+    (answer, order_ready, engine_name, tool_calls).
+
+    `catalog`: الكتالوج الكامل المخزَّن بالجلسة قبل بداية هذا الدور (أو
+    None إذا لسا ما انحمّل) — يُحقن بالبرومبت (build_sales_prompt).
+    `image`: صورة PIL مفكوكة (app/vision_utils.decode_image_bytes) إن
+    أرفقها العميل هذا الدور، أو None."""
+    messages = build_sales_prompt(history, req.message, catalog=catalog)
+    multi_modal_data = {"image": image} if image is not None else None
+    if image is not None:
+        _attach_image_to_last_message(messages, image)
 
     if not llm_engine.ready:
         return _fallback_sales_answer(req.message), False, "fallback", []
+
+    # راوتر نية محافظ (app/intent_router.py) — رسالة تحية/شكر/هوية بحتة
+    # بلا أي إشارة منتج/رقم تتجاوز حلقة الأدوات كاملاً: توفير جولة توليد
+    # وإزالة خطر استدعاء search_products بلا داعي (next.md §2). order_ready
+    # يبقى False دائماً هنا — رسالة كهذي ما تكتمل بيها معلومة طلب.
+    # صورة مرفقة تُلغي هذا المسار دائماً — إرفاق صورة **دائماً** إشارة
+    # منتج حقيقية، حتى لو نص الرسالة المرافق قصير أو تحية.
+    if image is None and is_pure_chitchat(req.message):
+        answer = await answer_without_tools(messages, max_tokens=req.max_tokens)
+        return answer, False, "vllm", []
 
     tools = {"search_products": partial(search_products_tool, api_key=api_key, session_id=key)}
     data = await run_with_tools(
@@ -406,21 +489,33 @@ async def _run_sales_turn(
         max_tokens=req.max_tokens,
         temperature=req.temperature,
         schema=_SALES_SCHEMA,
+        multi_modal_data=multi_modal_data,
     )
     return data["final_answer"], bool(data.get("order_ready")), "vllm", data.get("tool_calls") or []
 
 
 async def _complete_sales_turn(
-    key: str, session_id: str, req: SalesChatRequest, history: List[dict], api_key: str
+    key: str, session_id: str, req: SalesChatRequest, history: List[dict], api_key: str,
+    image=None,
 ) -> tuple:
     """يشغّل دور المبيعات كاملاً (توليد + بوابة الاكتمال + حفظ الجلسة + بناء
     الطلب) — مشترك بين /chat و /chat/stream حتى لا يتكرر منطق البوابة."""
-    answer, order_ready, engine_name, tool_calls = await _run_sales_turn(key, req, history, api_key)
+    # القصّ هنا (لا داخل sessions.cached_catalog) — الكاش نفسه يبقى كاملاً؛
+    # هذا نسخة "ما يشوفه الموديل فعلياً هذا الدور" فقط، تُستخدم لكل من الحقن
+    # بالبرومبت وحرّاس الأرقام/الأسماء أدناه (يجب يطابقا بعض تماماً — انظر
+    # app/context_blocks.py::cap_for_model).
+    catalog = cap_for_model(
+        sessions.cached_catalog(key) or [], settings.max_injected_records,
+        label=f"catalog injection (session={session_id})",
+    )
+    answer, order_ready, engine_name, tool_calls = await _run_sales_turn(
+        key, req, history, api_key, catalog=catalog, image=image
+    )
 
     # حارسا الأرقام وأسماء المنتجات (app/guards.py) — يسبقان كل شي ويغلبان
     # قرار الموديل: اسم/سعر مختلَق يُنقَّح أو يستبدل الرد كاملاً بغض النظر عن
     # order_ready. انظر _apply_number_and_name_guards.
-    answer, names_blocked = _apply_number_and_name_guards(answer, tool_calls, session_id)
+    answer, names_blocked = _apply_number_and_name_guards(answer, tool_calls, session_id, catalog=catalog)
     if names_blocked:
         order_ready = False
 
@@ -461,9 +556,10 @@ async def sales_chat(req: SalesChatRequest, api_key: str = Depends(require_sales
     session_id = req.session_id or str(uuid.uuid4())
     key = _SESSION_PREFIX + session_id
     history = sessions.get(key)
+    image = _decode_request_image(req.image_base64)
 
     answer, order, engine_name, tool_calls = await _complete_sales_turn(
-        key, session_id, req, history, api_key
+        key, session_id, req, history, api_key, image=image
     )
 
     return SalesChatResponse(
@@ -486,6 +582,9 @@ async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(requir
     session_id = req.session_id or str(uuid.uuid4())
     key = _SESSION_PREFIX + session_id
     history = sessions.get(key)
+    # يفشل فوراً بحالة HTTP واضحة (400/422/501) قبل بداية البث — صورة غير
+    # صالحة داخل SSE كانت تعني 200 مع بث مكسور بلا تفسير للعميل.
+    image = _decode_request_image(req.image_base64)
 
     async def event_source():
         if not llm_engine.ready:
@@ -499,11 +598,29 @@ async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(requir
             ) + "\n\n"
             return
 
-        messages = build_sales_prompt(history, req.message)
-        tools = {"search_products": partial(search_products_tool, api_key=api_key, session_id=key)}
-        working_messages, decision, tool_calls = await run_decision_rounds(
-            messages, tools=tools, schema=_SALES_DECISION_SCHEMA,
+        # نفس منطق القصّ بـ_complete_sales_turn أعلاه — انظر تعليقه.
+        catalog = cap_for_model(
+            sessions.cached_catalog(key) or [], settings.max_injected_records,
+            label=f"catalog injection (session={session_id})",
         )
+        messages = build_sales_prompt(history, req.message, catalog=catalog)
+        multi_modal_data = {"image": image} if image is not None else None
+        if image is not None:
+            _attach_image_to_last_message(messages, image)
+
+        # نفس الراوتر المحافظ أعلاه (_run_sales_turn) — تخطّي جولة القرار
+        # كاملاً لرسالة دردشة/هوية بحتة (بلا صورة مرفقة — صورة دائماً إشارة
+        # منتج حقيقية). working_messages=messages (بلا أي رسائل أداة مضافة)
+        # يخلي باقي الدالة (البث عبر stream_final_answer، حرّاس الأرقام/
+        # الأسماء، حفظ الجلسة) يشتغل بلا أي تغيير إضافي — decision={} يعني
+        # order_ready=False تلقائياً.
+        if image is None and is_pure_chitchat(req.message):
+            working_messages, decision, tool_calls = messages, {}, []
+        else:
+            tools = {"search_products": partial(search_products_tool, api_key=api_key, session_id=key)}
+            working_messages, decision, tool_calls = await run_decision_rounds(
+                messages, tools=tools, schema=_SALES_DECISION_SCHEMA, multi_modal_data=multi_modal_data,
+            )
         order_ready = bool(decision.get("order_ready"))
 
         _remember_user_location(key, req.message)
@@ -523,7 +640,9 @@ async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(requir
             yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
         else:
             answer = ""
-            async for delta in stream_final_answer(working_messages, max_tokens=req.max_tokens):
+            async for delta in stream_final_answer(
+                working_messages, max_tokens=req.max_tokens, multi_modal_data=multi_modal_data,
+            ):
                 answer += delta
                 yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             if not answer.strip():
@@ -541,7 +660,9 @@ async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(requir
         # لجولات لاحقة أو من الدخول بطلب حقيقي، حتى لو النص الظاهر للعميل
         # بهذا الدور بالذات وصله كما هو. الحماية الكاملة (منع الظهور أصلاً)
         # متوفرة فقط بمسار /chat غير المتدفق (_complete_sales_turn).
-        guarded_answer, names_blocked = _apply_number_and_name_guards(answer, tool_calls, session_id)
+        guarded_answer, names_blocked = _apply_number_and_name_guards(
+            answer, tool_calls, session_id, catalog=catalog
+        )
         if names_blocked:
             order_ready = False
             answer = guarded_answer

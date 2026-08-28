@@ -18,6 +18,7 @@ import pytest
 from app import tool_loop
 from app.tool_loop import (
     EXHAUSTED_FALLBACK,
+    answer_without_tools,
     build_schema,
     run_decision_rounds,
     run_with_tools,
@@ -38,12 +39,14 @@ class _FakeEngine:
         self._stream_chunks = list(stream_chunks or [])
         self.calls = 0
         self.stream_calls = 0
+        self.last_multi_modal_data = None
 
     def render_prompt(self, messages, tools=None):
         return messages
 
     async def generate_full(self, prompt, result_holder=None, **kwargs):
         self.calls += 1
+        self.last_multi_modal_data = kwargs.get("multi_modal_data")
         reply = self._replies.pop(0) if self._replies else {"action": "final_answer", "final_answer": ""}
         text = json.dumps(reply, ensure_ascii=False) if not isinstance(reply, str) else reply
         if result_holder is not None:
@@ -51,8 +54,9 @@ class _FakeEngine:
             result_holder["finish_reason"] = "stop"
         return text
 
-    async def stream_chat_completion(self, prompt, max_tokens=None, stop=None):
+    async def stream_chat_completion(self, prompt, max_tokens=None, stop=None, multi_modal_data=None):
         self.stream_calls += 1
+        self.last_multi_modal_data = multi_modal_data
         for chunk in self._stream_chunks:
             yield chunk
 
@@ -209,3 +213,54 @@ def test_stream_final_answer_yields_deltas_in_order(fake_engine):
 
 async def _collect_stream(agen):
     return [chunk async for chunk in agen]
+
+
+# ---------------------------------------------------------------------------
+# answer_without_tools — مسار app/intent_router.py::is_pure_chitchat (رد
+# مباشر بلا جولات أدوات ولا guided_json، انظر next.md §2).
+# ---------------------------------------------------------------------------
+
+def test_answer_without_tools_collects_stream_deltas(fake_engine):
+    """يجمع دلتات stream_final_answer لرد واحد — بلا guided_json ولا أداة."""
+    engine = fake_engine([], stream_chunks=["هلا ", "بيك ", "شلونك"])
+    answer = asyncio.run(
+        answer_without_tools([{"role": "user", "content": "هلا"}])
+    )
+    assert answer == "هلا بيك شلونك"
+    assert engine.stream_calls == 1
+    assert engine.calls == 0  # ماكو أي جولة guided_json — توليد حر فقط
+
+
+def test_answer_without_tools_falls_back_on_empty_stream(fake_engine):
+    """بث فاضي (عطل مؤقت بجهة vLLM) يرجع EXHAUSTED_FALLBACK بدل نص فاضي."""
+    fake_engine([], stream_chunks=[])
+    answer = asyncio.run(
+        answer_without_tools([{"role": "user", "content": "هلا"}])
+    )
+    assert answer == EXHAUSTED_FALLBACK
+
+
+def test_answer_without_tools_forwards_multi_modal_data(fake_engine):
+    """صورة مرفقة (app/features/sales/router.py) لازم توصل استدعاء المحرك
+    الفعلي، لا تضيع بين answer_without_tools وstream_final_answer."""
+    engine = fake_engine([], stream_chunks=["زين"])
+    image_marker = {"image": object()}
+    asyncio.run(
+        answer_without_tools(
+            [{"role": "user", "content": "شنو هذا؟"}], multi_modal_data=image_marker,
+        )
+    )
+    assert engine.last_multi_modal_data is image_marker
+
+
+def test_run_with_tools_forwards_multi_modal_data(fake_engine):
+    """نفس الشي لجولة guided_json (run_with_tools) — الصورة تبقى مرفقة
+    بكل جولة توليد حتى لو استدعى الموديل أداة أولاً."""
+    engine = fake_engine([{"action": "final_answer", "final_answer": "زين"}])
+    image_marker = {"image": object()}
+    asyncio.run(
+        run_with_tools(
+            [{"role": "user", "content": "شنو هذا؟"}], tools={}, multi_modal_data=image_marker,
+        )
+    )
+    assert engine.last_multi_modal_data is image_marker

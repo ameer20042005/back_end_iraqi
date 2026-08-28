@@ -592,6 +592,11 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
+  .bubble .img-note {
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
 
   pre.json-view {
     background: var(--mono-bg);
@@ -1156,6 +1161,17 @@
     return String(s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; });
   }
 
+  // يحوّل ملف صورة لـ base64 خام (بلا بادئة data:...;base64,) — نفس الصيغة
+  // اللي يتوقعها حقل image_base64 بـ POST /sales/chat (انظر API.md).
+  function fileToBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result.split(",", 2)[1] || ""); };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
   function highlightJson(obj) {
     var str = JSON.stringify(obj, null, 2);
     var escaped = escapeHtml(str);
@@ -1213,7 +1229,7 @@
       method: "POST",
       path: "/sales/chat",
       title: "POST /sales/chat",
-      desc: "رد كامل (بدون بث). يحاول يقنع العميل بالشراء، يقترح منتج إضافي، ويثبّت الطلب تلقائياً عند الموافقة الصريحة. يحتاج مفتاح API المبيعات (X-API-Key).",
+      desc: "رد كامل (بدون بث). يحاول يقنع العميل بالشراء، يقترح منتج إضافي أو بديل مشابه، ويثبّت الطلب تلقائياً عند الموافقة الصريحة. يقبل صورة منتج اختيارية (يحللها ويطابقها مع الكتالوج). يحتاج مفتاح API المبيعات (X-API-Key).",
       apiKeyService: "sales",
       render: renderChatForm
     },
@@ -1539,6 +1555,31 @@
     msgField.appendChild(msgInput);
     grid.appendChild(msgField);
 
+    // صورة منتج اختيارية (image_base64) — الموديل يحللها ويطابقها مع
+    // الكتالوج المحقون، يعرض بديلاً مشابهاً لو ما لگى تطابقاً تاماً. انظر
+    // API.md § POST /sales/chat.
+    var imgField = document.createElement("div");
+    imgField.className = "field";
+    imgField.style.marginTop = "12px";
+    imgField.innerHTML = '<label>صورة منتج <span class="opt">اختياري</span></label>';
+    var imgDrop = document.createElement("div");
+    imgDrop.className = "file-drop";
+    var imgInput = document.createElement("input");
+    imgInput.type = "file";
+    imgInput.accept = "image/*";
+    imgDrop.appendChild(imgInput);
+    var imgClear = document.createElement("button");
+    imgClear.className = "ghost";
+    imgClear.type = "button";
+    imgClear.textContent = "إزالة الصورة";
+    imgClear.style.display = "none";
+    imgClear.style.marginRight = "8px";
+    imgClear.onclick = function () { imgInput.value = ""; imgClear.style.display = "none"; };
+    imgInput.onchange = function () { imgClear.style.display = imgInput.files[0] ? "inline-block" : "none"; };
+    imgField.appendChild(imgDrop);
+    imgField.appendChild(imgClear);
+    grid.appendChild(imgField);
+
     var advGrid = document.createElement("div");
     advGrid.className = "field-grid";
     advGrid.style.marginTop = "12px";
@@ -1604,14 +1645,27 @@
       var message = msgInput.value.trim();
       if (!message) return;
       btn.setBusy(true);
+      var imgFile = imgInput.files[0] || null;
       var userBubble = document.createElement("div");
       userBubble.className = "bubble user";
-      userBubble.innerHTML = '<div class="who">العميل</div>' + escapeHtml(message);
+      userBubble.innerHTML = '<div class="who">العميل</div>' + escapeHtml(message) +
+        (imgFile ? '<div class="img-note">📷 ' + escapeHtml(imgFile.name) + '</div>' : "");
       chatLog.appendChild(userBubble);
 
       var payload = { message: message, session_id: sessionId };
       if (maxTokInput.value) payload.max_tokens = parseInt(maxTokInput.value, 10);
       if (tempInput.value) payload.temperature = parseFloat(tempInput.value);
+      if (imgFile) {
+        try {
+          payload.image_base64 = await fileToBase64(imgFile);
+        } catch (e) {
+          meta.innerHTML = '<span class="status-code s5">خطأ</span>';
+          chatLog.removeChild(userBubble);
+          btn.setBusy(false);
+          alert("تعذّرت قراءة الصورة: " + e.message);
+          return;
+        }
+      }
 
       var t0 = performance.now();
       try {
@@ -1654,6 +1708,8 @@
       }
       btn.setBusy(false);
       msgInput.value = "";
+      imgInput.value = "";
+      imgClear.style.display = "none";
       msgInput.focus();
     };
   }

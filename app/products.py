@@ -63,6 +63,14 @@ class ProductRepository(ABC):
     async def get_by_id(self, product_id: str, api_key: str) -> Optional[dict]:
         """يرجع منتجاً واحداً بالمعرّف، أو None إذا غير موجود."""
 
+    @abstractmethod
+    async def list_all(self, api_key: str) -> List[dict]:
+        """يرجع الكتالوج كاملاً — تُستدعى مرة وحدة لكل جلسة محادثة مبيعات
+        (انظر app/tools/products.py::search_products_tool وapp/sessions.py::
+        cache_catalog) بدل بحث ضيّق منفصل لكل منتج يُسأل عنه؛ الموديل نفسه
+        يدوّر بالكتالوج الكامل المحقون بالبرومبت (app/context_blocks.py::
+        catalog_context_block) لأي سؤال منتج لاحق بنفس الجلسة."""
+
 
 class HttpProductRepository(ProductRepository):
     """عميل HTTP رفيع لباك اند السستم — بدون أي بيانات أو منطق بحث محلي.
@@ -116,6 +124,22 @@ class HttpProductRepository(ProductRepository):
             except ValidationError as exc:
                 logger.warning("منتج %s لا يطابق عقد SystemProduct: %s", product_id, exc)
                 return None
+
+    async def list_all(self, api_key: str) -> List[dict]:
+        # ماكو endpoint منفصل موثَّق بـAPI.md لكل الكتالوج (بعكس الطلبات
+        # اللي عندها GET /orders صريحة) — أفضل تخمين موثَّق: /products/search
+        # بلا فلتر q (بلا تضييق = الكتالوج كامل)، بسقف top_k كبير حتى لا
+        # يرجّع باك اند السستم افتراضيه القصير (5) لو طبّق q الفارغ كاستعلام
+        # عادي. عدّل هذا فقط عند توفر مسار "كل الكتالوج" الحقيقي.
+        params = {"top_k": 10_000}
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
+            resp = await backend_request(
+                client, "GET", "/products/search",
+                params=params,
+                headers=self._headers(api_key),
+            )
+            resp.raise_for_status()
+            return _parse_products(resp.json().get("results", []))
 
 
 product_repository: ProductRepository = HttpProductRepository()

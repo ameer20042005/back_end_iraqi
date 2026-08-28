@@ -282,6 +282,7 @@ X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2
 | `session_id` | string أو null | ❌ | معرّف الجلسة (أرجعه من أول رد لتكملة نفس المحادثة). اتركه فارغاً بأول رسالة |
 | `max_tokens` | int أو null | ❌ | حد أقصى لطول الرد المولَّد (اختياري، افتراضي داخلي إن لم يُرسل) |
 | `temperature` | float أو null | ❌ | درجة العشوائية بالتوليد (اختياري) |
+| `image_base64` | string أو null | ❌ | صورة منتج (base64 خام، بلا بادئة `data:image/...;base64,`) — الوكيل يحللها ويطابقها مع الكتالوج، يقترح بديلاً مشابهاً لو ما لگى تطابقاً تاماً. يحتاج Pillow + خادم vLLM جاهز؛ بدونها `501` |
 
 #### مثال — أول رسالة
 ```bash
@@ -299,6 +300,14 @@ curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/sales/chat" \
   -d '{"message": "اريدها، اسمي سارة", "session_id": "3f6e2b1a-....-...."}'
 ```
 
+#### مثال — صورة منتج
+```bash
+curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/sales/chat" \
+  -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
+  -H "Content-Type: application/json" \
+  -d "{\"message\": \"شنو هذا، عدكم شي مثله؟\", \"image_base64\": \"$(base64 -w0 product.jpg)\"}"
+```
+
 ### شكل الاستجابة (`/sales/chat`)
 `200 OK`:
 
@@ -311,6 +320,7 @@ curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/sales/chat" \
   "tool_calls": [
     {
       "tool": "search_products",
+      "args": {},
       "result": {
         "results": [
           {"id": "P-102", "name": "غسالة اتوماتيك 7 كيلو", "price": 350000, "currency": "IQD"}
@@ -323,7 +333,7 @@ curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/sales/chat" \
 
 - `order`: يبقى `null` طول المحادثة، ويمتلئ ببنية `OrderConfirmation` (نفس شكل استجابة `/orders/create` أعلاه) فقط بالدور اللي يكتمل فيه الطلب (اسم + هاتف + عنوان + منتج مذكورين فعلاً من الزبون).
 - `engine`: `"vllm"` عند رد حقيقي من النموذج، أو `"fallback"` إذا الخادم بوضع بديل بلا GPU جاهز.
-- `tool_calls`: للشفافية فقط — يوضح أي استعلامات منتج نفّذها الوكيل قبل الرد (فارغة إن لم يستدعِ أي أداة).
+- `tool_calls`: للشفافية فقط. **`search_products` تُستدعى مرة وحدة لكل جلسة** — تجيب الكتالوج كاملاً ويُحقن تلقائياً بكل رسالة لاحقة، فتبقى `tool_calls` فاضية بأغلب الأدوار (الموديل يدوّر بالكتالوج المحقون بلا حاجة أداة جديدة).
 
 ### نقطة النهاية — رد متدفّق (Streaming)
 

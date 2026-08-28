@@ -169,6 +169,41 @@
           }
         },
         {
+          "name": "Sales Chat — صورة منتج (image_base64)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.session_id) {",
+                  "    pm.collectionVariables.set('sales_session_id', body.session_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{sales_api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"شنو هذا المنتج، عدكم شي مثله؟\",\n  \"session_id\": \"{{sales_session_id}}\",\n  \"image_base64\": \"<الصق هنا base64 خام للصورة — بلا بادئة data:image/...;base64,>\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/chat",
+              "host": ["{{baseUrl}}"],
+              "path": ["sales", "chat"]
+            },
+            "description": "الموديل يحلل الصورة ويطابقها مع الكتالوج المحقون — يذكر المنتج المطابق حرفياً، أو يعرض بديلاً مشابهاً، أو ينفي التوفّر صراحة. يحتاج Pillow + خادم vLLM جاهز (نفس متطلبات /orders/create بالصور) — بدونها 501. base64 غير صالح → 400، صورة تعذّرت قراءتها → 422."
+          }
+        },
+        {
           "name": "Sales Chat — Streaming (SSE)",
           "request": {
             "method": "POST",

@@ -117,11 +117,16 @@ async def run_with_tools(
     temperature: Optional[float] = None,
     max_rounds: int = 3,
     schema: Optional[dict] = None,
+    multi_modal_data: Optional[dict] = None,
 ) -> dict:
     """يولّد رداً مقيَّداً بـ `schema` (افتراضياً TOOL_LOOP_SCHEMA)؛ إذا طلب
     الموديل أداة ينفّذها ويعيد التوليد بنتيجتها، حتى رد نهائي أو بلوغ
     `max_rounds`. يرجع دائماً dict فيه على الأقل "final_answer" — الحقول
-    الإضافية (مثل order_ready) تصل كما رجّعها الموديل بردّه الأخير."""
+    الإضافية (مثل order_ready) تصل كما رجّعها الموديل بردّه الأخير.
+
+    `multi_modal_data`: صورة مرفقة (app/features/sales/router.py) — تُمرَّر
+    لكل جولة توليد بهذا الاستدعاء حتى تبقى مرئية للموديل عبر جولات الأدوات
+    المتتالية (next.md: طلب المستخدم تحليل صورة منتج)."""
     working_messages = list(messages)
     guided_json = schema or TOOL_LOOP_SCHEMA
     # سجل كل استدعاء أداة بهذه الجولة — يُرجَع مع النتيجة النهائية حتى تقدر
@@ -136,6 +141,7 @@ async def run_with_tools(
             max_tokens=max_tokens,
             temperature=temperature,
             guided_json=guided_json,
+            multi_modal_data=multi_modal_data,
         )
 
         data = _parse_action(text)
@@ -183,12 +189,15 @@ async def run_decision_rounds(
     tools: Dict[str, ToolFunc],
     max_rounds: int = 3,
     schema: Optional[dict] = None,
+    multi_modal_data: Optional[dict] = None,
 ) -> Tuple[List[Dict[str, str]], dict, List[dict]]:
     """جولات قرار الأدوات فقط (بلا نص نهائي) — مقيَّدة بـ DECISION_SCHEMA
     (أو `schema` مخصص بنفس القاعدة). تُنفّذ استدعاءات الأداة كما
     run_with_tools تماماً، لكن بمجرد ما يقرر الموديل action="done" تتوقف
     فوراً بلا توليد أي نص — النص الفعلي يتولاه stream_final_answer بجولة
     منفصلة غير مقيَّدة قابلة للبث الحقيقي.
+
+    `multi_modal_data`: انظر run_with_tools — نفس المبدأ.
 
     ترجع (working_messages, decision_data, tool_calls_log): working_messages
     جاهزة تُمرَّر مباشرة لـ stream_final_answer، وdecision_data يحمل أي حقول
@@ -202,7 +211,9 @@ async def run_decision_rounds(
         # 128 يكفي بوفرة لمخطط القرار المصغّر (action + tool_call صغير أو
         # order_ready) — أقصر بكثير من ردود المبيعات الكاملة، فيقلّل زمن هذي
         # الجولة قبل ما توصل جولة البث النهائي.
-        text = await llm_engine.generate_full(prompt, max_tokens=128, guided_json=guided_json)
+        text = await llm_engine.generate_full(
+            prompt, max_tokens=128, guided_json=guided_json, multi_modal_data=multi_modal_data,
+        )
 
         data = _parse_action(text)
         if data is None:
@@ -242,13 +253,40 @@ async def run_decision_rounds(
     return working_messages, {}, tool_calls_log
 
 
+async def answer_without_tools(
+    messages: List[Dict[str, str]],
+    max_tokens: Optional[int] = None,
+    multi_modal_data: Optional[dict] = None,
+) -> str:
+    """رد نهائي مباشر بلا جولات أدوات ولا guided_json — تُستخدم لمّا
+    app.intent_router.is_pure_chitchat يكتشف رسالة دردشة/هوية/شكر بحتة
+    (انظر تعليق ذاك الملف)، فما داعي لعناء حلقة الأدوات: توفير جولة
+    توليد كاملة + إزالة خطر استدعاء أداة غير لازمة على رسالة بلا أي حاجة
+    بيانات فعلية.
+
+    تجمع stream_final_answer (توليد حر موجود أصلاً، مُستخدَم بمسار
+    `/chat/stream`) لرد واحد — مسار `/chat` غير المتدفق يحتاج النص كاملاً
+    دفعة وحدة، لا دلتات."""
+    chunks = [
+        delta async for delta in
+        stream_final_answer(messages, max_tokens=max_tokens, multi_modal_data=multi_modal_data)
+    ]
+    answer = "".join(chunks).strip()
+    return answer or EXHAUSTED_FALLBACK
+
+
 async def stream_final_answer(
     working_messages: List[Dict[str, str]],
     max_tokens: Optional[int] = None,
+    multi_modal_data: Optional[dict] = None,
 ) -> AsyncGenerator[str, None]:
     """يبثّ النص النهائي توكن-بتوكن فعلياً — تُستدعى بعد run_decision_rounds
     بمجرد ما ينتهي الموديل من الأدوات. توليد حر (بلا guided_json) بتعليمة
     صريحة تكتب النص مباشرة لا JSON، عبر app.engine.stream_chat_completion.
+
+    `multi_modal_data`: انظر run_with_tools — صورة مرفقة (لو وردت) لازم
+    تبقى مرئية للموديل بهذي الجولة المنفصلة كمان، وإلا "ينساها" فور ما
+    تنتهي جولة القرار.
 
     مو مناسبة لتوليد order_ready أو أي حقل بنيوي آخر — هذي مسؤولية
     run_decision_rounds قبلها؛ هنا فقط الكلام الموجَّه للعميل."""
@@ -262,5 +300,6 @@ async def stream_final_answer(
     async for delta in llm_engine.stream_chat_completion(
         llm_engine.render_prompt(final_prompt),
         max_tokens=max_tokens or 512,
+        multi_modal_data=multi_modal_data,
     ):
         yield delta

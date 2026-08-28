@@ -235,6 +235,7 @@ class LLMEngine:
         messages: List[Message],
         max_tokens: int,
         stop: Optional[List[str]] = None,
+        multi_modal_data: Optional[dict] = None,
     ) -> AsyncGenerator[str, None]:
         """توليد حر (بلا guided_json) مبثوث توكن-بتوكن فعلياً عبر SSE من vLLM
         (`stream: true`) — يُستخدم فقط للنص النهائي الحر بعد ما تنتهي جولات
@@ -242,9 +243,15 @@ class LLMEngine:
         مع guided_json: JSON مقيَّد ما يصير صالحاً للتحليل إلا مكتملاً، فبثّه
         جزئياً بلا فائدة للعميل.
 
+        `multi_modal_data`: نفس معامل generate_stream/generate_full — صورة
+        مرفقة بمحادثة مبيعات (app/features/sales/router.py) لازم تبقى
+        مرئية للموديل حتى بجولة الرد النهائي المنفصلة هذي، وإلا "ينسى"
+        الصورة بمجرد ما تنتهي جولة القرار.
+
         كل قطعة SSE بصيغة OpenAI: `data: {...}\\n\\n`، تنتهي بـ `data: [DONE]`.
         نقص أي دلتا نص فيها ونتجاهل الباقي (role وما شابه)."""
-        body = self._build_body(messages, max_tokens, stop, guided_json=None, stream=True)
+        openai_messages = self._to_openai_messages(messages, multi_modal_data)
+        body = self._build_body(openai_messages, max_tokens, stop, guided_json=None, stream=True)
 
         if not self._ready:
             raise RuntimeError("لا يوجد خادم vLLM جاهز حالياً")

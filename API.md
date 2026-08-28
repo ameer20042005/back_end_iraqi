@@ -108,11 +108,11 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 2. **إذا `action == "tool_call"`**: الباك اند يقرأ `tool_call.tool` (اسم الأداة) و`tool_call.args` (معاملاتها)، ينفّذ الأداة المطابقة فعلياً (استعلام حقيقي — مثل `search_products` أو `get_order_status`)، ويضيف نتيجتها كرسالة جديدة بالمحادثة، ثم يعيد التوليد بجولة ثانية (حتى `max_rounds`، افتراضياً 3).
 3. **إذا `action == "final_answer"`**: `final_answer` هو النص الذي يصل للعميل فعلياً بحقل `answer` بجسم الاستجابة — تنتهي الحلقة.
 
-**مثال `tool_call` فعلي** (النموذج يطلب بحث منتج بالمبيعات):
+**مثال `tool_call` فعلي** (النموذج يطلب الكتالوج أول مرة بالمحادثة — انظر "تحميل الكتالوج مرة وحدة بالجلسة" أدناه):
 ```json
 {
   "action": "tool_call",
-  "tool_call": {"tool": "search_products", "args": {"query": "لابتوب", "top_k": 5}}
+  "tool_call": {"tool": "search_products", "args": {}}
 }
 ```
 
@@ -128,10 +128,14 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 
 | الميزة | الأداة (`tool`) | التنفيذ الفعلي |
 |---|---|---|
-| المبيعات | `search_products` | `app/tools/products.py::search_products_tool` — استعلام حي على باك اند السستم (`args.query`, `args.top_k`) |
+| المبيعات | `search_products` | `app/tools/products.py::search_products_tool` — استعلام حي على باك اند السستم، **مرة وحدة لكل جلسة** (انظر أدناه) |
 | الدعم | `get_order_status` | `app/features/support/router.py::_get_order_status_tool` — استعلام حي (`args.order_id` أو `args.phone` أو `args.status` أو `args.all`) |
 
 النموذج **ما يفترض وجود أدوات أخرى غير المسجَّلة**؛ لو رجّع `tool_call.tool` باسم غير معروف، الباك اند يرجّع `{"error": "أداة غير معروفة: ..."}` كنتيجة، والموديل يكمل الحلقة (بدل ما ينهار).
+
+### تحميل الكتالوج/دفتر الطلبات مرة وحدة بالجلسة (بدل بحث لكل عنصر)
+
+`search_products`/`get_order_status(all=true)` **لا يضيّقان النتيجة بـquery بحث** — أول استدعاء بكل جلسة يجيب الكتالوج الكامل (أو دفتر الطلبات الكامل بالدعم) من باك اند السستم ويخزّنه بذاكرة الجلسة (`app/sessions.py::cache_catalog`/`cache_orders`)، ثم يُحقن **تلقائياً** كرسالة `system` إضافية بكل رسالة لاحقة بنفس الجلسة (`app/context_blocks.py::catalog_context_block`/`orders_context_block`) — الموديل يدوّر بالبيانات الكاملة المحقونة (بضمنه اقتراح بدائل مشابهة، والبحث باسم الزبون بالدعم) بدل استدعاء أداة جديد لكل عنصر يُسأل عنه. `args.category`/`args.in_stock_only` يبقيان يضيّقان رد **نفس الدور** فقط (فلترة محلية على الكتالوج المحمَّل، بلا طلب HTTP إضافي). الحجم المحقون محدود بـ`settings.max_injected_records` (افتراضياً 80 عنصر) لحماية ميزانية `max_model_len` — تحذير باللوق لو الكتالوج/الدفتر الحقيقي أكبر.
 
 ### حقل إضافي بالمبيعات: `order_ready`
 
@@ -268,7 +272,8 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
   "message": "شنو عندكم لابتوبات؟",
   "session_id": null,
   "max_tokens": null,
-  "temperature": null
+  "temperature": null,
+  "image_base64": null
 }
 ```
 
@@ -278,6 +283,7 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 | `session_id` | string \| null | لا | لاستمرار نفس المحادثة؛ اتركه فارغ أول مرة وخزّن القيمة اللي ترجع لك واستخدمها بالطلبات التالية |
 | `max_tokens` | int \| null | لا | يتجاوز `MAX_NEW_TOKENS` الافتراضي لهذا الطلب فقط |
 | `temperature` | float \| null | لا | يتجاوز `TEMPERATURE` الافتراضي لهذا الطلب فقط |
+| `image_base64` | string \| null | لا | صورة منتج (JPEG/PNG...) مُرمَّزة base64 خام (بلا بادئة `data:image/...;base64,`) — الموديل يحللها ويطابقها مع الكتالوج المحقون (مطابقة تامة، أو بديل مشابه، أو نفي صريح). يحتاج Pillow + خادم vLLM جاهز (نفس متطلبات `/orders/create` بالصور) — بدونها `501`. صورة base64 غير صالحة → `400`؛ صورة تعذّرت قراءتها → `422` |
 
 **استجابة 200 (بدون تثبيت طلب):**
 ```json
@@ -289,8 +295,8 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
   "tool_calls": [
     {
       "tool": "search_products",
-      "args": {"query": "لابتوب", "top_k": 5},
-      "result": [{"id": "p001", "name": "لابتوب لينوفو IdeaPad 15", "price": 750000, "currency": "IQD"}]
+      "args": {},
+      "result": {"results": [{"id": "p001", "name": "لابتوب لينوفو IdeaPad 15", "price": 750000, "currency": "IQD"}]}
     }
   ]
 }

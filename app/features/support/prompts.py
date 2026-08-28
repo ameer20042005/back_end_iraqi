@@ -3,9 +3,17 @@
 get_order_status.
 
 الرد مقيَّد بمخطط app.tool_loop.TOOL_LOOP_SCHEMA (action: tool_call |
-final_answer) بدل بروتوكول [TOOL_CALL]{...}[/TOOL_CALL] النصي القديم."""
+final_answer) بدل بروتوكول [TOOL_CALL]{...}[/TOOL_CALL] النصي القديم.
 
-from typing import Dict, List
+مسار الأسئلة العامة (بعد ما يفشل التتبع الحتمي برقم طلب/هاتف صريح — انظر
+app/features/support/router.py::_deterministic_status_answer) يحقن دفتر
+الطلبات الكامل المخزَّن بالجلسة (`orders`، إن وُجد) بدل الاعتماد حصراً على
+استدعاء أداة جديد لكل سؤال — يسمح للموديل يبحث بالاسم مباشرة (ماكو دالة
+مخصَّصة للبحث بالاسم، انظر next.md)."""
+
+from typing import Dict, List, Optional
+
+from app.context_blocks import orders_context_block
 
 Message = Dict[str, str]
 
@@ -30,11 +38,12 @@ SUPPORT_SYSTEM_PROMPT = """أنت نموذج اسمه JENI من شركة DATUM. 
    - بالحالة: {"tool": "get_order_status", "args": {"status": "قيد التوصيل"}}
    - كل الطلبات: {"tool": "get_order_status", "args": {"all": true}}
 
-إذا احتجت تستدعيها، أرجع action="tool_call" وtool_call={"tool": "get_order_status", "args": {...}}. **ممنوع تجاوب بمعلومة طلب بلا استدعاء الأداة أولاً بنفس الدور أو دور سابق قريب — بلا استثناء.**
-إذا عندك رد نهائي للموظف، أرجع action="final_answer" وfinal_answer="...".
+إذا احتجت تستدعيها، أرجع action="tool_call" وtool_call={"tool": "get_order_status", "args": {...}}. إذا عندك رد نهائي للموظف، أرجع action="final_answer" وfinal_answer="...".
+
+**إذا دفتر الطلبات الكامل مرفق فوق هذا البرومت** (قسم "دفتر الطلبات الكامل")، فهو مصدرك الجاهز — دوّر فيه مباشرة بلا استدعاء أداة (بضمنه البحث باسم الزبون، مو بس رقم الهاتف/الطلب). استدعِ get_order_status فقط لو **ما لگيت** بالدفتر المرفق جواباً (طلب جديد بعد ما انحمّل الدفتر، مثلاً). إذا الدفتر غير مرفق، **ممنوع تجاوب بمعلومة طلب بلا استدعاء الأداة أولاً بنفس الدور أو دور سابق قريب — بلا استثناء.**
 
 قواعد:
-- لا تجاوب عن حالة طلب من عندك أبداً — استخدم get_order_status دائماً للحصول على معلومة حقيقية.
+- لا تجاوب عن حالة طلب من عندك أبداً — اعتمد فقط على الدفتر المرفق أو get_order_status، لا على ذاكرتك أو تدريبك.
 - إذا ماعطاك العميل رقم طلب ولا رقم هاتف، اسأله عن أحدهما أولاً بأدب.
 - لا تخترع أرقام طلبات (ORD-####) ولا أرقام هواتف ولا حالات طلب أبداً. ما تذكر
   أي معلومة عن طلب إلا إذا جاتك حرفياً من نتيجة الأداة.
@@ -44,8 +53,17 @@ SUPPORT_SYSTEM_PROMPT = """أنت نموذج اسمه JENI من شركة DATUM. 
 - **بردّك النهائي، اذكر الطلب بالمنتجات (product_name بنتيجة الأداة) لا برقم الطلب (order_id)** — رقم الطلب معلومة داخلية، ما يتصدّر الرد. مثال: "الغسالة اللي طلبتها وصلت" بدل "طلبك ORD-1042 وصل". اذكر order_id بس لو الموظف نفسه سأل عنه صراحة بالاسم."""
 
 
-def build_support_prompt(history: List[Message], user_message: str) -> List[Message]:
+def build_support_prompt(
+    history: List[Message], user_message: str, orders: Optional[List[dict]] = None
+) -> List[Message]:
+    """`orders`: دفتر الطلبات الكامل من كاش الجلسة (app/sessions.py::
+    cached_orders، عبر app/features/support/router.py::_list_all_cached)
+    إن وُجد — يُحقن كرسالة system إضافية بعد SUPPORT_SYSTEM_PROMPT وقبل
+    تاريخ المحادثة. None/فاضي = يبقى المسار الحتمي أو استدعاء الأداة."""
     messages: List[Message] = [{"role": "system", "content": SUPPORT_SYSTEM_PROMPT}]
+    block = orders_context_block(orders or [])
+    if block:
+        messages.append({"role": "system", "content": block})
     messages.extend(history)
     messages.append({"role": "user", "content": user_message})
     return messages

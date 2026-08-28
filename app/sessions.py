@@ -25,8 +25,22 @@ _session_orders_cache: Dict[str, List[dict]] = {}
 # (session_id + نص الاستعلام والفلاتر) لأن كل استعلام مختلف عن الآخر، خلافاً
 # لدفتر الطلبات اللي هو قائمة واحدة كاملة. انظر cached_product_search()/
 # cache_product_search() بـ app/tools/products.py.
+#
+# ⚠️ لم تعد مستخدَمة من مسار المبيعات بعد الانتقال لتحميل الكتالوج كاملاً
+# مرة وحدة بالجلسة (انظر cached_catalog()/cache_catalog() أدناه، ونفس فكرة
+# cached_orders()/cache_orders() تحته) — تبقى هنا بلا حذف لأنها ما تكسر شي
+# وإزالتها خارج نطاق ذاك التغيير.
 _MAX_PRODUCT_SEARCH_CACHE = 24  # أقصى عدد استعلامات مختلفة تبقى بذاكرة الجلسة
 _session_product_search_cache: Dict[str, "OrderedDict[str, List[dict]]"] = defaultdict(OrderedDict)
+
+# كاش الكتالوج الكامل (list_all) بحدود الجلسة — نفس نمط _session_orders_cache
+# تماماً: قائمة واحدة كاملة، لا مفتاح استعلام. يُجلب مرة وحدة أول ما يحتاجه
+# الموديل بأي جلسة مبيعات (search_products_tool) ثم يُحقن بكل رسالة لاحقة
+# بنفس الجلسة (app/context_blocks.py::catalog_context_block عبر
+# build_sales_prompt) — الموديل نفسه يدوّر بالكتالوج الكامل بدل بحث ضيّق
+# لكل منتج. بلا TTL ولا invalidate (الكتالوج ما يتغيّر بفعل العميل، بعكس
+# دفتر الطلبات اللي يُبطَل بعد تثبيت طلب جديد).
+_session_catalog_cache: Dict[str, List[dict]] = {}
 
 
 def get(session_id: str) -> List[Dict[str, str]]:
@@ -133,3 +147,17 @@ def cache_product_search(session_id: str, cache_key: str, results: List[dict]) -
     cache.move_to_end(cache_key)
     if len(cache) > _MAX_PRODUCT_SEARCH_CACHE:
         cache.popitem(last=False)
+
+
+def cached_catalog(session_id: str) -> Optional[List[dict]]:
+    """الكتالوج الكامل المخزَّن بهذه الجلسة، أو None إذا ما انجاب بعد —
+    يميّز "محفوظ وفاضي" (كتالوج حقيقي فارغ) عن "غير محفوظ أصلاً" (لسا ما
+    استُدعيت الأداة هذي الجلسة)، نفس مبدأ cached_orders أعلاه."""
+    return _session_catalog_cache.get(session_id)
+
+
+def cache_catalog(session_id: str, products: List[dict]) -> None:
+    """يخزّن الكتالوج الكامل بهذه الجلسة (انظر cached_catalog) — استدعاء
+    وحد لكل جلسة عملياً؛ الاستدعاءات اللاحقة بـsearch_products_tool تلگى
+    الكاش مباشرة بدل إعادة الجلب."""
+    _session_catalog_cache[session_id] = products

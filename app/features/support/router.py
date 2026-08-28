@@ -13,12 +13,21 @@ from pydantic import BaseModel
 
 from app import sessions
 from app.auth import require_support_api_key
+from app.config import settings
+from app.context_blocks import cap_for_model
 from app.engine import llm_engine
 from app.features.support.prompts import build_support_prompt
+from app.intent_router import is_pure_chitchat
 from app.order_gateway import order_status_provider
 from app.system_backend import SystemBackendUnavailable
 from app.text_norm import normalize
-from app.tool_loop import EXHAUSTED_FALLBACK, run_decision_rounds, run_with_tools, stream_final_answer
+from app.tool_loop import (
+    EXHAUSTED_FALLBACK,
+    answer_without_tools,
+    run_decision_rounds,
+    run_with_tools,
+    stream_final_answer,
+)
 
 router = APIRouter(prefix="/support", tags=["support"])
 
@@ -163,7 +172,12 @@ async def _get_order_status_tool(args: dict, api_key: str, session_id: str = "")
         orders = await order_status_provider.search_by_status(str(status), api_key)
         return {"orders": orders} if orders else {"error": f"ماكو طلبات بحالة {status}"}
     if args.get("all"):
-        return {"orders": await _list_all_cached(session_id, api_key)}
+        orders = await _list_all_cached(session_id, api_key)
+        orders = cap_for_model(
+            orders, settings.max_injected_records,
+            label=f"get_order_status(all=true) (session={session_id})",
+        )
+        return {"orders": orders}
     return {"error": "لازم تزودني برقم الطلب أو رقم الهاتف أو الحالة"}
 
 
@@ -447,7 +461,6 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
     session_id = req.session_id or str(uuid.uuid4())
     key = _SESSION_PREFIX + session_id
     history = sessions.get(key)
-    messages = build_support_prompt(history, req.message)
 
     # طلبات التتبع (رقم طلب/هاتف بالرسالة) تُجاب حتمياً من المصدر مباشرة —
     # الموديل غير موثوق باستدعاء الأدوات ويخترع حالات طلب (انظر
@@ -473,11 +486,29 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
         answer = deterministic
         engine_name = "deterministic"
     elif llm_engine.ready:
-        tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key, session_id=key)}
-        data = await run_with_tools(messages, tools=tools)
-        answer = data["final_answer"]
+        # راوتر نية محافظ (app/intent_router.py) — وصلنا هذا الفرع أصلاً لأن
+        # الرسالة ما فيها معرّف طلب/هاتف/حالة صريحة (_deterministic_status_
+        # answer رجّع None). لو كانت كمان تحية/شكر/هوية بحتة، نتجاوز
+        # get_order_status كلياً بدل التعرّض لاستدعاء غير لازم (next.md §2).
+        #
+        # دفتر الطلبات الكامل (_list_all_cached — نفس الكاش المستخدَم بالمسار
+        # الحتمي أعلاه، انظر cached_orders/cache_orders بـapp/sessions.py)
+        # يُحقن بالبرومبت (build_support_prompt) حتى يبحث الموديل باسم الزبون
+        # مباشرة بلا استدعاء أداة جديد كل سؤال — انظر next.md.
+        orders = cap_for_model(
+            await _list_all_cached(key, api_key), settings.max_injected_records,
+            label=f"orders injection (session={session_id})",
+        )
+        messages = build_support_prompt(history, req.message, orders=orders)
+        if is_pure_chitchat(req.message):
+            answer = await answer_without_tools(messages)
+            tool_calls = []
+        else:
+            tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key, session_id=key)}
+            data = await run_with_tools(messages, tools=tools)
+            answer = data["final_answer"]
+            tool_calls = data.get("tool_calls") or []
         engine_name = "vllm"
-        tool_calls = data.get("tool_calls") or []
     else:
         answer = await _fallback_support_answer(req.message, api_key, history, key, tool_calls=tool_calls)
         engine_name = "fallback"
@@ -520,9 +551,22 @@ async def support_chat_stream(req: SupportChatRequest, api_key: str = Depends(re
             answer = deterministic
             yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
         elif llm_engine.ready:
-            messages = build_support_prompt(history, req.message)
-            tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key, session_id=key)}
-            working_messages, _decision, tool_calls = await run_decision_rounds(messages, tools=tools)
+            # نفس دفتر الطلبات المحقون بمسار /chat غير المتدفق (support_chat)
+            # — انظر تعليقه هناك.
+            orders = cap_for_model(
+                await _list_all_cached(key, api_key), settings.max_injected_records,
+                label=f"orders injection (session={session_id})",
+            )
+            messages = build_support_prompt(history, req.message, orders=orders)
+            # نفس الراوتر المحافظ أعلاه (support_chat) — رسالة دردشة/هوية
+            # بحتة تتجاوز جولة القرار كلياً (working_messages=messages بلا
+            # أي رسائل أداة مضافة)، فباقي الدالة (البث الحر) يشتغل بلا أي
+            # تغيير إضافي.
+            if is_pure_chitchat(req.message):
+                working_messages, tool_calls = messages, []
+            else:
+                tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key, session_id=key)}
+                working_messages, _decision, tool_calls = await run_decision_rounds(messages, tools=tools)
 
             answer = ""
             async for delta in stream_final_answer(working_messages):
