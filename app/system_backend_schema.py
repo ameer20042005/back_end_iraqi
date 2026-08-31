@@ -93,12 +93,29 @@ class SystemOrder(BaseModel):
     بـ app/features/support/router.py::_STATUS_SYNONYMS تُطابَق ضدها وقت
     التشغيل، لا تُفترض هنا).
 
+    `current_stage`/`current_step`/`step_entered_at`/`assigned_transporter`
+    (**TODO — باك اند السستم لا يرجّعها بعد**): تقابل جدول سير عمل الطلب
+    الحقيقي (`current_step_id → sell_flow_step.id → sell_flow_stage.id`،
+    و`sell_flow_transition_log` لتاريخ آخر انتقال) و`assigned_transporter_id
+    → transporters.id` — موثَّقة بـ
+    `assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md` §6.5/6.7.
+    أُضيفت هنا **قبل** ربط باك اند السستم الفعلي (نفس نهج بقية الملف —
+    عقد موثَّق سلفاً يشتغل فوراً بلا تعديل كود لما البيانات توصل) لتمكين
+    ميزتين ناقصتين بدعم العملاء: «بأي مرحلة الطلب/ليش متأخر؟» (تحتاج
+    current_stage + step_entered_at لمعرفة أين ومنذ متى) و«شنو الطلبات
+    الموكلة لمندوب معيّن؟» (assigned_transporter). لحد ما تتوفر فعلياً،
+    تصل None تلقائياً (نفس سياسة التسامح)، والموديل مبرمج لا يخترع قيمة
+    لحقل فاضي.
+
     الحقول كلها اختيارية عدا `order_id` — انظر «سياسة التسامح» بأعلى الملف."""
 
     model_config = ConfigDict(extra="allow")
 
     order_id: str  # receipt_number أو id بصيغة نصية معروضة (مثل ORD-1001)
     status: Optional[str] = None  # sell_status أو مرادفه العربي
+    current_stage: Optional[str] = None  # sell_flow_stage.name (عبر current_step_id) — TODO أعلاه
+    current_step: Optional[str] = None  # sell_flow_step.name — الخطوة الدقيقة داخل المرحلة
+    step_entered_at: Optional[str] = None  # ISO 8601 — آخر انتقال بـ sell_flow_transition_log لنفس الطلب
     customer_name: Optional[str] = None
     phone: Optional[str] = None  # customer_phone_number
     customer_city: Optional[str] = None  # اسم المحافظة (commondata.cities.name_arabic)
@@ -107,6 +124,7 @@ class SystemOrder(BaseModel):
     items: List[SystemOrderItem] = []
     total: Optional[float] = None  # total_price
     currency: Optional[str] = "IQD"
+    assigned_transporter: Optional[str] = None  # transporters.name (عبر assigned_transporter_id) — TODO أعلاه
     eta: Optional[str] = None  # estimated_delivery_date، نص جاهز للعرض
     created_at: Optional[str] = None  # ISO 8601
 

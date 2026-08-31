@@ -140,10 +140,14 @@ def test_extract_phone(description, message, expected):
 @pytest.mark.parametrize(
     "message,expected_fragment",
     [
-        ("رقمي ٠٧٧٠١٢٣٤٥٦٧", "ORD-1001"),
-        ("+964 770 123 4567", "ORD-1001"),
-        ("0770-987-6543", "ORD-1002"),
-        ("رقمي 07801119988", "ORD-1005"),
+        # البحث بالهاتف يذكر **المنتج** لا رقم الطلب الداخلي (الموظف ما سأل
+        # به بالاسم) — انظر _format_order_reply(mention_order_id=False
+        # الافتراضي) بـrouter.py. صيغة الرقم مهما اختلفت لازم توصل لنفس
+        # الطلب الحقيقي بالمزوّد.
+        ("رقمي ٠٧٧٠١٢٣٤٥٦٧", "لابتوب لينوفو"),
+        ("+964 770 123 4567", "لابتوب لينوفو"),
+        ("0770-987-6543", "سماعة بلوتوث JBL"),
+        ("رقمي 07801119988", "شاحن سريع 65 واط"),
     ],
     ids=["هندي", "دولي", "مشرَّط", "زين-078"],
 )
@@ -155,9 +159,9 @@ def test_deterministic_answer_uses_real_data(message, expected_fragment):
 
 
 def test_multiple_orders_on_one_phone():
-    """رقم عليه طلبان: الرد لازم يذكر الاثنين، مو واحداً فقط."""
+    """رقم عليه طلبان: الرد لازم يذكر الاثنين بمنتجيهما، مو واحداً فقط."""
     answer = _answer("رقمي 07512223344")
-    assert "ORD-1003" in answer and "ORD-1004" in answer
+    assert "حقيبة لابتوب مبطنة" in answer and "ماوس لاسلكي لوجيتك" in answer
 
 
 def test_unknown_phone_is_denied_not_invented():

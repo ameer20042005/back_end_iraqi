@@ -224,8 +224,10 @@ def test_own_order_by_id_still_works():
 
 
 def test_orders_by_phone_still_work():
+    """البحث بالهاتف يذكر المنتج لا رقم الطلب الداخلي — الموظف سأل برقمه
+    مو باسم الطلب. انظر _format_order_reply(mention_order_id=False)."""
     answer = _answer("رقمي 07512223344 وين وصلت طلباتي")
-    assert "ORD-1003" in answer and "ORD-1004" in answer
+    assert "حقيبة لابتوب مبطنة" in answer and "ماوس لاسلكي لوجيتك" in answer
 
 
 def test_general_question_still_reaches_model():

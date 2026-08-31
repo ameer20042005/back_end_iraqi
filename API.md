@@ -188,6 +188,9 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 |---|---|---|---|---|
 | `order_id` | string | **نعم** | `sells.receipt_number` أو `sells.id` | مثلاً `ORD-1001` — نفس الصيغة التي يستخرجها `app/features/support/router.py::extract_order_id` من رسالة الموظف |
 | `status` | string \| null | لا | `sells.sell_status` (أو مرادفه العربي) | نص عربي حر — تُطابَق ضده مرادفات `_STATUS_SYNONYMS` وقت التشغيل، لا قائمة ثابتة بالعقد |
+| `current_stage` | string \| null | لا **(TODO — غير مربوط بعد)** | `sell_flow_stage.name` (عبر `sells.current_step_id → sell_flow_step.id → sell_flow_stage.id`) | مرحلة سير عمل الطلب (`ORDER_FULFILLMENT`، `OUT_FOR_DELIVERY`، `RETURN`، `FINISHED`...) — يلزم لسؤال «بأي مرحلة الطلب؟» |
+| `current_step` | string \| null | لا **(TODO)** | `sell_flow_step.name` | الخطوة الدقيقة داخل المرحلة (مثلاً `requires_manifest_info`) |
+| `step_entered_at` | string \| null | لا **(TODO)** | آخر سطر بـ `sell_flow_transition_log` لنفس الطلب | ISO 8601 — منذ متى الطلب بهذي الخطوة، أساس حساب «التأخير» |
 | `customer_name` | string \| null | لا | `sells.customer_name` | |
 | `phone` | string \| null | لا | `sells.customer_phone_number` | صيغة عراقية `07XXXXXXXXX` |
 | `customer_city` | string \| null | لا | اسم المحافظة (`commondata.cities.name_arabic`) | |
@@ -196,6 +199,7 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 | `items` | `SystemOrderItem[]` | لا (افتراضي `[]`) | `sell_items` | انظر الجدول التالي |
 | `total` | number \| null | لا | `sells.total_price` | |
 | `currency` | string \| null | لا (افتراضي `"IQD"`) | — | |
+| `assigned_transporter` | string \| null | لا **(TODO — غير مربوط بعد)** | `transporters.name` (عبر `sells.assigned_transporter_id`) | مندوب/شركة التوصيل الموكَّلة — يلزم لسؤال «مين المندوب المسؤول؟» و«كم طلب عنده؟» |
 | `eta` | string \| null | لا | `sells.estimated_delivery_date` | نص جاهز للعرض المباشر |
 | `created_at` | string \| null | لا | `sells.created_at` | ISO 8601 |
 

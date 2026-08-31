@@ -25,7 +25,7 @@ TODO: رابط ومسارات باك اند السستم الفعلية غير �
 
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 import httpx
@@ -39,24 +39,34 @@ from app.system_backend_schema import SystemOrder
 logger = logging.getLogger(__name__)
 
 
-def _created_at_in_range(
+def created_at_in_range(
     created_at: Optional[str], date_from: Optional[str], date_to: Optional[str]
 ) -> bool:
     """هل تاريخ إنشاء الطلب (ISO 8601) يقع بفترة [date_from, date_to]؟
 
     نتساهل عمداً مع أي خطأ تحليل (تنسيق غير متوقَّع من باك اند السستم
     الحقيقي، أو created_at مفقود): **نُبقي** الطلب بدل ما نخفيه — إخفاء طلب
-    حقيقي عن الموظف بسبب فلتر تاريخ فشل تحليله أسوأ من عرضه بلا فلترة."""
+    حقيقي عن الموظف بسبب فلتر تاريخ فشل تحليله أسوأ من عرضه بلا فلترة.
+
+    عامة (بلا شرطة سفلية) لأنها تُستعمل أيضاً بـ
+    app/features/support/router.py::_bulk_query_answer لفلترة دفتر الطلبات
+    الكامل محلياً بفترة تاريخ — نفس منطق التحقق، مصدر وحيد.
+
+    المقارنة على مستوى **اليوم** فقط (`.date()`) لا الوقت الكامل: date_from/
+    date_to أصلاً "YYYY-MM-DD" بلا توقيت، فمقارنتهما بـdatetime كامل تفشل
+    بـTypeError (offset-aware مقابل offset-naive) لو created_at جا بصيغة
+    UTC صريحة ("...Z") من باك اند السستم — احتمال وارد جداً بـISO 8601
+    الحقيقي، وليس مجرد حافة نادرة."""
     if not created_at:
         return True
     try:
-        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-        if date_from and created < datetime.fromisoformat(date_from):
+        created_date = datetime.fromisoformat(created_at.replace("Z", "+00:00")).date()
+        if date_from and created_date < date.fromisoformat(date_from):
             return False
-        if date_to and created > datetime.fromisoformat(date_to + "T23:59:59"):
+        if date_to and created_date > date.fromisoformat(date_to):
             return False
         return True
-    except ValueError:
+    except (ValueError, TypeError):
         return True
 
 
@@ -157,7 +167,7 @@ class HttpOrderStatusProvider(OrderStatusProvider):
         if date_from or date_to:
             orders = [
                 o for o in orders
-                if _created_at_in_range(o.get("created_at"), date_from, date_to)
+                if created_at_in_range(o.get("created_at"), date_from, date_to)
             ]
         return orders
 

@@ -4,8 +4,9 @@
 import json
 import re
 import uuid
+from datetime import date, timedelta
 from functools import partial
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -18,7 +19,7 @@ from app.context_blocks import cap_for_model
 from app.engine import llm_engine
 from app.features.support.prompts import build_support_prompt
 from app.intent_router import is_pure_chitchat
-from app.order_gateway import order_status_provider
+from app.order_gateway import created_at_in_range, order_status_provider
 from app.system_backend import SystemBackendUnavailable
 from app.text_norm import normalize
 from app.tool_loop import (
@@ -88,10 +89,10 @@ _CONTACT_REQUEST_WORDS = (
 )
 
 # إشارة فترة تاريخ («من الشهر الماضي»، «من تاريخ ... لين ...») — رسالة فيها
-# رقم هاتف **و**إشارة فترة زمنية تتجاوز مسار الرد الحتمي (_deterministic_
-# status_answer يرجع كل الطلبات بلا فلترة) وتذهب لمسار الموديل+الأداة، اللي
-# يقدر يحسب date_from/date_to الفعليين من الكلام الدارج (انظر get_order_status
-# بـSUPPORT_SYSTEM_PROMPT) — رد حتمي بسيط ما يقدر يفهم «الشهر الماضي».
+# رقم هاتف **و**إشارة فترة زمنية تتجاوز مسار الرد الحتمي المباشر
+# (_deterministic_status_answer يرجع كل طلبات الرقم بلا فلترة تاريخ) وتروح
+# لـ_bulk_query_answer، اللي يحسب الفترة فعلياً عبر extract_date_range
+# ويطبّقها على الرقم إذا مذكور (انظر أدناه) — رد حتمي، بلا حاجة للموديل.
 _DATE_RANGE_HINTS = (
     "من تاريخ", "من يوم", "لين تاريخ", "لغاية", "الى تاريخ", "إلى تاريخ",
     "الشهر الماضي", "الاسبوع الماضي", "الأسبوع الماضي", "الاسبوع اللي طاف",
@@ -101,6 +102,81 @@ _DATE_RANGE_HINTS = (
 
 def _mentions_date_range(message: str) -> bool:
     return any(h in message for h in _DATE_RANGE_HINTS)
+
+
+# تاريخ صريح بالرسالة: ISO (٢٠٢٦-٠٨-٠١) أو يوم/شهر/سنة بالعرف العراقي
+# (١/٨/٢٠٢٦). الفاصل "-" أو "/" — نفس نمط استخراج رقم الطلب/الهاتف أعلاه:
+# نطبّع أولاً (أرقام لاتينية) ثم نلتقط الصيغة بـregex.
+_ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
+_DMY_DATE_RE = re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b")
+_ANY_DATE_RE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{4}")
+
+
+def _extract_explicit_dates(message: str) -> List[str]:
+    """يرجع كل التواريخ الصريحة المذكورة بالرسالة، محوّلة لصيغة ISO
+    "YYYY-MM-DD" — يقبل ISO مباشرة أو يوم/شهر/سنة. تاريخ غير صالح فعلياً
+    (مثل ٣٢/١٣/٢٠٢٦) يُتجاهل بصمت بدل ما يكسر باقي الرسالة."""
+    normalized = normalize(message, keep_punctuation=True)
+    found: List[str] = []
+    for token in _ANY_DATE_RE.findall(normalized):
+        iso_match = _ISO_DATE_RE.fullmatch(token)
+        if iso_match:
+            year, month, day = iso_match.groups()
+        else:
+            dmy_match = _DMY_DATE_RE.fullmatch(token)
+            if not dmy_match:
+                continue
+            day, month, year = dmy_match.groups()
+        try:
+            found.append(date(int(year), int(month), int(day)).isoformat())
+        except ValueError:
+            continue
+    return found
+
+
+def _resolve_relative_range(message: str, today: Optional[date] = None) -> Optional[Tuple[str, str]]:
+    """يحسب (date_from, date_to) من عبارة نسبية دارجة («الشهر الماضي»،
+    «الأسبوع الماضي»، «اليوم»، «امس»)، أو None إذا ما لگى وحدة معروفة.
+
+    `today` قابلة للتمرير للاختبار (تاريخ ثابت بدل تاريخ التشغيل الفعلي)."""
+    today = today or date.today()
+    normalized = normalize(message)  # توحّد الهمزات: الأسبوع/امس تصير الاسبوع/امس
+
+    if "الشهر الماضي" in normalized or "الشهر اللي طاف" in normalized:
+        first_of_this_month = today.replace(day=1)
+        last_of_prev_month = first_of_this_month - timedelta(days=1)
+        first_of_prev_month = last_of_prev_month.replace(day=1)
+        return first_of_prev_month.isoformat(), last_of_prev_month.isoformat()
+
+    if "الاسبوع الماضي" in normalized or "الاسبوع اللي طاف" in normalized:
+        # آخر ٧ أيام قبل اليوم — تعريف عملي بسيط، لا تقويم أسبوعي رسمي (السبت-الجمعة مثلاً).
+        end = today - timedelta(days=1)
+        start = end - timedelta(days=6)
+        return start.isoformat(), end.isoformat()
+
+    # عمداً بلا "اليوم"/"امس" كوحدهما: كلمات عامة تنورد بأي حديث عادي
+    # («شلونك اليوم؟») بلا أي علاقة بفترة شحنات — إشارة ضعيفة جداً لوحدها
+    # (بعكس «الشهر الماضي»/«الاسبوع الماضي» أعلاه، عبارات مركّبة نادرة
+    # بالدردشة العادية). لو الموظف يريد تاريخ اليوم/أمس بالضبط، يذكره
+    # صراحة كتاريخ (ISO أو يوم/شهر/سنة) وتلتقطه _extract_explicit_dates.
+    return None
+
+
+def extract_date_range(message: str) -> Optional[Tuple[str, str]]:
+    """يحسب فترة (date_from, date_to) بصيغة ISO من رسالة الموظف الخام، أو
+    None إذا ما لگى فترة واضحة — يغذّي فلترة _bulk_query_answer المحلية عبر
+    created_at_in_range (app/order_gateway.py).
+
+    الترتيب: (١) تاريخان صريحان بالرسالة → أصغرهما date_from وأكبرهما
+    date_to بغض النظر عن ترتيب ذكرهما. (٢) تاريخ صريح واحد بس → يُعتبر
+    يوماً واحداً. (٣) عبارة نسبية دارجة (_resolve_relative_range)."""
+    explicit = _extract_explicit_dates(message)
+    if len(explicit) >= 2:
+        ordered = sorted(explicit)
+        return ordered[0], ordered[-1]
+    if len(explicit) == 1:
+        return explicit[0], explicit[0]
+    return _resolve_relative_range(message)
 
 # أرقام الهواتف العراقية: 07XXXXXXXXX (11 خانة). الزبون يكتبها بصيغ كثيرة —
 # بأرقام عربية-هندية، بفواصل/شرطات، بمقدمة دولية (+964 / 00964 / 964) اللي
@@ -181,20 +257,32 @@ async def _get_order_status_tool(args: dict, api_key: str, session_id: str = "")
     return {"error": "لازم تزودني برقم الطلب أو رقم الهاتف أو الحالة"}
 
 
-def _format_order_reply(order: dict) -> str:
+def _format_order_reply(order: dict, mention_order_id: bool = False) -> str:
     """يبني رداً عراقياً حتمياً من بيانات الطلب الحقيقية — بدون موديل.
 
-    يذكر **المنتجات** لا رقم الطلب الداخلي (نفس مبدأ voice_followup —
-    الزبون/الموظف يتعرف على طلبه بالمنتج، مو برقم ORD-#### الداخلي). رقم
-    الطلب يبقى محفوظاً بالبيانات ومتاحاً لمن يحتاجه (تتبع داخلي)، بس ما
-    يتصدّر الرد المنطوق/المكتوب للزبون."""
+    يذكر **المنتجات** لا رقم الطلب الداخلي افتراضياً (نفس مبدأ voice_followup
+    — الزبون/الموظف يتعرف على طلبه بالمنتج، مو برقم ORD-#### الداخلي)، إلا
+    إذا الموظف نفسه سأل به صراحة بالاسم (`mention_order_id=True`) — نفس
+    قاعدة SUPPORT_SYSTEM_PROMPT بـapp/features/support/prompts.py ("اذكر
+    order_id بس لو الموظف نفسه سأل عنه صراحة بالاسم"). المتصل الوحيد اللي
+    يمرّرها True هو فرع البحث بمعرّف الطلب بـ_deterministic_status_answer —
+    بحث بالهاتف يبقى بلا رقم طلب لأن الموظف ما ذكره."""
     items = "، ".join(
         f"{it['product_name']} ×{it.get('quantity', 1)}" for it in order.get("items", [])
     )
     subject = items or "طلبك"
     reply = f"هلا بيك، {subject} حالته: {order['status']}"
+    if mention_order_id:
+        reply += f" (طلب {order['order_id']})"
     if order.get("eta"):
         reply += f"، والوصول المتوقع {order['eta']}"
+    # current_stage/assigned_transporter (TODO بـsystem_backend_schema.py):
+    # None حالياً لحد ما باك اند السستم يربطهم — الشرط يمنع إلحاق "None"
+    # نصياً بالرد لو وصلت فاضية، فالسلوك الحالي (بدون هالحقلين) ما يتغيّر.
+    if order.get("current_stage"):
+        reply += f" (مرحلة: {order['current_stage']})"
+    if order.get("assigned_transporter"):
+        reply += f"، المندوب المسؤول: {order['assigned_transporter']}"
     return reply + "."
 
 
@@ -273,6 +361,37 @@ async def extract_status(message: str, api_key: str, session_id: str = "") -> Op
     return None
 
 
+# «مندوب فلان عنده كم طلب؟» — عدّ/سرد الطلبات الموكَّلة لمندوب توصيل معيّن.
+# نفس فكرة extract_status/_known_statuses أعلاه بالضبط، بس مقابل حقل
+# assigned_transporter بدل status. الحقل TODO بـ
+# app/system_backend_schema.py::SystemOrder (باك اند السستم لسا ما يربط
+# assigned_transporter_id → transporters.name)، فالدالتين ترجعان قائمة/None
+# فاضية لحد الآن — فور ما الحقل يوصل بالبيانات الحقيقية، هذا الجزء يشتغل
+# بلا أي تعديل إضافي (نفس مبدأ TODO الموثَّق بأعلى app/order_gateway.py).
+
+
+async def _known_transporters(api_key: str, session_id: str = "") -> List[str]:
+    """اسماء المندوبين الموجودة فعلاً بالبيانات — نفس نمط _known_statuses:
+    مشتقة من استعلام حي (أو كاش الجلسة)، مو مكتوبة بالكود."""
+    orders = await _list_all_cached(session_id, api_key)
+    seen = []
+    for order in orders:
+        name = str(order.get("assigned_transporter") or "").strip()
+        if name and name not in seen:
+            seen.append(name)
+    return seen
+
+
+async def extract_transporter(message: str, api_key: str, session_id: str = "") -> Optional[str]:
+    """يستخرج اسم المندوب المذكور برسالة الموظف من أسماء المندوبين
+    الحقيقية (_known_transporters)، أو None إذا ما انذكر اسم مطابق."""
+    normalized = normalize(message)
+    for name in await _known_transporters(api_key, session_id):
+        if normalize(name) in normalized:
+            return name
+    return None
+
+
 def _format_order_line(order: dict) -> str:
     """سطر طلب واحد بقائمة — يشمل رقم هاتف الزبون لأن البوت داخلي والموظف
     يحتاجه حتى يتصل بيه."""
@@ -283,6 +402,10 @@ def _format_order_line(order: dict) -> str:
     line += f" | الهاتف {order['phone']}"
     if order.get("eta"):
         line += f" | الوصول {order['eta']}"
+    # assigned_transporter (TODO بـsystem_backend_schema.py): None لحد ما
+    # باك اند السستم يربطه — نفس شرط eta أعلاه، ما يظهر بالسطر لو فاضي.
+    if order.get("assigned_transporter"):
+        line += f" | المندوب {order['assigned_transporter']}"
     return line
 
 
@@ -360,6 +483,45 @@ async def _bulk_query_answer(
             )
         return _format_order_list(orders, heading)
 
+    # «مندوب فلان عنده كم طلب؟» — يقابل extract_transporter فوق extract_status.
+    # None دايماً لحد ما assigned_transporter يوصل من باك اند السستم (TODO)،
+    # فالفرع يرجع "ماكو طلبات لهذا المندوب" مؤقتاً — يشتغل فوراً بلا تعديل
+    # وقت ما الحقل يتربط فعلياً.
+    transporter = await extract_transporter(message, api_key, session_id)
+    if transporter:
+        orders = [
+            o for o in await _list_all_cached(session_id, api_key)
+            if o.get("assigned_transporter") == transporter
+        ]
+        heading = f"طلبات المندوب {transporter}"
+        if wants_count:
+            return f"عدد طلبات المندوب {transporter}: {len(orders)}.\n" + _format_order_list(
+                orders, "التفاصيل"
+            )
+        return _format_order_list(orders, heading)
+
+    # عدّ/سرد الشحنات ضمن فترة تاريخ (تاريخ وتاريخ) — انظر extract_date_range
+    # أعلاه. إذا الرسالة فيها رقم هاتف كمان (مثلاً حالة الاستثناء اللي
+    # _deterministic_status_answer يمرّرها هنا بدل الرد المباشر)، نفلتر
+    # بالرقم فوق فلترة التاريخ حتى ما نرجّع شحنات زبائن ثانيين لموظف يسأل
+    # عن رقم معيّن بفترة معيّنة.
+    date_range = extract_date_range(message)
+    if date_range:
+        date_from, date_to = date_range
+        orders = [
+            o for o in await _list_all_cached(session_id, api_key)
+            if created_at_in_range(o.get("created_at"), date_from, date_to)
+        ]
+        phone = extract_phone(message)
+        if phone:
+            orders = [o for o in orders if o.get("phone") == phone]
+        heading = f"الشحنات من {date_from} لين {date_to}"
+        if wants_count:
+            return f"عدد الشحنات بالفترة {date_from} - {date_to}: {len(orders)}.\n" + _format_order_list(
+                orders, "التفاصيل"
+            )
+        return _format_order_list(orders, heading)
+
     if any(w in normalized for w in _LIST_ALL_WORDS):
         orders = await _list_all_cached(session_id, api_key)
         if wants_count:
@@ -390,8 +552,10 @@ async def _deterministic_status_answer(
     معرّف، فتذهب لمسار الموديل+الأدوات.
 
     ⚠️ استثناء عمدي: رقم هاتف مع إشارة فترة تاريخ («من الشهر الماضي») يتجاوز
-    هذا المسار الحتمي (ما يقدر يفهم فترات نسبية) ويذهب لمسار الموديل+الأداة
-    — انظر _mentions_date_range وget_order_status.
+    الرد المباشر أعلاه (اللي يرجع كل طلبات الرقم بلا فلترة) ويروح لـ
+    _bulk_query_answer، اللي يحسب الفترة فعلياً (extract_date_range) ويفلتر
+    بالرقم **و**التاريخ معاً — حتمي بالكامل، بلا حاجة للموديل هنا. انظر
+    _mentions_date_range.
 
     `tool_calls` (اختياري): لو تم تمرير قائمة، نلحق فيها سجل الاستعلام
     (نفس شكل tool_calls اللي يبنيها run_with_tools) حتى لو الرد جا من هذا
@@ -408,7 +572,7 @@ async def _deterministic_status_answer(
                 "result": order or {"error": "ماكو طلب بهذا الرقم"},
             })
         if order:
-            return _format_order_reply(order)
+            return _format_order_reply(order, mention_order_id=True)
         return "والله ماكو طلب بهذا الرقم عدنا — دقّق الرقم وگلي مرة ثانية."
 
     phone = extract_phone(message)
