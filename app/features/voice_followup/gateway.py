@@ -114,7 +114,7 @@ class HttpVoicePostponeSubmitter(VoicePostponeSubmitter):
         payload = {
             "order_id": order.order_id,
             "new_scheduled_date": new_date,
-            "postpone_choice": chosen_option,  # "today" | "plus_1" | "plus_2" — قيمة داخلية ثابتة، مفيدة للتقارير
+            "postpone_choice": chosen_option,  # "today" | "plus_N" | "weekday_D" — قيمة داخلية، مفيدة للتقارير
             "reason": "تأجيل بطلب الزبون عبر مكالمة صباح",
         }
         async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:

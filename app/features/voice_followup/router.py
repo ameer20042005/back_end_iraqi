@@ -35,7 +35,7 @@ from app.features.order_intake.transcribe import transcribe
 from app.features.voice_followup import session_store, tts
 from app.features.voice_followup.gateway import voice_followup_submitter, voice_postpone_submitter
 from app.features.voice_followup.prompts import (
-    OPTION_LABELS,
+    option_label,
     build_analyze_prompt,
     build_ask_prompt,
     build_postpone_dialogue_prompt,
@@ -101,13 +101,46 @@ def _synthesize_or_503(text: str) -> bytes:
 # الزبون المحوَّل من صوت لنص) — النموذج (انظر _generate_postpone_reply
 # أدناه) يُستدعى فقط بعد ما يُحسم القرار، ليصوغه بلهجة عراقية طبيعية.
 
-# "يومين" تحتوي حرفياً "يوم" (أول ثلاثة أحرف)، فلازم نفحص خيار اليومين
-# أولاً وإلا "بعد يومين" تُصنَّف غلط كـ"بعد يوم" — نفس تحذير extract_status
-# بـsupport/router.py (نطابق الأطول أولاً). القوائم مكتوبة بصيغتها المطبَّعة
-# (بعد normalize) — بلا همزات ولا تاء مربوطة.
-_TWO_DAYS_WORDS = ("يومين", "بعد يومين", "بيومين")
-_ONE_DAY_WORDS = ("بعد يوم", "غدا", "باچر", "بكره", "يوم واحد")
-_TODAY_WORDS = ("اليوم", "هسه", "نفس اليوم", "هذا اليوم", "الحين")
+# الحد الأقصى للتأجيل. سقف ضروري لسببين: يمنع قيماً عبثية ("أجلها سنة")
+# تصير التزاماً تشغيلياً ما ننفّذه، ويمنع خطأ Whisper برقم منطوق (يسمع
+# "أربعين" بدل "أربعة") من تحويل مكالمة عادية لتأجيل مستحيل. أي رقم فوقه
+# يُعامَل كخيار غير مسموح، فتعيد صباح السؤال بدل ما تثبّته.
+MAX_POSTPONE_DAYS = 14
+
+# ترتيب الفحص أدناه **حرج**: نطابق الأطول والأخص أولاً. "بعد غدا" تحتوي
+# "غدا"، و"يومين" تحتوي "يوم"، و"اسبوعين" تحتوي "اسبوع" — فحص المختصر
+# أولاً يصنّف الطويل غلط. نفس تحذير extract_status بـsupport/router.py.
+#
+# كل القوائم مكتوبة بصيغتها **المطبَّعة** (بعد normalize): بلا همزات ولا
+# تاء مربوطة ("غداً"→"غدا"، "بكرة"→"بكره"، "أسبوع"→"اسبوع").
+_DAY_AFTER_TOMORROW_WORDS = ("بعد غدا", "بعد باچر", "بعد بكره", "عقب غدا", "عقب باچر")
+_TWO_DAYS_WORDS = ("يومين", "بيومين")
+_TWO_WEEKS_WORDS = ("اسبوعين", "باسبوعين")
+_ONE_WEEK_WORDS = ("اسبوع", "باسبوع", "جمعه")
+_TOMORROW_WORDS = ("غدا", "باچر", "بكره", "بجر")
+_ONE_DAY_WORDS = ("بعد يوم", "يوم واحد", "بيوم")
+_TODAY_WORDS = ("اليوم", "هسه", "نفس اليوم", "هذا اليوم", "الحين", "هلحين")
+
+# أسماء الأعداد المنطوقة — Whisper يكتبها حروفاً لا أرقاماً غالباً
+# ("بعد أربعة أيام" لا "بعد 4 أيام")، فلازم نغطي الشكلين.
+_NUMBER_WORDS = {
+    "يوم": 1, "يومين": 2, "ثلاث": 3, "ثلاثه": 3, "تلاث": 3, "تلاته": 3,
+    "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6,
+    "سبع": 7, "سبعه": 7, "ثمان": 8, "ثمانيه": 8, "تمن": 8, "تمانيه": 8,
+    "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10,
+}
+
+# أيام الأسبوع → ترقيم date.weekday() (الاثنين=0 … الأحد=6).
+_WEEKDAYS = {
+    "الاثنين": 0, "الاثنين": 0, "الثلاثاء": 1, "الاربعاء": 2,
+    "الخميس": 3, "الجمعه": 4, "السبت": 5, "الاحد": 6,
+    "اثنين": 0, "ثلاثاء": 1, "اربعاء": 2, "خميس": 3, "جمعه": 4, "سبت": 5, "احد": 6,
+}
+
+# "بعد ٤ ايام" / "بعد 4 يوم" — الأرقام وصلت إنجليزية بعد normalize.
+_DIGIT_DAYS_RE = re.compile(r"\b(\d{1,2})\s*(?:ايام|يوم|يوما)\b")
+# "بعد اربع ايام" — عدد منطوق متبوعاً بكلمة أيام.
+_WORD_DAYS_RE = re.compile(r"\b(" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r")\s*(?:ايام|يوم|يوما)\b")
 
 _YES_WORDS = ("نعم", "ايوه", "ايه", "اي", "تمام", "زين", "موافق", "صح", "اوكي")
 _NO_WORDS = ("لا", "كلا", "ماريد", "ما اريد", "تراجعت", "غيرها", "بديل")
@@ -123,13 +156,69 @@ def _contains_word(normalized: str, words: "tuple[str, ...]") -> bool:
     return any(re.search(rf"\b{re.escape(w)}\b", normalized) for w in words)
 
 
+def _days_choice(days: int) -> Optional[str]:
+    """يحوّل عدد أيام لمفتاح خيار، أو None لو تجاوز السقف أو كان سالباً.
+    الصفر يصير "today" حتى يبقى مفتاح اليوم واحداً بكل المسارات."""
+    if days < 0 or days > MAX_POSTPONE_DAYS:
+        return None
+    return "today" if days == 0 else f"plus_{days}"
+
+
 def extract_postpone_choice(message: str) -> Optional[str]:
-    """يستخرج خيار التأجيل («today»/«plus_1»/«plus_2») من رد الزبون
-    المحوَّل من صوت لنص، أو None إذا ما طابق أي خيار من الثلاثة المسموحة
-    (خارج النطاق، أو رد غامض/غير مفهوم)."""
+    """يستخرج خيار التأجيل من رد الزبون الحر (المحوَّل من صوت لنص).
+
+    الصيغ المدعومة:
+      - اليوم / هسه            → "today"
+      - غدا / باچر / بكره      → "plus_1"
+      - بعد غدا / بعد يومين    → "plus_2"
+      - بعد N أيام (رقماً أو حروفاً، لين MAX_POSTPONE_DAYS) → "plus_N"
+      - أسبوع / أسبوعين        → "plus_7" / "plus_14"
+      - اسم يوم بالأسبوع       → "weekday_D" (يُحسَب تاريخه لاحقاً)
+
+    يرجع None لرد غامض، أو موعد خارج السقف — وكلاهما يقود صباح لإعادة
+    السؤال بدل الحسم (انظر decide_turn).
+
+    ليش "weekday_D" ما ينحسب هنا لتاريخ مباشرة؟ لأن الحساب يحتاج تاريخ
+    اليوم، وتثبيته لحظة الاستخراج يخلي الدالة غير قابلة للاختبار بتاريخ
+    ثابت — نأجّله لـresolve_postpone_date اللي تستقبل `today` صراحة.
+    """
     normalized = normalize(message)
+
+    # 1) بعد غد — قبل "غدا" وقبل الأرقام، لأنها تحتوي "غدا" حرفياً.
+    if any(w in normalized for w in _DAY_AFTER_TOMORROW_WORDS):
+        return "plus_2"
+
+    # 2) أسبوعان ثم أسبوع — "اسبوعين" تحتوي "اسبوع".
+    if any(w in normalized for w in _TWO_WEEKS_WORDS):
+        return _days_choice(14)
+
+    # 3) عدد صريح بالأرقام، ثم عدد منطوق حروفاً. يسبق باقي الكلمات لأن
+    #    "بعد يومين" تُطابق هنا برقم 2 بنفس النتيجة، بينما "بعد اربع ايام"
+    #    ما تطابق أي كلمة ثابتة.
+    m = _DIGIT_DAYS_RE.search(normalized)
+    if m:
+        return _days_choice(int(m.group(1)))
+    m = _WORD_DAYS_RE.search(normalized)
+    if m:
+        return _days_choice(_NUMBER_WORDS[m.group(1)])
+
+    # 4) يومان بصيغته المجردة ("خليها يومين").
     if any(w in normalized for w in _TWO_DAYS_WORDS):
         return "plus_2"
+
+    # 5) أسبوع مجرد. "جمعه" تعني أسبوعاً بالعراقي، وتُفحص هنا لا مع أيام
+    #    الأسبوع أدناه لأن "بعد جمعه" أشيع من قصد يوم الجمعة نفسه.
+    if any(w in normalized for w in _ONE_WEEK_WORDS):
+        return _days_choice(7)
+
+    # 6) اسم يوم بالأسبوع — بعد الأرقام حتى "بعد اربع ايام" ما تنسحب هنا.
+    for name, weekday in _WEEKDAYS.items():
+        if re.search(rf"\b{re.escape(name)}\b", normalized):
+            return f"weekday_{weekday}"
+
+    # 7) غداً ثم "بعد يوم" ثم اليوم — الأقصر والأعم آخراً.
+    if any(w in normalized for w in _TOMORROW_WORDS):
+        return "plus_1"
     if any(w in normalized for w in _ONE_DAY_WORDS):
         return "plus_1"
     if any(w in normalized for w in _TODAY_WORDS):
@@ -150,7 +239,21 @@ def _is_wrong_number(message: str) -> bool:
     return any(h in normalized for h in _WRONG_NUMBER_HINTS)
 
 
-_OPTION_OFFSETS = {"today": 0, "plus_1": 1, "plus_2": 2}
+def postpone_days(choice: str, today: Optional[date] = None) -> int:
+    """عدد الأيام من اليوم لموعد الخيار. مفصولة عن resolve_postpone_date
+    لأن التسمية العربية (option_label) تحتاج العدد لا التاريخ."""
+    if choice == "today":
+        return 0
+    if choice.startswith("plus_"):
+        return int(choice[len("plus_"):])
+    if choice.startswith("weekday_"):
+        today = today or date.today()
+        target = int(choice[len("weekday_"):])
+        delta = (target - today.weekday()) % 7
+        # صفر يعني إن اليوم نفسه هو اليوم المطلوب — والزبون اللي يگول
+        # "خليها الخميس" وهو يوم خميس يقصد الخميس الجاي، لا اليوم.
+        return delta or 7
+    raise ValueError(f"خيار تأجيل غير معروف: {choice!r}")
 
 
 def resolve_postpone_date(choice: str, today: Optional[date] = None) -> str:
@@ -158,7 +261,7 @@ def resolve_postpone_date(choice: str, today: Optional[date] = None) -> str:
     للاختبار (تاريخ ثابت بدل تاريخ التشغيل الفعلي) — نفس نمط
     support/router.py::_resolve_relative_range."""
     today = today or date.today()
-    return (today + timedelta(days=_OPTION_OFFSETS[choice])).isoformat()
+    return (today + timedelta(days=postpone_days(choice, today))).isoformat()
 
 
 @dataclass
@@ -212,9 +315,9 @@ def decide_turn(
 # الحالة لو الموديل غير جاهز (بلا GPU محلياً) — نفس فلسفة _FALLBACK_* أدناه.
 _CASE_NOTES = {
     "confirm_choice": "الزبون اختار {option}. أكّدي اختياره بجملة قصيرة وانتظري تأكيده (نعم/لا).",
-    "clarify": "رد الزبون غير واضح أو خارج الخيارات الثلاثة (احتمال سكوت أو كلام غير مفهوم). ذكّريه بأدب إن الخيارات المتاحة بس: اليوم، بعد يوم، أو بعد يومين، واسأليه يختار وحدة منهم.",
+    "clarify": "ما وصل موعد واضح من الزبون (رد غامض، سكوت، أو موعد أبعد من أسبوعين). اسأليه بأدب يحدد موعد التسليم: اليوم، بكرة، بعد بكرة، أو أي يوم يناسبه خلال أسبوعين.",
     "give_up": "ما وضح اختيار الزبون رغم المحاولة. اعتذري بلطف، گولي إن فريقنا راح يعاود الاتصال، وانهي المكالمة.",
-    "reset_choice": "الزبون رفض التأكيد وتراجع عن اختياره. اسأليه من جديد يختار وحدة من: اليوم، بعد يوم، أو بعد يومين.",
+    "reset_choice": "الزبون رفض التأكيد وتراجع عن موعده. اسأليه من جديد يحدد الموعد اللي يناسبه.",
     "reconfirm": "رد الزبون على سؤال التأكيد غير واضح (احتمال سكوت أو كلام غير مفهوم). اسأليه بجملة أقصر: نعم لو لا بس.",
     "confirmed": "الزبون أكّد اختياره {option}. اشكريه بجملة قصيرة وانهي المكالمة بأدب.",
     "wrong_number": "تبين إن هذا مو الشخص المقصود بالطلب أو الرقم غلط. اعتذري بأدب جداً وانهي المكالمة فوراً بلا إصرار.",
@@ -222,9 +325,9 @@ _CASE_NOTES = {
 
 _POSTPONE_FALLBACKS = {
     "confirm_choice": "تمام، خليها {option} إذن؟",
-    "clarify": "عذراً، ما وضحت زين. الخيارات عدنا: اليوم، بعد يوم، أو بعد يومين — شنو تفضل؟",
+    "clarify": "عذراً، ما وضحت زين. تحب توصلك اليوم، بكرة، لو أي يوم ثاني يناسبك؟",
     "give_up": "ما مشكلة، فريقنا راح يعاود الاتصال بعدين. تصبح على خير.",
-    "reset_choice": "تمام، شنو تفضل: اليوم، بعد يوم، لو بعد يومين؟",
+    "reset_choice": "تمام، شنو الموعد اللي يناسبك؟",
     "reconfirm": "بس تأكد لي: نعم لو لا؟",
     "confirmed": "تمام، خليناها {option}. مشكورين على وقتك، تصبح على خير.",
     "wrong_number": "عذراً على الإزعاج، يبدو صار خطأ بالرقم. تصبح على خير.",
@@ -232,7 +335,7 @@ _POSTPONE_FALLBACKS = {
 
 _FALLBACK_POSTPONE_OPENING = (
     "هلا بيك، وياك صباح من خدمة العملاء. عدنا شحنتك بانتظار التسليم، "
-    "حاب تستلمها اليوم، لو تفضّل نأجل يوم أو يومين؟"
+    "حاب تستلمها اليوم، لو تفضّل موعد ثاني يناسبك؟"
 )
 
 
@@ -252,9 +355,11 @@ async def _generate_postpone_reply(
     reply_case: str,
     chosen: Optional[str],
 ) -> str:
-    option_label = OPTION_LABELS.get(chosen or "", "")
-    directive = _CASE_NOTES[reply_case].format(option=option_label)
-    fallback = _POSTPONE_FALLBACKS[reply_case].format(option=option_label)
+    # التسمية تحتاج عدد الأيام لا مفتاح الخيار — و"weekday_D" ما يحمل
+    # عدداً بذاته، فنحسبه بتاريخ اليوم عبر postpone_days.
+    label = option_label(chosen, postpone_days(chosen)) if chosen else ""
+    directive = _CASE_NOTES[reply_case].format(option=label)
+    fallback = _POSTPONE_FALLBACKS[reply_case].format(option=label)
     if not llm_engine.ready:
         return fallback
     messages = build_postpone_dialogue_prompt(order, history, directive)

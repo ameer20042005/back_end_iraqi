@@ -70,7 +70,7 @@ class PostponeSession:
     history: List[Message] = field(default_factory=list)
     # "awaiting_choice" | "awaiting_confirmation" | "closed"
     state: str = "awaiting_choice"
-    chosen: Optional[str] = None  # "today" | "plus_1" | "plus_2"
+    chosen: Optional[str] = None  # "today" | "plus_N" | "weekday_D"
     clarify_attempts: int = 0
     created_at: float = field(default_factory=time.monotonic)
 

@@ -26,9 +26,6 @@ from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
 from app.features.support.router import router as support_router
 from app.features.voice_followup.router import router as voice_followup_router
-# راوتر مكالمة "راجع" (شخصية صباح) — مسار متعدد الأدوار يحسم سبب
-# رجوع الشحنة ويرسل القرار لباك اند السستم.
-from app.features.voice_return.router import router as voice_return_router
 from app.features.voice_followup.tts import warmup as warmup_tts
 
 try:
@@ -127,8 +124,6 @@ app.add_middleware(
         "X-Session-Id", "X-Question-Text",
         "X-Reason-Summary", "X-Customer-Transcript", "X-Query-Sent",
         "X-Reply-Text", "X-Call-Status", "X-Chosen-Option", "X-Postpone-Saved",
-        # هيدرات مكالمة "راجع" (app/features/voice_return/router.py)
-        "X-Call-Stage", "X-Return-Reason", "X-Decision", "X-Result-Sent",
     ],
 )
 
@@ -136,7 +131,6 @@ app.include_router(sales_router)
 app.include_router(support_router)
 app.include_router(order_intake_router)
 app.include_router(voice_followup_router)
-app.include_router(voice_return_router)
 
 
 @app.get("/")

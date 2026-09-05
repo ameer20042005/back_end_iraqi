@@ -1117,7 +1117,7 @@
   // الحقيقي كالمعتاد. كل نقاط JSON العادية (health/gpu/root/sales/support/
   // orders create) تمر من هنا بلا أي تغيير بمنطقها. مسارات voice_followup
   // (صوت حقيقي داخل/خارج) لها معالجة تجريبية منفصلة داخل renderVoiceFollowupForm
-  // وrenderVoiceReturnForm — والأخيرة متعددة الأدوار (تكرّر /respond).
+  // وrenderVoicePostponeForm — والأخيرة متعددة الأدوار (تكرّر /respond).
   // لأنها ترجع audio/wav لا JSON.
   function apiFetch(url, options) {
     return isDemoMode() ? mockFetch(url, options) : fetch(url, options);
@@ -1285,14 +1285,14 @@
       render: renderVoiceFollowupForm
     },
     {
-      group: "مكالمة الراجع",
-      id: "voiceReturn",
+      group: "مكالمة التأجيل",
+      id: "voicePostpone",
       method: "POST",
-      path: "/voice_return/start → /voice_return/respond ×N",
-      title: "مكالمة صباح — شحنة راجعة",
-      desc: "مكالمة صوتية متعددة الأدوار بشخصية صباح: تفهم سبب رجوع الشحنة، تعرض حلاً واحداً حسب السبب (ما طلبها / ماكو وقت / مشكلة مندوب / متردد / رافض)، وتنتهي بقرار مؤكَّد يُرسل لباك اند السستم. كل القرارات حتمية بالخادم — النموذج يصوغ فقط. كرّر /respond بنفس session_id لين X-Call-Status يصير ended. يحتاج مفتاح API المتابعة الصوتية.",
+      path: "/voice_followup/postpone/start → .../respond ×N",
+      title: "مكالمة صباح — تأجيل التسليم",
+      desc: "مكالمة صوتية متعددة الأدوار بشخصية صباح: تسأل الزبون يريد التسليم اليوم لو يفضّل يأجّله، وتنتهي بموعد مؤكَّد يُرسل لباك اند السستم كتاريخ ISO. المواعيد المقبولة: اليوم / بكرة / بعد بكرة / بعد N أيام (لين ١٤) / أسبوع / اسم يوم بالأسبوع. كل القرارات حتمية بالخادم — النموذج يصوغ فقط. كرّر /respond بنفس session_id لين X-Call-Status يصير ended. يحتاج مفتاح API المتابعة الصوتية.",
       apiKeyService: "voiceFollowup",
-      render: renderVoiceReturnForm
+      render: renderVoicePostponeForm
     },
     {
       group: "اختبار الحمل",
@@ -1306,7 +1306,7 @@
     }
   ];
 
-  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب", "المتابعة الصوتية", "مكالمة الراجع", "اختبار الحمل"];
+  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب", "المتابعة الصوتية", "مكالمة التأجيل", "اختبار الحمل"];
   var navGroups = document.getElementById("navGroups");
   var mainView = document.getElementById("mainView");
 
@@ -2318,39 +2318,42 @@
     };
   }
 
-  /* ---------------- Voice return (مكالمة "راجع" — متعددة الأدوار) ---------------- */
+  /* ---------------- Voice postpone (مكالمة صباح — متعددة الأدوار) ---------------- */
   // تختلف بنيوياً عن renderVoiceFollowupForm أعلاه: هناك دور واحد يُغلق
-  // الجلسة فوراً، وهنا المكالمة تستمر — /respond يُستدعى مراراً بنفس
-  // session_id لين X-Call-Status يرجع "ended". لذلك نراكم الأدوار بسجل
-  // محادثة واحد بدل ما نستبدل محتوى اللوحة بكل دور.
-  function renderVoiceReturnForm(container, ep) {
+  // الجلسة فوراً، وهنا المكالمة تستمر — /postpone/respond يُستدعى مراراً
+  // بنفس session_id لين X-Call-Status يرجع "ended". لذلك نراكم الأدوار
+  // بسجل محادثة واحد بدل ما نستبدل محتوى اللوحة بكل دور.
+  function renderVoicePostponeForm(container, ep) {
     var sessionId = null;
     var turnIndex = 0;
     var defaultOrder = {
       order_id: "ORD-1042",
-      status: "راجع",
-      store_name: "متجر النور",
-      amount: 75000,
-      currency: "دينار",
+      status: "قيد التوصيل",
       items: [{ product_name: "غسالة اتوماتيك", quantity: 1 }],
-      return_reason_hint: "لم يطلب",
-      goods_description: null,
-      tracking_number: null
+      scheduled_date: new Date().toISOString().slice(0, 10)
     };
 
-    /* ---- الخطوة 1: POST /voice_return/start ---- */
-    var startPanel = makePanel("الخطوة ١ — بيانات الشحنة الراجعة (JSON قابل للتعديل)");
+    /* ---- الخطوة 1: POST /voice_followup/postpone/start ---- */
+    var startPanel = makePanel("الخطوة ١ — بيانات الشحنة (JSON قابل للتعديل)");
     var orderField = document.createElement("div");
     orderField.className = "field";
     var orderTextarea = document.createElement("textarea");
-    orderTextarea.style.minHeight = "200px";
+    orderTextarea.style.minHeight = "170px";
     orderTextarea.style.direction = "ltr";
     orderTextarea.style.textAlign = "left";
     orderTextarea.value = JSON.stringify(defaultOrder, null, 2);
     orderField.appendChild(orderTextarea);
     startPanel.appendChild(orderField);
 
-    var startBtn = makeButton("ابدأ المكالمة (/start)");
+    var hint = document.createElement("div");
+    hint.style.cssText = "font-size:12.5px;color:var(--text-dim);margin-top:10px;line-height:1.9";
+    hint.innerHTML =
+      "<b>المواعيد المقبولة:</b> اليوم · بكرة · بعد بكرة · بعد N أيام (لين ١٤) · " +
+      "أسبوع/أسبوعين · اسم يوم بالأسبوع (\"خليها الخميس\").<br>" +
+      "أبعد من أسبوعين تعتذر صباح وتطلب موعد أقرب.";
+    startPanel.appendChild(hint);
+
+    var startBtn = makeButton("ابدأ المكالمة (/postpone/start)");
     var sessionPill = document.createElement("span");
     sessionPill.className = "session-pill";
     sessionPill.innerHTML = 'الجلسة: <span class="val"></span>';
@@ -2385,23 +2388,21 @@
       b.scrollIntoView({ block: "nearest" });
     }
 
-    // شريط الحالة أعلى السجل: كود الحالة + الزمن + المرحلة + السبب + القرار.
-    function setMeta(status, ms, stage, reason, decision, sent) {
+    // شريط الحالة أعلى السجل: كود الحالة + الزمن + الموعد المختار + الحفظ.
+    function setMeta(status, ms, chosen, saved) {
       var html =
         '<span class="status-code ' + statusClass(status) + '">' + status + "</span>" +
         '<span class="latency">' + ms + " ms</span>";
-      if (stage) html += '<span class="engine-pill">' + escapeHtml(stage) + "</span>";
-      if (reason) html += '<span class="engine-pill">سبب: ' + escapeHtml(reason) + "</span>";
-      if (decision) {
-        html += '<span class="engine-pill ' + (sent === "true" ? "vllm" : "fallback") + '">' +
-          escapeHtml(decision) +
-          (sent === "true" ? " · أُرسل" : sent === "false" ? " · تعذّر الإرسال" : "") + "</span>";
+      if (chosen) html += '<span class="engine-pill">الموعد: ' + escapeHtml(chosen) + "</span>";
+      if (saved) {
+        html += '<span class="engine-pill ' + (saved === "true" ? "vllm" : "fallback") + '">' +
+          (saved === "true" ? "انحفظ بنظام الطلبات" : "تعذّر الحفظ") + "</span>";
       }
       callMeta.innerHTML = html;
     }
 
     // الهيدرات العربية تصل percent-encoded (RFC 5987) — انظر _ascii_header
-    // بـapp/features/voice_return/router.py.
+    // بـapp/features/voice_followup/router.py.
     function decodeHeader(res, name) {
       try { return decodeURIComponent(res.headers.get(name) || ""); } catch (e) { return ""; }
     }
@@ -2420,7 +2421,7 @@
       callBody.innerHTML = '<div class="empty-state">جاري توليد جملة الافتتاح (نص → صوت)...</div>';
       var t0 = performance.now();
       try {
-        var res = await fetch(baseUrl() + "/voice_return/start", {
+        var res = await fetch(baseUrl() + "/voice_followup/postpone/start", {
           method: "POST",
           headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
           body: JSON.stringify(payload)
@@ -2429,8 +2430,8 @@
         if (!res.ok) {
           var errJson = await res.json().catch(function () { return null; });
           setMeta(res.status, ms);
-          var msg = (errJson && errJson.detail) || "فشل الطلب";
-          callBody.innerHTML = '<div class="empty-state">' + escapeHtml(msg) + "</div>";
+          callBody.innerHTML = '<div class="empty-state">' +
+            escapeHtml((errJson && errJson.detail) || "فشل الطلب") + "</div>";
           startBtn.setBusy(false);
           return;
         }
@@ -2438,7 +2439,7 @@
         var openingText = decodeHeader(res, "X-Reply-Text");
         var audioUrl = URL.createObjectURL(await res.blob());
 
-        setMeta(res.status, ms, "awaiting_permission");
+        setMeta(res.status, ms);
         sessionPill.querySelector(".val").textContent = sessionId || "—";
         sessionPill.classList.add("show");
         callBody.innerHTML = "";
@@ -2455,13 +2456,11 @@
       startBtn.setBusy(false);
     };
 
-    /* ---- الخطوة 2: POST /voice_return/respond (تتكرر كل دور) ---- */
+    /* ---- الخطوة 2: POST /voice_followup/postpone/respond (تتكرر) ---- */
     var turnPanel = makePanel("الخطوة ٢ — رد الزبون (يتكرر كل دور)");
     turnPanel.style.display = "none";
     var turnNote = document.createElement("div");
-    turnNote.style.fontSize = "12.5px";
-    turnNote.style.color = "var(--text-dim)";
-    turnNote.style.marginBottom = "10px";
+    turnNote.style.cssText = "font-size:12.5px;color:var(--text-dim);margin-bottom:10px";
     turnPanel.appendChild(turnNote);
 
     var recordRow = document.createElement("div");
@@ -2471,9 +2470,7 @@
     recordBtn.type = "button";
     recordBtn.textContent = "🎙 سجّل رد الزبون";
     var recordStatus = document.createElement("span");
-    recordStatus.style.fontSize = "12.5px";
-    recordStatus.style.color = "var(--text-dim)";
-    recordStatus.style.alignSelf = "center";
+    recordStatus.style.cssText = "font-size:12.5px;color:var(--text-dim);align-self:center";
     recordRow.appendChild(recordBtn);
     recordRow.appendChild(recordStatus);
     turnPanel.appendChild(recordRow);
@@ -2493,9 +2490,7 @@
 
     var recordedPreview = document.createElement("audio");
     recordedPreview.controls = true;
-    recordedPreview.style.width = "100%";
-    recordedPreview.style.marginTop = "10px";
-    recordedPreview.style.display = "none";
+    recordedPreview.style.cssText = "width:100%;margin-top:10px;display:none";
     turnPanel.appendChild(recordedPreview);
 
     var recordedBlob = null;
@@ -2527,12 +2522,12 @@
       }
     };
 
-    var turnBtn = makeButton("أرسل الدور (/respond)");
+    var turnBtn = makeButton("أرسل الدور (/postpone/respond)");
     turnPanel.appendChild(makeActionsRow(turnBtn));
     container.appendChild(turnPanel);
 
     turnBtn.onclick = async function () {
-      if (!sessionId) { alert("ابدأ المكالمة أولاً (/start)."); return; }
+      if (!sessionId) { alert("ابدأ المكالمة أولاً."); return; }
       var audioFile = fileInput.files[0] || recordedBlob;
       if (!audioFile) { alert("سجّل صوتاً أو ارفع ملفاً أولاً."); return; }
 
@@ -2543,7 +2538,7 @@
 
       var t0 = performance.now();
       try {
-        var url = baseUrl() + "/voice_return/respond?session_id=" + encodeURIComponent(sessionId);
+        var url = baseUrl() + "/voice_followup/postpone/respond?session_id=" + encodeURIComponent(sessionId);
         var res = await fetch(url, { method: "POST", headers: apiKeyHeader(ep.apiKeyService), body: form });
         var ms = Math.round(performance.now() - t0);
         if (!res.ok) {
@@ -2556,13 +2551,11 @@
         var transcript = decodeHeader(res, "X-Customer-Transcript");
         var replyText = decodeHeader(res, "X-Reply-Text");
         var callStatus = res.headers.get("X-Call-Status") || "";
-        var stage = res.headers.get("X-Call-Stage") || "";
-        var reason = res.headers.get("X-Return-Reason") || "";
-        var decision = res.headers.get("X-Decision") || "";
-        var sent = res.headers.get("X-Result-Sent") || "";
+        var chosen = res.headers.get("X-Chosen-Option") || "";
+        var saved = res.headers.get("X-Postpone-Saved") || "";
         var audioUrl = URL.createObjectURL(await res.blob());
 
-        setMeta(res.status, ms, stage, reason, decision, sent);
+        setMeta(res.status, ms, chosen, saved);
         addBubble("user", "الزبون — دور " + turnIndex + " (Whisper)", transcript || "(سكوت / ما انفهم كلام)");
         addBubble("assistant", "صباح — دور " + turnIndex, replyText, audioUrl, true);
 
@@ -2578,9 +2571,11 @@
           sessionPill.classList.remove("show");
           turnPanel.style.display = "none";
           addBubble("assistant", "انتهت المكالمة",
-            "القرار النهائي: " + (decision || "—") +
-            (sent === "true" ? " — أُرسل لنظام الطلبات."
-              : sent === "false" ? " — تعذّر إرساله لنظام الطلبات." : ""));
+            chosen
+              ? "الموعد المثبَّت: " + chosen +
+                (saved === "true" ? " — انحفظ بنظام الطلبات."
+                  : saved === "false" ? " — تعذّر حفظه بنظام الطلبات." : "")
+              : "انتهت بلا تثبيت أي موعد.");
         }
       } catch (e) {
         callMeta.innerHTML = '<span class="status-code s5">خطأ</span>';

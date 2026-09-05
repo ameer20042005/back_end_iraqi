@@ -12,9 +12,12 @@ test_support_queries.py): استخراج خيار التأجيل من نص ال�
 
 from datetime import date
 
+from app.features.voice_followup.prompts import option_label
 from app.features.voice_followup.router import (
+    MAX_POSTPONE_DAYS,
     decide_turn,
     extract_postpone_choice,
+    postpone_days,
     resolve_postpone_date,
     _is_no,
     _is_wrong_number,
@@ -45,9 +48,69 @@ def test_extract_choice_two_days_not_confused_with_one_day():
 
 
 def test_extract_choice_none_for_unsupported_or_unclear():
-    assert extract_postpone_choice("خليها بعد اسبوع") is None
+    # ما عاد "أسبوع" مرفوضاً (صار plus_7) — المرفوض الآن ما يتجاوز السقف
+    # أو ما ماكو بيه موعد أصلاً.
+    assert extract_postpone_choice("خليها بعد شهر") is None
+    assert extract_postpone_choice("بعد عشرين يوم") is None
     assert extract_postpone_choice("شنو؟ ما فهمت") is None
     assert extract_postpone_choice("") is None
+
+
+# ---------------------------------------------------------------------------
+# مواعيد حرة: عدد أيام، أسبوع، واسم يوم بالأسبوع
+# ---------------------------------------------------------------------------
+
+
+def test_extract_choice_explicit_day_count():
+    """عدد الأيام يوصل رقماً إنجليزياً أو هندياً أو منطوقاً حروفاً —
+    والثلاثة لازم تعطي نفس المفتاح، لأن Whisper يكتبه بأي شكل منهم."""
+    assert extract_postpone_choice("بعد 4 ايام") == "plus_4"
+    assert extract_postpone_choice("بعد ٤ ايام") == "plus_4"
+    assert extract_postpone_choice("خليها بعد اربع ايام") == "plus_4"
+    assert extract_postpone_choice("بعد عشره ايام") == "plus_10"
+
+
+def test_extract_choice_weeks():
+    assert extract_postpone_choice("خليها بعد اسبوع") == "plus_7"
+    assert extract_postpone_choice("بعد اسبوعين") == "plus_14"
+
+
+def test_extract_choice_day_after_tomorrow_beats_tomorrow():
+    """«بعد غدا» تحتوي «غدا» حرفياً — لولا ترتيب الفحص لصارت plus_1."""
+    assert extract_postpone_choice("بعد غدا") == "plus_2"
+    assert extract_postpone_choice("بعد بكره") == "plus_2"
+    assert extract_postpone_choice("بكره") == "plus_1"
+
+
+def test_extract_choice_weekday_names():
+    assert extract_postpone_choice("خليها الخميس") == "weekday_3"
+    assert extract_postpone_choice("يوم الاثنين") == "weekday_0"
+
+
+def test_weekday_resolves_to_next_occurrence():
+    """السبت 2026-09-05: «الخميس» بعده بخمسة أيام، و«السبت» نفسه يعني
+    السبت الجاي (سبعة أيام) لا اليوم — الزبون اللي يگول اسم يوم اليوم
+    نفسه يقصد الأسبوع الجاي."""
+    saturday = date(2026, 9, 5)
+    assert resolve_postpone_date("weekday_3", saturday) == "2026-09-10"
+    assert resolve_postpone_date("weekday_5", saturday) == "2026-09-12"
+    assert postpone_days("weekday_5", saturday) == 7
+
+
+def test_choice_above_cap_is_rejected():
+    """فوق السقف يرجع None فتعيد صباح السؤال — ما ينثبّت موعد مستحيل."""
+    assert extract_postpone_choice(f"بعد {MAX_POSTPONE_DAYS} ايام") == f"plus_{MAX_POSTPONE_DAYS}"
+    assert extract_postpone_choice(f"بعد {MAX_POSTPONE_DAYS + 1} ايام") is None
+
+
+def test_option_label_echoes_customer_phrasing():
+    """التسمية ترجع بصيغة الزبون: اسم اليوم يبقى اسم يوم، ما ينقلب
+    لعدد أيام — وإلا جملة التأكيد تبدو كأن صباح ما فهمته."""
+    assert option_label("weekday_3", 5) == "يوم الخميس"
+    assert option_label("today", 0) == "اليوم"
+    assert option_label("plus_2", 2) == "بعد يومين"
+    assert option_label("plus_7", 7) == "بعد أسبوع"
+    assert option_label("plus_4", 4) == "بعد 4 أيام"
 
 
 # ---------------------------------------------------------------------------

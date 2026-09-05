@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Order/Sales/Voice API — order_intake, sales, voice_followup, voice_return",
+    "name": "Order/Sales/Voice API — order_intake, sales, voice_followup, postpone",
     "description": "مجموعة Postman جاهزة للاستيراد المباشر لاختبار الميزات الثلاث الموثّقة في docs/api-order-sales-voice.md. استوردها في Postman (File > Import > اختر هذا الملف)، ثم شغّل الطلبات مباشرة — القيم (الرابط والمفاتيح) معبّأة مسبقاً كمتغيرات على مستوى الـ Collection.\n\n⚠️ تحذير أمني: هذا الملف يحتوي مفاتيح API حقيقية (نفس القيم الموجودة في api-order-sales-voice.md). لا تشاركه أو ترفعه لمستودع عام.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -11,7 +11,7 @@
     { "key": "voice_api_key", "value": "sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b", "type": "string" },
     { "key": "sales_session_id", "value": "", "type": "string" },
     { "key": "voice_session_id", "value": "", "type": "string" },
-    { "key": "return_session_id", "value": "", "type": "string" }
+    { "key": "postpone_session_id", "value": "", "type": "string" }
   ],
   "item": [
     {
@@ -294,8 +294,8 @@
       ]
     },
     {
-      "name": "4) Voice Return — مكالمة الشحنة الراجعة",
-      "description": "مكالمة صوتية متعددة الأدوار بشخصية \"صباح\" لشحنة راجعة.\n\nالتسلسل: شغّل Step 1 مرة وحدة، ثم كرّر Step 2 بنفس الجلسة لين هيدر X-Call-Status يرجع \"ended\".\n\nكل قرارات المكالمة تُحسب بالخادم حتمياً — النموذج يصوغ الكلام فقط.",
+      "name": "4) Voice Postpone — مكالمة تأجيل التسليم",
+      "description": "مكالمة صوتية متعددة الأدوار بشخصية \"صباح\" لتأجيل تسليم شحنة.\n\nالتسلسل: شغّل Step 1 مرة وحدة، ثم كرّر Step 2 بنفس الجلسة لين X-Call-Status يرجع \"ended\".\n\nالمواعيد المقبولة: اليوم · بكرة · بعد بكرة · بعد N أيام (لين 14) · أسبوع/أسبوعين · اسم يوم بالأسبوع.",
       "item": [
         {
           "name": "Step 1 — Start Call",
@@ -307,9 +307,7 @@
                 "exec": [
                   "// يحفظ X-Session-Id تلقائياً حتى تستخدمه كل أدوار Step 2",
                   "const sid = pm.response.headers.get('X-Session-Id');",
-                  "if (sid) {",
-                  "    pm.collectionVariables.set('return_session_id', sid);",
-                  "}",
+                  "if (sid) { pm.collectionVariables.set('postpone_session_id', sid); }",
                   "",
                   "// الهيدرات العربية تصل percent-encoded — نفكّها للكونسول.",
                   "const reply = pm.response.headers.get('X-Reply-Text');",
@@ -326,15 +324,15 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"order_id\": \"ORD-000123456\",\n  \"status\": \"راجع\",\n  \"store_name\": \"متجر النور\",\n  \"amount\": 75000,\n  \"currency\": \"دينار\",\n  \"items\": [\n    {\n      \"product_name\": \"غسالة اتوماتيك\",\n      \"quantity\": 1\n    }\n  ],\n  \"return_reason_hint\": \"لم يطلب\",\n  \"goods_description\": null,\n  \"tracking_number\": null\n}",
+              "raw": "{\n  \"order_id\": \"ORD-000123456\",\n  \"status\": \"قيد التوصيل\",\n  \"items\": [\n    {\n      \"product_name\": \"غسالة اتوماتيك\",\n      \"quantity\": 1\n    }\n  ],\n  \"scheduled_date\": \"2026-09-05\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{baseUrl}}/voice_return/start",
+              "raw": "{{baseUrl}}/voice_followup/postpone/start",
               "host": ["{{baseUrl}}"],
-              "path": ["voice_return", "start"]
+              "path": ["voice_followup", "postpone", "start"]
             },
-            "description": "الاستجابة ملف audio/wav خام (جملة افتتاح صباح) — Save Response > Save to a file لسماعه. الهيدر X-Session-Id يُحفظ تلقائياً بمتغيّر return_session_id.\n\nملاحظة خصوصية: ماكو حقل لاسم الزبون أو عنوانه أو محافظته — ممنوع ذكرها بالمكالمة فما تُرسل أصلاً. goods_description وtracking_number داخليان: صباح ما تذكرهما إلا إذا سأل الزبون عن التفاصيل."
+            "description": "الاستجابة ملف audio/wav خام (جملة افتتاح صباح) — Save Response > Save to a file لسماعه. الهيدر X-Session-Id يُحفظ تلقائياً بمتغيّر postpone_session_id، ونص الجملة يُطبع بالكونسول مفكوك الترميز.\n\nملاحظة خصوصية: اسم الزبون وهاتفه ما ينمرّان للنموذج بهذا المسار حتى لو أرسلتهما — صباح ممنوعة من ذكر اسم المستلم."
           }
         },
         {
@@ -345,17 +343,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// يطبع مجرى الدور كاملاً: كلام الزبون، رد صباح، والمرحلة/السبب/القرار.",
+                  "// يطبع مجرى الدور: كلام الزبون، رد صباح، والموعد المختار.",
                   "const h = pm.response.headers;",
                   "const dec = (n) => { try { return decodeURIComponent(h.get(n) || ''); } catch (e) { return ''; } };",
                   "",
                   "console.log('الزبون:', dec('X-Customer-Transcript') || '(سكوت)');",
                   "console.log('صباح  :', dec('X-Reply-Text'));",
-                  "console.log('المرحلة:', h.get('X-Call-Stage') || '—', '| السبب:', h.get('X-Return-Reason') || '—');",
+                  "console.log('الموعد المختار:', h.get('X-Chosen-Option') || '— لسه');",
                   "",
                   "if (h.get('X-Call-Status') === 'ended') {",
-                  "    console.log('انتهت المكالمة — القرار:', h.get('X-Decision'), '| أُرسل:', h.get('X-Result-Sent'));",
-                  "    pm.collectionVariables.set('return_session_id', '');",
+                  "    console.log('انتهت المكالمة | انحفظ الموعد:', h.get('X-Postpone-Saved') || 'بلا تأكيد');",
+                  "    pm.collectionVariables.set('postpone_session_id', '');",
                   "} else {",
                   "    console.log('المكالمة مستمرة — أرسل هذا الطلب مرة ثانية بدور جديد.');",
                   "}",
@@ -377,14 +375,14 @@
               ]
             },
             "url": {
-              "raw": "{{baseUrl}}/voice_return/respond?session_id={{return_session_id}}",
+              "raw": "{{baseUrl}}/voice_followup/postpone/respond?session_id={{postpone_session_id}}",
               "host": ["{{baseUrl}}"],
-              "path": ["voice_return", "respond"],
+              "path": ["voice_followup", "postpone", "respond"],
               "query": [
-                { "key": "session_id", "value": "{{return_session_id}}" }
+                { "key": "session_id", "value": "{{postpone_session_id}}" }
               ]
             },
-            "description": "شغّل Step 1 أولاً. اضغط حقل audio > Select Files واختر تسجيل رد الزبون.\n\n⚠️ خلافاً لـ voice_followup، هذا الطلب يتكرر: أرسله مرة بعد مرة بنفس الجلسة لين X-Call-Status يرجع \"ended\".\n\nهيدرات الرد: X-Call-Status (continue/ended) · X-Call-Stage (المرحلة) · X-Return-Reason (تصنيف السبب) · X-Decision (القرار النهائي) · X-Result-Sent · X-Reply-Text وX-Customer-Transcript (Percent-encoded).\n\nسكوت الزبون ليس خطأ — يُعامَل كرد غامض: تعيد صباح السؤال مرة، ثم تقفل بأدب."
+            "description": "شغّل Step 1 أولاً. اضغط حقل audio > Select Files واختر تسجيل رد الزبون.\n\n⚠️ هذا الطلب يتكرر: أرسله مرة بعد مرة بنفس الجلسة لين X-Call-Status يرجع \"ended\".\n\nهيدرات الرد: X-Call-Status (continue/ended) · X-Chosen-Option (today / plus_N / weekday_D) · X-Postpone-Saved · X-Reply-Text وX-Customer-Transcript (Percent-encoded).\n\nسكوت الزبون ليس خطأ — يُعامَل كرد غامض: تعيد صباح السؤال مرة، ثم تقفل بأدب."
           }
         }
       ]
