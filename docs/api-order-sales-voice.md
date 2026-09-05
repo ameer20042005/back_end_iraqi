@@ -1,4 +1,4 @@
-# توثيق API — ثلاث ميزات: إنشاء الطلبات، المبيعات، المتابعة الصوتية
+# توثيق API — أربع ميزات: إنشاء الطلبات، المبيعات، المتابعة الصوتية، مكالمة الراجع
 
 > ⚠️ **تنبيه أمني**: هذا الملف يحتوي على مفاتيح API الحقيقية الحالية للخادم (لأنها القيم
 > الافتراضية المضبوطة فعلياً بـ `app/config.py` ولا يوجد `.env` يتجاوزها). لا تشارك هذا
@@ -16,7 +16,7 @@ https://jshdv4wtjlgg9n-8000.proxy.runpod.net
 - توثيق OpenAPI التفاعلي (Swagger) متوفر تلقائياً على `/docs`.
 - فحص صحة الخادم: `GET /health` (بلا مفتاح API).
 
-## آلية الحماية (Authentication) — مشتركة بين الميزات الثلاث
+## آلية الحماية (Authentication) — مشتركة بين الميزات الأربع
 
 كل ميزة محمية بمفتاح API **خاص بها** (لا مفتاح عام مشترك)، يُرسَل بهيدر HTTP:
 
@@ -520,6 +520,149 @@ X-Query-Sent: true
 
 ---
 
+## 4) ميزة مكالمة الشحنة الراجعة — `voice_return`
+
+> ✅ الخطوة 1 (`/start`): **`application/json`** — ⚠️ الخطوة 2 (`/respond`): **`multipart/form-data` (ليس JSON)** — كلتاهما بهيدر `X-API-Key` (نفس مفتاح المتابعة الصوتية)
+
+### الوصف
+مكالمة صوتية صادرة بشخصية **"صباح"** بخصوص شحنة **راجعة**: تفهم سبب الرجوع، تحاول تحلّ السبب **مرة واحدة فقط** بلا ضغط، ثم تنتهي بقرار واحد مؤكَّد بنعم/لا يُرسَل لنظام الطلبات.
+
+الفرق الجوهري عن `voice_followup`: هذه مكالمة **متعددة الأدوار** — `/respond` يُستدعى مراراً بنفس `session_id` حتى يرجع `X-Call-Status: ended`، لا مرة واحدة.
+
+**كل قرارات المكالمة حتمية بالخادم** (مطابقة نصية على رد الزبون) — النموذج لا يقرر شيئاً، فقط يصوغ القرار المحسوم بلهجة عراقية. الاستثناء الوحيد: تصنيف سبب الرجوع من كلام حر، وهو استخراج لا قرار.
+
+### مراحل المكالمة (`X-Call-Stage`)
+
+| المرحلة | ماذا تسأل صباح |
+|---|---|
+| `awaiting_permission` | التعريف + "إذا تسمح دقيقة؟" |
+| `awaiting_identity` | تذكر الشحنة (المتجر + المبلغ) ثم "حضرتك المستلم؟" |
+| `awaiting_authorization` | إذا قال "مو أنا": "حضرتك مخوّل تأكد القرار؟" |
+| `awaiting_reason` | "شنو سبب رجوع الشحنة؟" |
+| `awaiting_solution` | تعرض **حلاً واحداً** حسب السبب المصنَّف |
+| `awaiting_final_confirm` | تلخّص القرار وتسأل نعم/لا |
+| `closed` | انتهت — القرار أُرسل لنظام الطلبات |
+
+### تصنيفات سبب الرجوع (`X-Return-Reason`) والحل المعروض
+
+| التصنيف | متى | الحل الذي تعرضه صباح |
+|---|---|---|
+| `no_order` | ما طلبها أصلاً / صارت بالغلط | "ممكن أحد طالبها باسمك أو صارت من المتجر بالغلط؟ إذا لا، أثبتها راجع نهائي." |
+| `no_time` | ما كان عنده وقت / ماكو أحد يستلم | "تحب نأجل توصيلها لوقت يناسبك؟" |
+| `agent_issue` | المندوب ما اتصل / سوء تنسيق | "أعالجها وأخليها ترجع للتوصيل بشكل أوضح، تحب أعيد إرسالها إلك؟" |
+| `hesitant` | متردد / مو متأكد | "أرتب إعادتها إلك ونخلي التوصيل اليوم، يناسبك؟" |
+| `refused` | رافض الاستلام نهائياً | "أثبتها راجع نهائي؟" |
+
+### جدول القرارات (`X-Decision`) — يُحسب بالخادم
+
+| السبب | ردّ الزبون على الحل | القرار | الإجراء المُرسَل | الحالة الجديدة |
+|---|---|---|---|---|
+| `no_order` | نعم | `CUSTOMER_WILL_RECEIVE` | `TREATED` | `TRY_AGAIN` |
+| `no_time` | نعم | `CONFIRMED_POSTPONED` | `APPROVAL_POSTPONED` | `APPROVAL_POSTPONED` |
+| `agent_issue` | نعم | `CUSTOMER_WILL_RECEIVE` | `TREATED` | `TRY_AGAIN` |
+| `hesitant` | نعم | `CUSTOMER_READY_NOW` | `TREATED` | `TRY_AGAIN` |
+| `refused` | نعم | `CONFIRMED_RETURN` | `RETURN_APPROVED` | `APPROVAL_RETURN` |
+| أي سبب | لا | `CONFIRMED_RETURN` | `RETURN_APPROVED` | `APPROVAL_RETURN` |
+| رقم غلط / غير مخوّل / تعذّر الفهم | — | `NO_ACTION_NEEDED` | `NO_ACTION_NEEDED` | **بلا تغيير** |
+
+> `refused` + "لا" حالة تضارب (رفض الاستلام ورفض إثبات الرجوع): لا تُحسم، بل تُعاد لسؤال السبب.
+
+### الخطوة 1 — `POST /voice_return/start`
+
+```
+POST /voice_return/start
+Content-Type: application/json
+X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b
+```
+
+#### ماذا يجب أن ترسل (JSON)
+
+| الحقل | النوع | إلزامي | الوصف |
+|---|---|---|---|
+| `order_id` | string | ✅ | معرّف الطلب بنظامكم — **لا يُنطق بالمكالمة**، يُستخدم بالإرسال النهائي فقط |
+| `status` | string | ❌ | حالة الشحنة (افتراضياً `"راجع"`) |
+| `store_name` | string أو null | ❌ | اسم المتجر/المرسل — يُذكر بالافتتاح |
+| `amount` | number أو null | ❌ | مبلغ الشحنة — يُذكر بالافتتاح |
+| `currency` | string أو null | ❌ | العملة (مثلاً "دينار") |
+| `items` | array | ❌ | `{"product_name": "...", "quantity": 1}` |
+| `return_reason_hint` | string أو null | ❌ | ملاحظة النظام عن سبب الرجوع إن وُجدت |
+| `goods_description` | string أو null | ❌ | وصف داخلي — **لا يُذكر إلا إذا سأل الزبون** |
+| `tracking_number` | string أو null | ❌ | رقم تتبع داخلي — **لا يُذكر إلا إذا سأل الزبون** |
+
+> 🔒 لا يوجد حقل لاسم الزبون أو عنوانه أو محافظته — الدليل يمنع ذكرها بالمكالمة نهائياً، فلا تُرسَل للنموذج أصلاً.
+
+#### مثال
+```bash
+curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/voice_return/start" \
+  -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
+  -H "Content-Type: application/json" \
+  -o opening.wav -D headers_start.txt \
+  -d '{
+        "order_id": "ORD-000123456",
+        "status": "راجع",
+        "store_name": "متجر النور",
+        "amount": 75000,
+        "currency": "دينار",
+        "items": [{"product_name": "غسالة اتوماتيك", "quantity": 1}],
+        "return_reason_hint": "لم يطلب"
+      }'
+```
+
+#### شكل الاستجابة
+`200 OK` — **الجسم ملف صوت خام `audio/wav`**. التفاصيل بالهيدرات:
+
+| الهيدر | المحتوى |
+|---|---|
+| `X-Session-Id` | معرّف الجلسة — **احفظه** لكل أدوار `/respond` |
+| `X-Reply-Text` | نص جملة الافتتاح (Percent-encoded) |
+| `X-Call-Status` | `continue` دائماً بهذه الخطوة |
+
+### الخطوة 2 — `POST /voice_return/respond` (تتكرر)
+
+```
+POST /voice_return/respond?session_id=<من الخطوة 1>
+Content-Type: multipart/form-data
+X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b
+```
+
+| الحقل | النوع | إلزامي | الوصف |
+|---|---|---|---|
+| `session_id` | query string | ✅ | من هيدر `X-Session-Id` بالخطوة 1 |
+| `audio` | file | ✅ | تسجيل رد الزبون (wav/mp3/m4a) |
+
+#### مثال
+```bash
+curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/voice_return/respond?session_id=8f1e2d3c-..." \
+  -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
+  -F "audio=@customer_reply.wav" \
+  -o sabah_reply.wav -D headers_respond.txt
+```
+
+#### شكل الاستجابة
+`200 OK` — **الجسم ملف صوت رد صباح `audio/wav`**. التفاصيل بالهيدرات:
+
+| الهيدر | المحتوى |
+|---|---|
+| `X-Call-Status` | `continue` = أرسل دوراً آخر · `ended` = انتهت المكالمة |
+| `X-Call-Stage` | المرحلة الحالية (انظر جدول المراحل أعلاه) |
+| `X-Return-Reason` | تصنيف سبب الرجوع بعد استخراجه، أو فارغ |
+| `X-Decision` | القرار النهائي — يمتلئ فقط عند `ended` |
+| `X-Customer-Transcript` | نص رد الزبون (Percent-encoded) |
+| `X-Reply-Text` | نص رد صباح (Percent-encoded) |
+| `X-Result-Sent` | `true`/`false` — هل وصل القرار لنظام الطلبات (فارغ ما لم تنتهِ المكالمة) |
+
+> ♻️ **حلقة الاستدعاء**: كرّر `/respond` بنفس `session_id` طالما `X-Call-Status: continue`. سكوت الزبون **ليس خطأ** — يُعامَل كرد غامض: تعيد صباح السؤال مرة، ثم تقفل بأدب.
+
+### أخطاء محتملة
+| الكود | السبب |
+|---|---|
+| `401` | مفتاح `X-API-Key` غلط |
+| `404` | `session_id` غير موجود أو انتهت صلاحيته (٣٠ دقيقة) — استدعِ `/start` من جديد |
+| `422` | جسم الخطوة 1 ناقص `order_id` |
+| `503` | تحويل النص لصوت أو الصوت لنص غير متوفر (يحتاج بيئة GPU) |
+
+---
+
 ## ملخص سريع
 
 | الميزة | Endpoint | نوع الجسم | المفتاح |
@@ -529,3 +672,5 @@ X-Query-Sent: true
 | المبيعات (بث) | `POST /sales/chat/stream` | `application/json` (نفس أعلاه) | `sk-sales-...` |
 | المتابعة الصوتية — سؤال | `POST /voice_followup/ask` | `application/json` (تفاصيل الطلب) | `sk-voicefu-...` |
 | المتابعة الصوتية — رد | `POST /voice_followup/respond?session_id=...` | `multipart/form-data` (`audio`) | `sk-voicefu-...` |
+| مكالمة الراجع — بدء | `POST /voice_return/start` | `application/json` (تفاصيل الشحنة) | `sk-voicefu-...` |
+| مكالمة الراجع — دور | `POST /voice_return/respond?session_id=...` | `multipart/form-data` (`audio`) | `sk-voicefu-...` |

@@ -1117,6 +1117,7 @@
   // الحقيقي كالمعتاد. كل نقاط JSON العادية (health/gpu/root/sales/support/
   // orders create) تمر من هنا بلا أي تغيير بمنطقها. مسارات voice_followup
   // (صوت حقيقي داخل/خارج) لها معالجة تجريبية منفصلة داخل renderVoiceFollowupForm
+  // وrenderVoiceReturnForm — والأخيرة متعددة الأدوار (تكرّر /respond).
   // لأنها ترجع audio/wav لا JSON.
   function apiFetch(url, options) {
     return isDemoMode() ? mockFetch(url, options) : fetch(url, options);
@@ -1284,6 +1285,16 @@
       render: renderVoiceFollowupForm
     },
     {
+      group: "مكالمة الراجع",
+      id: "voiceReturn",
+      method: "POST",
+      path: "/voice_return/start → /voice_return/respond ×N",
+      title: "مكالمة صباح — شحنة راجعة",
+      desc: "مكالمة صوتية متعددة الأدوار بشخصية صباح: تفهم سبب رجوع الشحنة، تعرض حلاً واحداً حسب السبب (ما طلبها / ماكو وقت / مشكلة مندوب / متردد / رافض)، وتنتهي بقرار مؤكَّد يُرسل لباك اند السستم. كل القرارات حتمية بالخادم — النموذج يصوغ فقط. كرّر /respond بنفس session_id لين X-Call-Status يصير ended. يحتاج مفتاح API المتابعة الصوتية.",
+      apiKeyService: "voiceFollowup",
+      render: renderVoiceReturnForm
+    },
+    {
       group: "اختبار الحمل",
       id: "loadTest",
       method: "POST",
@@ -1295,7 +1306,7 @@
     }
   ];
 
-  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب", "المتابعة الصوتية", "اختبار الحمل"];
+  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب", "المتابعة الصوتية", "مكالمة الراجع", "اختبار الحمل"];
   var navGroups = document.getElementById("navGroups");
   var mainView = document.getElementById("mainView");
 
@@ -2304,6 +2315,278 @@
         respondBody.innerHTML = '<div class="empty-state">تعذّر الوصول للسيرفر: ' + escapeHtml(e.message) + "</div>";
       }
       respondBtn.setBusy(false);
+    };
+  }
+
+  /* ---------------- Voice return (مكالمة "راجع" — متعددة الأدوار) ---------------- */
+  // تختلف بنيوياً عن renderVoiceFollowupForm أعلاه: هناك دور واحد يُغلق
+  // الجلسة فوراً، وهنا المكالمة تستمر — /respond يُستدعى مراراً بنفس
+  // session_id لين X-Call-Status يرجع "ended". لذلك نراكم الأدوار بسجل
+  // محادثة واحد بدل ما نستبدل محتوى اللوحة بكل دور.
+  function renderVoiceReturnForm(container, ep) {
+    var sessionId = null;
+    var turnIndex = 0;
+    var defaultOrder = {
+      order_id: "ORD-1042",
+      status: "راجع",
+      store_name: "متجر النور",
+      amount: 75000,
+      currency: "دينار",
+      items: [{ product_name: "غسالة اتوماتيك", quantity: 1 }],
+      return_reason_hint: "لم يطلب",
+      goods_description: null,
+      tracking_number: null
+    };
+
+    /* ---- الخطوة 1: POST /voice_return/start ---- */
+    var startPanel = makePanel("الخطوة ١ — بيانات الشحنة الراجعة (JSON قابل للتعديل)");
+    var orderField = document.createElement("div");
+    orderField.className = "field";
+    var orderTextarea = document.createElement("textarea");
+    orderTextarea.style.minHeight = "200px";
+    orderTextarea.style.direction = "ltr";
+    orderTextarea.style.textAlign = "left";
+    orderTextarea.value = JSON.stringify(defaultOrder, null, 2);
+    orderField.appendChild(orderTextarea);
+    startPanel.appendChild(orderField);
+
+    var startBtn = makeButton("ابدأ المكالمة (/start)");
+    var sessionPill = document.createElement("span");
+    sessionPill.className = "session-pill";
+    sessionPill.innerHTML = 'الجلسة: <span class="val"></span>';
+    startPanel.appendChild(makeActionsRow(startBtn, sessionPill));
+    container.appendChild(startPanel);
+
+    /* ---- سجل المكالمة (يتراكم عبر الأدوار) ---- */
+    var callPanel = makePanel("مجرى المكالمة");
+    var callMeta = document.createElement("div");
+    callMeta.className = "response-meta";
+    var callBody = document.createElement("div");
+    callBody.innerHTML = '<div class="empty-state">عدّل بيانات الشحنة (أو اتركها) واضغط "ابدأ المكالمة".</div>';
+    callPanel.appendChild(callMeta);
+    callPanel.appendChild(callBody);
+    container.appendChild(callPanel);
+
+    // يضيف فقاعة واحدة لسجل المكالمة، مع مشغّل صوت إن وُجد.
+    function addBubble(cls, who, text, audioUrl, autoplay) {
+      var b = document.createElement("div");
+      b.className = "bubble " + cls;
+      b.innerHTML = '<div class="who">' + escapeHtml(who) + "</div>" + escapeHtml(text || "—");
+      if (audioUrl) {
+        var a = document.createElement("audio");
+        a.controls = true;
+        a.autoplay = !!autoplay;
+        a.src = audioUrl;
+        a.style.width = "100%";
+        a.style.marginTop = "8px";
+        b.appendChild(a);
+      }
+      callBody.appendChild(b);
+      b.scrollIntoView({ block: "nearest" });
+    }
+
+    // شريط الحالة أعلى السجل: كود الحالة + الزمن + المرحلة + السبب + القرار.
+    function setMeta(status, ms, stage, reason, decision, sent) {
+      var html =
+        '<span class="status-code ' + statusClass(status) + '">' + status + "</span>" +
+        '<span class="latency">' + ms + " ms</span>";
+      if (stage) html += '<span class="engine-pill">' + escapeHtml(stage) + "</span>";
+      if (reason) html += '<span class="engine-pill">سبب: ' + escapeHtml(reason) + "</span>";
+      if (decision) {
+        html += '<span class="engine-pill ' + (sent === "true" ? "vllm" : "fallback") + '">' +
+          escapeHtml(decision) +
+          (sent === "true" ? " · أُرسل" : sent === "false" ? " · تعذّر الإرسال" : "") + "</span>";
+      }
+      callMeta.innerHTML = html;
+    }
+
+    // الهيدرات العربية تصل percent-encoded (RFC 5987) — انظر _ascii_header
+    // بـapp/features/voice_return/router.py.
+    function decodeHeader(res, name) {
+      try { return decodeURIComponent(res.headers.get(name) || ""); } catch (e) { return ""; }
+    }
+
+    startBtn.onclick = async function () {
+      var payload;
+      try {
+        payload = JSON.parse(orderTextarea.value);
+      } catch (e) {
+        alert("JSON غير صالح: " + e.message);
+        return;
+      }
+      startBtn.setBusy(true);
+      turnIndex = 0;
+      callMeta.innerHTML = "";
+      callBody.innerHTML = '<div class="empty-state">جاري توليد جملة الافتتاح (نص → صوت)...</div>';
+      var t0 = performance.now();
+      try {
+        var res = await fetch(baseUrl() + "/voice_return/start", {
+          method: "POST",
+          headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
+          body: JSON.stringify(payload)
+        });
+        var ms = Math.round(performance.now() - t0);
+        if (!res.ok) {
+          var errJson = await res.json().catch(function () { return null; });
+          setMeta(res.status, ms);
+          var msg = (errJson && errJson.detail) || "فشل الطلب";
+          callBody.innerHTML = '<div class="empty-state">' + escapeHtml(msg) + "</div>";
+          startBtn.setBusy(false);
+          return;
+        }
+        sessionId = res.headers.get("X-Session-Id");
+        var openingText = decodeHeader(res, "X-Reply-Text");
+        var audioUrl = URL.createObjectURL(await res.blob());
+
+        setMeta(res.status, ms, "awaiting_permission");
+        sessionPill.querySelector(".val").textContent = sessionId || "—";
+        sessionPill.classList.add("show");
+        callBody.innerHTML = "";
+        addBubble("assistant", "صباح — الافتتاح", openingText, audioUrl, true);
+
+        turnPanel.style.display = "";
+        turnNote.textContent = sessionId
+          ? "الجلسة: " + sessionId + " — كرّر إرسال ردود الزبون لين تنتهي المكالمة."
+          : "تحذير: ما وصلت session_id بالهيدر — تحقق من Access-Control-Expose-Headers.";
+      } catch (e) {
+        callMeta.innerHTML = '<span class="status-code s5">خطأ</span>';
+        callBody.innerHTML = '<div class="empty-state">تعذّر الوصول للسيرفر: ' + escapeHtml(e.message) + "</div>";
+      }
+      startBtn.setBusy(false);
+    };
+
+    /* ---- الخطوة 2: POST /voice_return/respond (تتكرر كل دور) ---- */
+    var turnPanel = makePanel("الخطوة ٢ — رد الزبون (يتكرر كل دور)");
+    turnPanel.style.display = "none";
+    var turnNote = document.createElement("div");
+    turnNote.style.fontSize = "12.5px";
+    turnNote.style.color = "var(--text-dim)";
+    turnNote.style.marginBottom = "10px";
+    turnPanel.appendChild(turnNote);
+
+    var recordRow = document.createElement("div");
+    recordRow.className = "radio-row";
+    var recordBtn = document.createElement("button");
+    recordBtn.className = "ghost";
+    recordBtn.type = "button";
+    recordBtn.textContent = "🎙 سجّل رد الزبون";
+    var recordStatus = document.createElement("span");
+    recordStatus.style.fontSize = "12.5px";
+    recordStatus.style.color = "var(--text-dim)";
+    recordStatus.style.alignSelf = "center";
+    recordRow.appendChild(recordBtn);
+    recordRow.appendChild(recordStatus);
+    turnPanel.appendChild(recordRow);
+
+    var fileArea = document.createElement("div");
+    fileArea.className = "field";
+    fileArea.style.marginTop = "12px";
+    fileArea.innerHTML = '<label>أو ارفع ملف صوتي جاهز (wav/mp3/m4a)</label>';
+    var fileDrop = document.createElement("div");
+    fileDrop.className = "file-drop";
+    var fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "audio/*";
+    fileDrop.appendChild(fileInput);
+    fileArea.appendChild(fileDrop);
+    turnPanel.appendChild(fileArea);
+
+    var recordedPreview = document.createElement("audio");
+    recordedPreview.controls = true;
+    recordedPreview.style.width = "100%";
+    recordedPreview.style.marginTop = "10px";
+    recordedPreview.style.display = "none";
+    turnPanel.appendChild(recordedPreview);
+
+    var recordedBlob = null;
+    var mediaRecorder = null;
+    var mediaChunks = [];
+    recordBtn.onclick = async function () {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        return;
+      }
+      try {
+        var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = function (e) { if (e.data.size > 0) mediaChunks.push(e.data); };
+        mediaRecorder.onstop = function () {
+          recordedBlob = new Blob(mediaChunks, { type: "audio/webm" });
+          recordedPreview.src = URL.createObjectURL(recordedBlob);
+          recordedPreview.style.display = "";
+          recordBtn.textContent = "🎙 سجّل رد الزبون";
+          recordStatus.textContent = "تسجيل جاهز (" + Math.round(recordedBlob.size / 1024) + " كيلوبايت).";
+          stream.getTracks().forEach(function (t) { t.stop(); });
+        };
+        mediaRecorder.start();
+        recordBtn.textContent = "⏹ إيقاف التسجيل";
+        recordStatus.textContent = "جاري التسجيل...";
+      } catch (e) {
+        recordStatus.textContent = "تعذّر الوصول للمايكروفون: " + e.message;
+      }
+    };
+
+    var turnBtn = makeButton("أرسل الدور (/respond)");
+    turnPanel.appendChild(makeActionsRow(turnBtn));
+    container.appendChild(turnPanel);
+
+    turnBtn.onclick = async function () {
+      if (!sessionId) { alert("ابدأ المكالمة أولاً (/start)."); return; }
+      var audioFile = fileInput.files[0] || recordedBlob;
+      if (!audioFile) { alert("سجّل صوتاً أو ارفع ملفاً أولاً."); return; }
+
+      turnBtn.setBusy(true);
+      turnIndex += 1;
+      var form = new FormData();
+      form.append("audio", audioFile, audioFile.name || "reply.webm");
+
+      var t0 = performance.now();
+      try {
+        var url = baseUrl() + "/voice_return/respond?session_id=" + encodeURIComponent(sessionId);
+        var res = await fetch(url, { method: "POST", headers: apiKeyHeader(ep.apiKeyService), body: form });
+        var ms = Math.round(performance.now() - t0);
+        if (!res.ok) {
+          var errJson = await res.json().catch(function () { return null; });
+          setMeta(res.status, ms);
+          addBubble("assistant", "خطأ بالدور " + turnIndex, (errJson && errJson.detail) || "فشل الطلب");
+          turnBtn.setBusy(false);
+          return;
+        }
+        var transcript = decodeHeader(res, "X-Customer-Transcript");
+        var replyText = decodeHeader(res, "X-Reply-Text");
+        var callStatus = res.headers.get("X-Call-Status") || "";
+        var stage = res.headers.get("X-Call-Stage") || "";
+        var reason = res.headers.get("X-Return-Reason") || "";
+        var decision = res.headers.get("X-Decision") || "";
+        var sent = res.headers.get("X-Result-Sent") || "";
+        var audioUrl = URL.createObjectURL(await res.blob());
+
+        setMeta(res.status, ms, stage, reason, decision, sent);
+        addBubble("user", "الزبون — دور " + turnIndex + " (Whisper)", transcript || "(سكوت / ما انفهم كلام)");
+        addBubble("assistant", "صباح — دور " + turnIndex, replyText, audioUrl, true);
+
+        // نظّف المدخلات حتى ما ينرسل نفس التسجيل بالدور الجاي بالغلط.
+        fileInput.value = "";
+        recordedBlob = null;
+        recordedPreview.style.display = "none";
+        recordStatus.textContent = "";
+
+        if (callStatus === "ended") {
+          // المكالمة انتهت والجلسة انحذفت بالخادم — نمنع أي دور إضافي.
+          sessionId = null;
+          sessionPill.classList.remove("show");
+          turnPanel.style.display = "none";
+          addBubble("assistant", "انتهت المكالمة",
+            "القرار النهائي: " + (decision || "—") +
+            (sent === "true" ? " — أُرسل لنظام الطلبات."
+              : sent === "false" ? " — تعذّر إرساله لنظام الطلبات." : ""));
+        }
+      } catch (e) {
+        callMeta.innerHTML = '<span class="status-code s5">خطأ</span>';
+        addBubble("assistant", "خطأ", "تعذّر الوصول للسيرفر: " + e.message);
+      }
+      turnBtn.setBusy(false);
     };
   }
 

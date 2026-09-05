@@ -6,6 +6,13 @@
 import asyncio
 from contextlib import asynccontextmanager
 
+# الشرح: الإصلاح أدناه يحتاج شيئين غير موجودين حالياً بهذا الملف:
+#   - time.monotonic() لقياس مهلة الانتظار (ساعة لا تتأثر بتغيّر وقت النظام،
+#     بعكس time.time()، فما تنكسر المهلة لو عدّل الـ Pod ساعته أثناء الإقلاع).
+#   - logger لتسجيل سبب تجاوز المهلة، حتى يظهر بمخرجات uvicorn بدل صمت تام.
+# import logging
+# import time
+
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -19,6 +26,9 @@ from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
 from app.features.support.router import router as support_router
 from app.features.voice_followup.router import router as voice_followup_router
+# راوتر مكالمة "راجع" (شخصية صباح) — مسار متعدد الأدوار يحسم سبب
+# رجوع الشحنة ويرسل القرار لباك اند السستم.
+from app.features.voice_return.router import router as voice_return_router
 from app.features.voice_followup.tts import warmup as warmup_tts
 
 try:
@@ -28,6 +38,41 @@ try:
 except ImportError:
     # محلياً بدون torch — على RunPod تكون المكتبة موجودة في الصورة
     TORCH_AVAILABLE = False
+
+
+# الشرح: logger على مستوى الوحدة — يُستخدم داخل _warmup_local_models أدناه.
+# logger = logging.getLogger(__name__)
+
+
+# ═════════ إصلاح تسلسل الإقلاع: تأجيل موديلات الصوت حتى جاهزية vLLM ═════════
+# الشرح (ليش هذا الإصلاح موجود أصلاً):
+# Whisper و F5-TTS يعيشان داخل عملية FastAPI نفسها وعلى **نفس كرت الـGPU**
+# الذي يحجز عليه vLLM أوزانه (~24.4GB) + الـKV cache. بالكود الحالي (أسفل،
+# داخل lifespan) تُطلَق مَهمّتا التحميل فور إقلاع FastAPI — أي بالضبط بينما
+# vLLM لسه يحمّل الأوزان ويقيس الذاكرة الحرة (profiling) ليقرر حجم الـKV
+# cache. فيخطف موديلا الصوت VRAM من تحته أثناء القياس، وينهار المحرك لاحقاً
+# بـCUDA OOM. خفض GPU_MEMORY_UTILIZATION (start.sh) عالج *نسبة* الحجز لكنه
+# لا يعالج *ترتيبه* — وهذا ما تعالجه الدالة أدناه.
+#
+# الشرح (كيف تعالجه): تنتظر حتى يقلب فاحص الجاهزية llm_engine.ready إلى True
+# (أي بعد ما خلّص vLLM حجزه فعلاً وصار /v1/models يرد 200)، وعندها فقط
+# تحمّل الموديلين — و**بالتتابع** لا بالتوازي، لأن تحميلهما معاً يصنع قمة
+# ذاكرة مزدوجة لحظية بلا داعٍ.
+#
+# الشرح (ليش مهلة قصوى deadline): محلياً بلا خادم vLLM يبقى ready == False
+# للأبد، وبدون سقف زمني ما يتحمّل أي موديل صوت إطلاقاً فينكسر الاختبار
+# المحلي. بعد انقضاء المهلة نحمّل على أي حال — محلياً ماكو vLLM يزاحمنا.
+# async def _warmup_local_models(timeout_seconds: float = 900.0) -> None:
+#     deadline = time.monotonic() + timeout_seconds
+#     while not llm_engine.ready and time.monotonic() < deadline:
+#         await asyncio.sleep(5.0)
+#     if not llm_engine.ready:
+#         logger.warning(
+#             "انقضت مهلة انتظار vLLM (%.0f ثانية) — نحمّل موديلات الصوت رغم ذلك",
+#             timeout_seconds,
+#         )
+#     await run_in_threadpool(warmup_transcriber)
+#     await run_in_threadpool(warmup_tts)
 
 
 @asynccontextmanager
@@ -41,10 +86,17 @@ async def lifespan(app: FastAPI):
     # **أول رسالة صوتية** — فيدفع أول زبون عشرات الثواني تحميلاً تظهر كأنها
     # بطء بالتحويل. نحمّله بالخلفية من الآن: بخيط منفصل حتى لا يجمّد الـ event
     # loop، وكمَهمّة حتى لا يتأخر إقلاع الخادم (باقي المسارات تشتغل فوراً).
+    # ⚠️ السطران التاليان هما مصدر تصادم الذاكرة الموصوف فوق: يبدآن التحميل
+    # فوراً بالتوازي مع تحميل vLLM لأوزانه. عند تفعيل الإصلاح، علّقهما
+    # (وعلّق كذلك tts_warmup_task.cancel() بالأسفل) وفعّل السطر البديل.
     warmup_task = asyncio.create_task(run_in_threadpool(warmup_transcriber))
     # نفس مبرر تحميل Whisper أعلاه، لموديل تحويل النص لصوت (F5-TTS) الذي
     # يخدم مسار المتابعة الصوتية (app/features/voice_followup).
     tts_warmup_task = asyncio.create_task(run_in_threadpool(warmup_tts))
+    # الشرح: البديل — مَهمّة واحدة تنتظر جاهزية vLLM ثم تحمّل الموديلين
+    # بالتتابع. نفس اسم المتغير warmup_task عن قصد، حتى يبقى سطر
+    # warmup_task.cancel() بالأسفل صالحاً بلا أي تعديل عليه.
+    # warmup_task = asyncio.create_task(_warmup_local_models())
     yield
     # يوقف فاحص الجاهزية ويغلق عميل HTTP.
     warmup_task.cancel()
@@ -75,6 +127,8 @@ app.add_middleware(
         "X-Session-Id", "X-Question-Text",
         "X-Reason-Summary", "X-Customer-Transcript", "X-Query-Sent",
         "X-Reply-Text", "X-Call-Status", "X-Chosen-Option", "X-Postpone-Saved",
+        # هيدرات مكالمة "راجع" (app/features/voice_return/router.py)
+        "X-Call-Stage", "X-Return-Reason", "X-Decision", "X-Result-Sent",
     ],
 )
 
@@ -82,6 +136,7 @@ app.include_router(sales_router)
 app.include_router(support_router)
 app.include_router(order_intake_router)
 app.include_router(voice_followup_router)
+app.include_router(voice_return_router)
 
 
 @app.get("/")
