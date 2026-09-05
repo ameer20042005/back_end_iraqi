@@ -35,3 +35,8 @@ class VoiceFollowupOrderRequest(BaseModel):
     items: List[VoiceFollowupItem] = Field(default_factory=list)
     reason_hint: Optional[str] = None  # سبب أوّلي إن كان معروفاً بالسستم (مثل "رفض الزبون الاستلام")
     notes: Optional[str] = None
+    # موعد التسليم المجدوَل حالياً (ISO "YYYY-MM-DD") — تستعمله مكالمة تأجيل
+    # التسليم (شخصية "صباح"، انظر prompts.py::SABAH_SYSTEM_PROMPT) لتذكير
+    # الزبون بموعده الحالي قبل عرض خيارات التأجيل. اختياري ولا يؤثر على مسار
+    # سؤال سبب الحالة (ask/analyze) القديم.
+    scheduled_date: Optional[str] = None

@@ -69,9 +69,12 @@ app.add_middleware(
     # مسار المتابعة الصوتية (app/features/voice_followup/router.py) يرجع
     # session_id ونتيجة التحليل بهذي الهيدرات بدل جسم JSON (الجسم صوت خام) —
     # static/index.html يقرأها مباشرة لعرض التجربة الصوتية الكاملة.
+    # X-Reply-Text/X-Call-Status/X-Chosen-Option/X-Postpone-Saved تخص مكالمة
+    # تأجيل التسليم (شخصية صباح، /postpone/start و/postpone/respond).
     expose_headers=[
         "X-Session-Id", "X-Question-Text",
         "X-Reason-Summary", "X-Customer-Transcript", "X-Query-Sent",
+        "X-Reply-Text", "X-Call-Status", "X-Chosen-Option", "X-Postpone-Saved",
     ],
 )
 

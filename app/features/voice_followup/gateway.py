@@ -76,3 +76,55 @@ class HttpVoiceFollowupSubmitter(VoiceFollowupSubmitter):
 
 
 voice_followup_submitter: VoiceFollowupSubmitter = HttpVoiceFollowupSubmitter()
+
+
+# ---------------------------------------------------------------------------
+# بوابة مكالمة "صباح" (تأجيل التسليم) — انظر prompts.py::SABAH_SYSTEM_PROMPT
+# ---------------------------------------------------------------------------
+#
+# تُستدعى فقط بعد ما الزبون يأكّد اختياره فعلياً (انظر router.py) — لا نرسل
+# شي لباك اند السستم قبل تأكيد صريح، حتى لا يُسجَّل تأجيل ما وافق عليه
+# الزبون نهائياً.
+#
+# TODO: مسار باك اند السستم الفعلي لاستقبال هذا التحديث غير معروف بعد —
+# `/orders/{order_id}/postpone` أدناه أفضل تخمين موثَّق (يوازي
+# `/orders/{order_id}/feedback` أعلاه). عدّل المسار فقط عند توفر التفاصيل
+# الحقيقية؛ الواجهة (VoicePostponeSubmitter) والمستدعي (router.py) لا يتغيّرون.
+
+
+class VoicePostponeSubmitter(ABC):
+    @abstractmethod
+    async def submit(
+        self, order: VoiceFollowupOrderRequest, new_date: str, chosen_option: str, api_key: str,
+    ) -> bool:
+        """يرسل قرار التأجيل المؤكَّد لباك اند السستم. `new_date` تاريخ ISO
+        محسوب حتمياً (router.py::resolve_postpone_date) — لا نرسل الكلمة
+        العربية وحدها حتى يبقى باك اند السستم يستقبل تاريخاً صريحاً قابلاً
+        للحفظ مباشرة بجدول الطلب. يرجع True لو نجح الإرسال."""
+
+
+class HttpVoicePostponeSubmitter(VoicePostponeSubmitter):
+    def __init__(self, base_url: str = "", timeout: float = 15.0):
+        self._base_url = base_url or settings.system_backend_base_url
+        self._timeout = timeout
+
+    async def submit(
+        self, order: VoiceFollowupOrderRequest, new_date: str, chosen_option: str, api_key: str,
+    ) -> bool:
+        payload = {
+            "order_id": order.order_id,
+            "new_scheduled_date": new_date,
+            "postpone_choice": chosen_option,  # "today" | "plus_1" | "plus_2" — قيمة داخلية ثابتة، مفيدة للتقارير
+            "reason": "تأجيل بطلب الزبون عبر مكالمة صباح",
+        }
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
+            resp = await backend_request(
+                client, "POST", f"/orders/{order.order_id}/postpone",
+                json=payload,
+                headers={"X-API-Key": api_key},
+            )
+            resp.raise_for_status()
+            return True
+
+
+voice_postpone_submitter: VoicePostponeSubmitter = HttpVoicePostponeSubmitter()
