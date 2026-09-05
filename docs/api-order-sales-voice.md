@@ -8,10 +8,10 @@
 ## الرابط الأساسي (Base URL)
 
 ```
-https://jshdv4wtjlgg9n-8000.proxy.runpod.net
+https://1spx1ivrqcvt1h-8000.proxy.runpod.net
 ```
 
-كل مسار أدناه يُضاف لهذا الرابط مباشرة، مثلاً: `https://jshdv4wtjlgg9n-8000.proxy.runpod.net/orders/create`.
+كل مسار أدناه يُضاف لهذا الرابط مباشرة، مثلاً: `https://1spx1ivrqcvt1h-8000.proxy.runpod.net/orders/create`.
 
 - توثيق OpenAPI التفاعلي (Swagger) متوفر تلقائياً على `/docs`.
 - فحص صحة الخادم: `GET /health` (بلا مفتاح API).
@@ -91,21 +91,21 @@ X-API-Key: sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c
 
 #### مثال — نص
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/orders/create" \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/orders/create" \
   -H "X-API-Key: sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" \
   -F "text=اريد اطلب غسالة اتوماتيك، اسمي احمد، رقمي 07701234567، بغداد الكرادة"
 ```
 
 #### مثال — صوت
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/orders/create" \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/orders/create" \
   -H "X-API-Key: sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" \
   -F "audio=@voice_message.ogg"
 ```
 
 #### مثال — صورة
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/orders/create" \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/orders/create" \
   -H "X-API-Key: sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" \
   -F "image=@order_screenshot.jpg"
 ```
@@ -119,7 +119,7 @@ curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/orders/create" \
 ```java
 OkHttpClient client = new OkHttpClient();
 String apiKey = "sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c";
-String baseUrl = "https://jshdv4wtjlgg9n-8000.proxy.runpod.net";
+String baseUrl = "https://1spx1ivrqcvt1h-8000.proxy.runpod.net";
 
 // إرسال صوت
 File audioFile = new File("voice_message.ogg");
@@ -286,7 +286,7 @@ X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2
 
 #### مثال — أول رسالة
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/sales/chat" \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/sales/chat" \
   -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
   -H "Content-Type: application/json" \
   -d '{"message": "عندكم غسالات اتوماتيك؟"}'
@@ -294,7 +294,7 @@ curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/sales/chat" \
 
 #### مثال — تكملة نفس المحادثة
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/sales/chat" \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/sales/chat" \
   -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
   -H "Content-Type: application/json" \
   -d '{"message": "اريدها، اسمي سارة", "session_id": "3f6e2b1a-....-...."}'
@@ -302,7 +302,7 @@ curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/sales/chat" \
 
 #### مثال — صورة منتج
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/sales/chat" \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/sales/chat" \
   -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
   -H "Content-Type: application/json" \
   -d "{\"message\": \"شنو هذا، عدكم شي مثله؟\", \"image_base64\": \"$(base64 -w0 product.jpg)\"}"
@@ -403,7 +403,7 @@ X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b
 
 #### مثال
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/voice_followup/ask" \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/voice_followup/ask" \
   -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
   -H "Content-Type: application/json" \
   -o question.wav -D headers_ask.txt \
@@ -453,7 +453,7 @@ X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b
 
 #### مثال
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/voice_followup/respond?session_id=8f1e2d3c-4b5a-6789-0abc-def123456789" \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/voice_followup/respond?session_id=8f1e2d3c-4b5a-6789-0abc-def123456789" \
   -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
   -F "audio=@customer_reply.ogg" \
   -o thanks.wav -D headers_respond.txt
@@ -465,7 +465,7 @@ curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/voice_followup/respon
 ```java
 OkHttpClient client = new OkHttpClient();
 String apiKey = "sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b";
-String baseUrl = "https://jshdv4wtjlgg9n-8000.proxy.runpod.net";
+String baseUrl = "https://1spx1ivrqcvt1h-8000.proxy.runpod.net";
 String sessionId = "8f1e2d3c-4b5a-6789-0abc-def123456789"; // من هيدر X-Session-Id بالخطوة 1
 
 File replyAudio = new File("customer_reply.ogg");
@@ -593,7 +593,7 @@ X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b
 
 #### مثال
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/voice_return/start" \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/voice_return/start" \
   -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
   -H "Content-Type: application/json" \
   -o opening.wav -D headers_start.txt \
@@ -632,7 +632,7 @@ X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b
 
 #### مثال
 ```bash
-curl -X POST "https://jshdv4wtjlgg9n-8000.proxy.runpod.net/voice_return/respond?session_id=8f1e2d3c-..." \
+curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/voice_return/respond?session_id=8f1e2d3c-..." \
   -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
   -F "audio=@customer_reply.wav" \
   -o sabah_reply.wav -D headers_respond.txt
