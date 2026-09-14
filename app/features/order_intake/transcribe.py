@@ -1,20 +1,31 @@
 # -*- coding: utf-8 -*-
-"""تحويل صوت لنص عربي عبر موديل Whisper مفرَّغ على العربية (ayoubkirouane/whisper-small-ar
-افتراضياً — قابل للتغيير بـ WHISPER_MODEL). موديل transformers عادي (وليس
-CTranslate2)، لذا نستخدم pipeline قياسي بدل faster-whisper.
+"""تحويل صوت لنص عبر Whisper — عربي (ayoubkirouane/whisper-small-ar افتراضياً)
+أو كردي سوراني (roshna-omer/whisper-small-Kurdish-Sorani). موديلات
+transformers عادية (وليست CTranslate2)، لذا نستخدم pipeline قياسي بدل
+faster-whisper.
 
 **السرعة**: الموديل يُحمَّل على الـ GPU إن توفّر (كان يشتغل على الـ CPU دائماً
 لأن pipeline بلا `device` يختار CPU افتراضياً — أبطأ بمرّات على ملف صوتي
 حقيقي)، وبنصف الدقة على الـ GPU. والملفات الأطول من 30 ثانية تُقطَّع تلقائياً
 (`chunk_length_s`) لأن Whisper يقرأ أول 30 ثانية فقط بدونها فيضيع باقي الطلب.
 
-**اللغة**: نُثبّت العربية + مهمة النسخ صراحةً — بدونها Whisper يكتشف اللغة
-تلقائياً وقد يترجم الكلام العراقي للإنجليزية أحياناً بدل نسخه عربياً.
+**اللغة**: بالعربي نُثبّت "arabic" + مهمة النسخ صراحةً — بدونها Whisper يكتشف
+اللغة تلقائياً وقد يترجم الكلام العراقي للإنجليزية أحياناً بدل نسخه عربياً.
+بالكردي **ما نمرر رمز لغة**: الموديل مفرَّغ على لغة خارج قائمة Whisper الـ99
+(ماكو ku ولا ckb بيها)، وفرض رمز لغة ثانية عليه يخرّب مخرجه.
+
+⚠️ **اللغة تجي من المستدعي، لا من الملف الصوتي.** ما تكدر تعرف لغة الصوت
+قبل ما تحوّله لنص — وموديلنا العربي مفرَّغ على العربية وحدها، فخاصية اكتشاف
+اللغة بـWhisper الأصلي ما عادت موثوقة بيه: يرجّع عربي دائماً حتى لو الكلام
+كردي صرف (حروف عربية بلا معنى، لا خطأ واضح تكدر تكشفه). البديل — تشغيل
+الموديلين وأخذ الأفضل — مرفوض عمداً: يضاعف زمن الاستجابة واستهلاك الـVRAM
+بكل طلب، مقابل تخمين ما يزال غير مضمون.
 
 التحميل بطيء أول مرة (تنزيل الأوزان)؛ يصير مرة واحدة ويُخزَّن بالكاش.
 """
 
 import logging
+from time import monotonic
 from typing import Optional
 
 try:
@@ -25,10 +36,15 @@ except ImportError:
     _TRANSFORMERS_AVAILABLE = False
 
 from app.config import settings
+from app.lang import Lang
 
 logger = logging.getLogger(__name__)
 
-_asr_pipeline = None
+# قاموس بدل متغير مفرد: نحتاج موديلين محمّلين **بنفس الوقت** أحياناً (زبون
+# عربي وزبون كردي بنفس اللحظة)، ومتغير واحد يعني تفريغ وإعادة تحميل بكل
+# تبديل لغة — عشرات الثواني بكل مكالمة. المفتاح رمز اللغة، والقيمة
+# (pipeline, آخر وقت استعمال) حتى نعرف أي موديل صار خامل ونفرّغه.
+_pipelines: "dict[str, tuple]" = {}
 
 # Whisper يعالج 30 ثانية بالمرة — بدون تقطيع يُقصّ أي ملف أطول بصمت.
 # الرسائل الصوتية بالواتساب توصل لدقائق، فالتقطيع ضروري لا تحسين.
@@ -48,52 +64,105 @@ _GPU_BATCH_SIZE = 16
 _CPU_BATCH_SIZE = 1
 
 
-def _get_pipeline():
-    global _asr_pipeline
-    if _asr_pipeline is None:
-        device, torch_dtype = -1, None
+def _lang_config(lang: Lang) -> tuple:
+    """يرجع (اسم الموديل، معطيات التوليد) من اختيار config المركزي."""
+    model = settings.stt_model_for(lang)
+    gen = {"task": "transcribe"}
+    if model.language:
+        gen["language"] = model.language
+    return model.repository, gen
+
+
+def _evict_idle(keep: str) -> None:
+    """يفرّغ الموديلات الخاملة قبل تحميل موديل جديد.
+
+    هذي **مو رفاهية**: تعليقات tts.py توثّق سقوطاً حقيقياً بالإنتاج سببه
+    نفاد ذاكرة الـGPU لأن vLLM يحجز أغلب VRAM على A40. الموديل العربي
+    مستثنى دائماً لأنه المسار الأكثر استعمالاً، وتفريغه يعاقب الأغلبية
+    لأجل الأقلية."""
+    ttl = settings.ku_model_idle_unload_seconds
+    if ttl <= 0:
+        return
+    now = monotonic()
+    for key in [k for k in _pipelines if k not in (keep, Lang.AR.value)]:
+        _pipe, last_used = _pipelines[key]
+        if now - last_used < ttl:
+            continue
+        del _pipelines[key]
+        logger.info("تفريغ موديل الصوت %s بعد خمول %d ثانية", key, ttl)
         try:
+            import gc
+
             import torch
 
-            if torch.cuda.is_available():
-                device, torch_dtype = 0, torch.float16
-        except ImportError:
+            gc.collect()
+            torch.cuda.empty_cache()
+        except Exception:
             pass
 
-        logger.info(
-            "تحميل موديل تحويل الصوت %s على %s (أول مرة قد تستغرق دقائق للتنزيل)...",
-            settings.whisper_model, "GPU" if device == 0 else "CPU",
-        )
-        kwargs = {
-            "model": settings.whisper_model,
-            "device": device,
-            "chunk_length_s": _CHUNK_LENGTH_S,
-            "stride_length_s": _CHUNK_OVERLAP_S,
-            "batch_size": _GPU_BATCH_SIZE if device == 0 else _CPU_BATCH_SIZE,
-        }
-        if torch_dtype is not None:
-            kwargs["torch_dtype"] = torch_dtype
-        _asr_pipeline = pipeline("automatic-speech-recognition", **kwargs)
-    return _asr_pipeline
+
+def _get_pipeline(lang: Optional[Lang] = None):
+    """يحمّل (أو يرجّع المحمَّل مسبقاً) خط الاستدلال للغة المطلوبة."""
+    lang = lang or Lang.AR
+    key = lang.value
+    if key in _pipelines:
+        pipe, _last = _pipelines[key]
+        _pipelines[key] = (pipe, monotonic())
+        return pipe
+
+    _evict_idle(keep=key)
+    model_name, _gen = _lang_config(lang)
+
+    device, torch_dtype = -1, None
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            device, torch_dtype = 0, torch.float16
+    except ImportError:
+        pass
+
+    logger.info(
+        "تحميل موديل تحويل الصوت %s (%s) على %s (أول مرة قد تستغرق دقائق للتنزيل)...",
+        model_name, key, "GPU" if device == 0 else "CPU",
+    )
+    kwargs = {
+        "model": model_name,
+        "device": device,
+        "chunk_length_s": _CHUNK_LENGTH_S,
+        "stride_length_s": _CHUNK_OVERLAP_S,
+        "batch_size": _GPU_BATCH_SIZE if device == 0 else _CPU_BATCH_SIZE,
+    }
+    if torch_dtype is not None:
+        kwargs["torch_dtype"] = torch_dtype
+    pipe = pipeline("automatic-speech-recognition", **kwargs)
+    _pipelines[key] = (pipe, monotonic())
+    return pipe
 
 
 def warmup() -> bool:
-    """يحمّل الموديل (ويشغّله على صمت قصير) عند إقلاع الخادم بدل أول طلب حقيقي.
+    """يحمّل الموديل **العربي** (ويشغّله على صمت قصير) عند إقلاع الخادم بدل
+    أول طلب حقيقي.
 
-    بدون هذا، أول رسالة صوتية يدفع صاحبها ثمن تحميل الأوزان **ونسخ نواة CUDA
-    الأولى** — عشرات الثواني تظهر للمستخدم كأنها بطء بالتحويل نفسه، بينما
-    الطلبات اللاحقة أسرع بمرّات. يرجع True إن جهز الموديل فعلاً."""
+    بدون هذا، أول رسالة صوتية يدفع صاحبها ثمن تحميل الأوزان **ونسخ نواة
+    CUDA الأولى** — عشرات الثواني تظهر للمستخدم كأنها بطء بالتحويل نفسه،
+    بينما الطلبات اللاحقة أسرع بمرّات. يرجع True إن جهز الموديل فعلاً.
+
+    ⚠️ الموديل الكردي **ما ينحمّل هنا عمداً** (تحميل كسول): تحميل موديلين
+    إضافيين عند الإقلاع يحجز VRAM دائماً ويخاطر بـOOM يسقط المسار العربي
+    الأكثر استعمالاً. ينحمّل أول ما يوصل زبون كردي فعلاً."""
     if not _TRANSFORMERS_AVAILABLE:
         return False
     try:
         import numpy as np
 
-        pipe = _get_pipeline()
+        pipe = _get_pipeline(Lang.AR)
+        _model, gen_kwargs = _lang_config(Lang.AR)
         # ثانية صمت بـ 16kHz (معدل Whisper) — تكفي لتنفيذ مسار الاستدلال كاملاً
         # وتجهيز النواة، بلا تحميل ملف من القرص.
         pipe(
             {"raw": np.zeros(16000, dtype="float32"), "sampling_rate": 16000},
-            generate_kwargs={"language": "arabic", "task": "transcribe"},
+            generate_kwargs=gen_kwargs,
         )
         logger.info("✅ موديل تحويل الصوت جاهز (تحميل مسبق مكتمل)")
         return True
@@ -104,15 +173,19 @@ def warmup() -> bool:
         return False
 
 
-def transcribe(audio_bytes: bytes) -> Optional[str]:
-    """يحوّل بايتات ملف صوتي (wav/mp3/m4a/ogg...) لنص عربي. يرجع None إذا
-    transformers غير مثبَّتة (محلياً بدون GPU) — المستدعي يقرر كيف يتعامل مع
-    الحالة هذي — وسلسلة فارغة إذا ما كان بالملف كلام مفهوم."""
+def transcribe(audio_bytes: bytes, lang: Optional[Lang] = None) -> Optional[str]:
+    """يحوّل بايتات ملف صوتي (wav/mp3/m4a/ogg...) لنص باللغة المطلوبة.
+
+    يرجع None إذا transformers غير مثبَّتة (محلياً بدون GPU) — المستدعي
+    يقرر كيف يتعامل مع الحالة هذي — وسلسلة فارغة إذا ما كان بالملف كلام
+    مفهوم.
+
+    `lang` افتراضه العربي، فأي مستدعٍ قديم يبقى يشتغل حرفياً بلا تعديل —
+    وهذا مقصود: التوسعة للكردية ما تفرض تعديل كل نقطة نداء بالمشروع دفعة
+    وحدة. انظر أعلى الملف ليش ما ينكشف من الصوت نفسه."""
     if not _TRANSFORMERS_AVAILABLE:
         return None
-    result = _get_pipeline()(
-        audio_bytes,
-        # نسخ عربي صراحةً بدل الاكتشاف التلقائي (اللي يترجم للإنجليزية أحياناً).
-        generate_kwargs={"language": "arabic", "task": "transcribe"},
-    )
+    lang = lang or Lang.AR
+    _model, gen_kwargs = _lang_config(lang)
+    result = _get_pipeline(lang)(audio_bytes, generate_kwargs=gen_kwargs)
     return (result.get("text") or "").strip()

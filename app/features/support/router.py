@@ -2,8 +2,10 @@
 """دعم العملاء: POST /support/chat — تتبع حالة الطلب برقم الطلب أو الهاتف."""
 
 import json
+import logging
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import date, timedelta
 from functools import partial
 from typing import List, Optional, Tuple
@@ -15,7 +17,7 @@ from pydantic import BaseModel, ValidationError
 from app import sessions
 from app.auth import require_support_api_key
 from app.engine import llm_engine
-from app.features.support.prompts import build_support_prompt
+from app.features.support.prompts import build_support_prompt, build_support_query_prompt
 from app.intent_router import is_pure_chitchat
 from app.order_gateway import order_status_provider
 from app.order_query import OrderQuery, PagedOrders
@@ -29,79 +31,12 @@ from app.tool_loop import (
     stream_final_answer,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/support", tags=["support"])
 
 _SESSION_PREFIX = "support:"
 _ORDER_ID_RE = re.compile(r"ORD[\s\-_]*(\d+)", re.IGNORECASE)
-
-# حالات الطلب المعروفة بالنظام، وكل صيغة يكتبها بيها الموظف. البوت **داخلي
-# للموظفين**، فسؤال «شنو الطلبات قيد التوصيل؟» استعلام تشغيلي مشروع يُجاب من
-# المصدر مباشرة — مو طلب بيانات زبون غريب.
-#
-# ليش حتمي مو للموديل: الموديل مرصود إنه يخترع معرّفات طلبات ويسند لها حالات
-# ما تطابق orders.json (گال ORD-1002 و ORD-1003 «قيد التوصيل» بينما حالتهما
-# الحقيقية «تم التسليم» و«قيد التجهيز»). قائمة طلبات مخترَعة بميزة تتبع تشغيلي
-# أسوأ من لا جواب: الموظف يتصرف على أساسها.
-# **الحالات تُشتق من orders.json وقت التشغيل، ما مكتوبة هنا.** أضف حالة جديدة
-# للبيانات (أو بدّل مزوّد الطلبات بـAPI حقيقي) وتشتغل فوراً بلا تعديل كود —
-# نفس المبدأ المطبَّق بدروع المبيعات (انظر app/guards.py).
-#
-# المكتوب أدناه **مرادفات لغوية فقط**: كيف يسمّي الموظف العراقي الحالةَ بكلامه
-# الدارج. هذي تخص اللغة لا البيانات، فتبقى ثابتة مهما تبدّلت الحالات. كل
-# مرادف يُربط بحالة حقيقية بالمطابقة النصية، فإذا ما كانت الحالة موجودة
-# بالبيانات ينسقط المرادف تلقائياً.
-_STATUS_SYNONYMS = {
-    # كلمة الموظف         : كلمة تدل على الحالة بنص الحالة نفسها
-    "بالطريق": "توصيل",
-    "طالعه": "توصيل",
-    "مشحونه": "توصيل",
-    "الشحن": "توصيل",
-    "بالمخزن": "تجهيز",
-    "التحضير": "تجهيز",
-    "مكتمله": "تسليم",
-    "مكتمل": "تسليم",
-    "مكتمة": "تسليم",
-    "منجزه": "تسليم",
-    "منجز": "تسليم",
-    "مسلمه": "تسليم",
-    "واصله": "تسليم",
-    "وصلت": "تسليم",
-    "منتهيه": "تسليم",
-    "تم توصيلها": "تسليم",
-    "توصلت": "تسليم",
-    "الغيت": "ملغي",
-    "مرفوضه": "ملغي",
-    "مرتجعه": "ملغي",
-}
-
-# أسئلة الجرد العام («كل الطلبات»، «كم طلب عدنا؟») — بلا حالة محددة.
-_LIST_ALL_WORDS = (
-    "كل الطلبات", "جميع الطلبات", "كافه الطلبات", "قائمه الطلبات",
-    "لائحه الطلبات", "كم طلب", "عدد الطلبات", "الطلبات كلها",
-)
-
-# طلب صريح لبيانات الاتصال — مشروع هنا: الموظف يحتاج رقم الزبون حتى يتصل بيه.
-_CONTACT_REQUEST_WORDS = (
-    "ارقام الهواتف", "ارقام الهاتف", "رقم الهاتف", "ارقام هواتف",
-    "رقم الموبايل", "ارقام الموبايل", "رقم التلفون", "ارقام التلفون",
-    "الهواتف", "هواتف",
-)
-
-# إشارة فترة تاريخ («من الشهر الماضي»، «من تاريخ ... لين ...») — رسالة فيها
-# رقم هاتف **و**إشارة فترة زمنية تتجاوز مسار الرد الحتمي المباشر
-# (_deterministic_status_answer يرجع كل طلبات الرقم بلا فلترة تاريخ) وتروح
-# لـ_bulk_query_answer، اللي يحسب الفترة فعلياً عبر extract_date_range
-# ويطبّقها على الرقم إذا مذكور (انظر أدناه) — رد حتمي، بلا حاجة للموديل.
-_DATE_RANGE_HINTS = (
-    "من تاريخ", "من يوم", "لين تاريخ", "لغاية", "الى تاريخ", "إلى تاريخ",
-    "الشهر الماضي", "الاسبوع الماضي", "الأسبوع الماضي", "الاسبوع اللي طاف",
-    "من الشهر", "من الاسبوع", "بين تاريخ", "خلال الفترة", "بفترة",
-)
-
-
-def _mentions_date_range(message: str) -> bool:
-    return any(h in message for h in _DATE_RANGE_HINTS)
-
 
 # تاريخ صريح بالرسالة: ISO (٢٠٢٦-٠٨-٠١) أو يوم/شهر/سنة بالعرف العراقي
 # (١/٨/٢٠٢٦). الفاصل "-" أو "/" — نفس نمط استخراج رقم الطلب/الهاتف أعلاه:
@@ -133,49 +68,55 @@ def _extract_explicit_dates(message: str) -> List[str]:
     return found
 
 
-def _resolve_relative_range(message: str, today: Optional[date] = None) -> Optional[Tuple[str, str]]:
-    """يحسب (date_from, date_to) من عبارة نسبية دارجة («الشهر الماضي»،
-    «الأسبوع الماضي»، «اليوم»، «امس»)، أو None إذا ما لگى وحدة معروفة.
+# الفترات النسبية المسموحة — **مفاتيح مغلقة، لا نصوص حرة**. النموذج يختار
+# مفتاحاً والكود يحسب التاريخين. نفس مبدأ POSTPONE_CHOICES بمكالمة التأجيل:
+# لو خلّينا النموذج يرجّع تاريخاً جاهزاً، صار عندنا تاريخ من نموذج يدخل
+# استعلاماً تشغيلياً ما نكدر نتحقق منه — بينما المفتاح نتحقق منه بسطر واحد.
+RELATIVE_RANGES = ("today", "yesterday", "last_week", "last_month", "none")
+
+
+def resolve_relative_range(key: str, today: Optional[date] = None) -> Optional[Tuple[str, str]]:
+    """يحوّل مفتاح فترة نسبية لـ(date_from, date_to) بصيغة ISO، أو None
+    للمفتاح "none" أو أي مفتاح مجهول.
 
     `today` قابلة للتمرير للاختبار (تاريخ ثابت بدل تاريخ التشغيل الفعلي)."""
     today = today or date.today()
-    normalized = normalize(message)  # توحّد الهمزات: الأسبوع/امس تصير الاسبوع/امس
 
-    if "الشهر الماضي" in normalized or "الشهر اللي طاف" in normalized:
-        first_of_this_month = today.replace(day=1)
-        last_of_prev_month = first_of_this_month - timedelta(days=1)
-        first_of_prev_month = last_of_prev_month.replace(day=1)
-        return first_of_prev_month.isoformat(), last_of_prev_month.isoformat()
-
-    if "الاسبوع الماضي" in normalized or "الاسبوع اللي طاف" in normalized:
-        # آخر ٧ أيام قبل اليوم — تعريف عملي بسيط، لا تقويم أسبوعي رسمي (السبت-الجمعة مثلاً).
+    if key == "today":
+        return today.isoformat(), today.isoformat()
+    if key == "yesterday":
+        y = today - timedelta(days=1)
+        return y.isoformat(), y.isoformat()
+    if key == "last_week":
+        # آخر ٧ أيام قبل اليوم — تعريف عملي بسيط، لا تقويم أسبوعي رسمي
+        # (السبت-الجمعة مثلاً).
         end = today - timedelta(days=1)
-        start = end - timedelta(days=6)
-        return start.isoformat(), end.isoformat()
-
-    # عمداً بلا "اليوم"/"امس" كوحدهما: كلمات عامة تنورد بأي حديث عادي
-    # («شلونك اليوم؟») بلا أي علاقة بفترة شحنات — إشارة ضعيفة جداً لوحدها
-    # (بعكس «الشهر الماضي»/«الاسبوع الماضي» أعلاه، عبارات مركّبة نادرة
-    # بالدردشة العادية). لو الموظف يريد تاريخ اليوم/أمس بالضبط، يذكره
-    # صراحة كتاريخ (ISO أو يوم/شهر/سنة) وتلتقطه _extract_explicit_dates.
+        return (end - timedelta(days=6)).isoformat(), end.isoformat()
+    if key == "last_month":
+        first_of_this_month = today.replace(day=1)
+        last_of_prev = first_of_this_month - timedelta(days=1)
+        return last_of_prev.replace(day=1).isoformat(), last_of_prev.isoformat()
     return None
 
 
-def extract_date_range(message: str) -> Optional[Tuple[str, str]]:
-    """يحسب فترة (date_from, date_to) بصيغة ISO من رسالة الموظف الخام، أو
-    None إذا ما لگى فترة واضحة — يغذّي فلترة _bulk_query_answer المحلية عبر
-    created_at_in_range (app/order_gateway.py).
+def extract_date_range(message: str, relative_key: str = "none") -> Optional[Tuple[str, str]]:
+    """يحسب فترة (date_from, date_to) بصيغة ISO — يغذّي فلترة
+    _bulk_query_answer المحلية عبر created_at_in_range (app/order_gateway.py).
 
     الترتيب: (١) تاريخان صريحان بالرسالة → أصغرهما date_from وأكبرهما
     date_to بغض النظر عن ترتيب ذكرهما. (٢) تاريخ صريح واحد بس → يُعتبر
-    يوماً واحداً. (٣) عبارة نسبية دارجة (_resolve_relative_range)."""
+    يوماً واحداً. (٣) مفتاح الفترة النسبية اللي فهمه النموذج.
+
+    التواريخ الصريحة تبقى تُستخرج بـregex لا بالنموذج: «2026-08-01» صيغة
+    لا لغة — نفس مبرر إبقاء _PHONE_RE و_ORDER_ID_RE أدناه. الفرق أن
+    «الشهر الماضي» **لغة**، وهي اللي انتقلت للنموذج."""
     explicit = _extract_explicit_dates(message)
     if len(explicit) >= 2:
         ordered = sorted(explicit)
         return ordered[0], ordered[-1]
     if len(explicit) == 1:
         return explicit[0], explicit[0]
-    return _resolve_relative_range(message)
+    return resolve_relative_range(relative_key)
 
 # أرقام الهواتف العراقية: 07XXXXXXXXX (11 خانة). الزبون يكتبها بصيغ كثيرة —
 # بأرقام عربية-هندية، بفواصل/شرطات، بمقدمة دولية (+964 / 00964 / 964) اللي
@@ -213,8 +154,8 @@ async def _list_all_cached(session_id: str, api_key: str) -> List[dict]:
 
     لم يعد يُحقن بالبرومبت (docs/fix-plan.md § المرحلة 4). مستهلكه الوحيد
     الآن اشتقاق الحالات/المندوبين الموجودين فعلاً بالبيانات (_known_statuses/
-    _known_transporters) — extract_status يستدعيها مرتين أو أكثر بكل رسالة
-    واحدة، والكاش يمتص التكرار داخل الدقيقة. يبقى لحين ما يوفّر باك اند
+    _known_transporters) — قد يحتاجهما المخطط الحي وبناء الاستعلام ضمن الرسالة
+    الواحدة، والكاش يمتص التكرار داخل الدقيقة. يبقى لحين ما يوفّر باك اند
     السستم مساراً لقائمة الحالات (العطل B9)."""
     cached = sessions.cached_orders(session_id)
     if cached is not None:
@@ -414,44 +355,146 @@ async def _known_statuses(api_key: str, session_id: str = "") -> List[str]:
     return seen
 
 
-async def extract_status(message: str, api_key: str, session_id: str = "") -> Optional[str]:
-    """يستخرج حالة الطلب المقصودة من سؤال الموظف، أو None.
+# ---------------------------------------------------------------------------
+# فهم سؤال الموظف — البديل عن جداول الكلمات المحذوفة
+# ---------------------------------------------------------------------------
+#
+# **ليش انحذفت الجداول.** كان الفهم بمطابقة نصية على قوائم مكتوبة بيد:
+# _STATUS_SYNONYMS ("مكتمله"→تسليم، "بالطريق"→توصيل…)، _COUNT_WORDS،
+# _LATEST_WORDS، _LIST_ALL_WORDS، _CONTACT_REQUEST_WORDS، _DATE_RANGE_HINTS.
+# كل صيغة مو بالقائمة تفشل بصمت وتروح لمسار الموديل العام، وكل لهجة أو لغة
+# جديدة تحتاج نسخة كاملة من الجداول.
+#
+# **والاعتراض القديم على النموذج — وكيف انحلّ.** توثيق هذا الملف كان يقول:
+# «تُحسم هنا لا بالموديل لأن الموديل يخترع معرّفات وحالات» (مرصود فعلياً:
+# گال ORD-1002 حالته "قيد التوصيل" وهي "تم التسليم"). الاعتراض صحيح تماماً
+# **لو** خلّينا النموذج يكتب حالة نصاً حراً. لكن هنا القوائم المسموحة
+# **مبنية من البيانات الحية** (_known_statuses/_known_transporters) وتُمرَّر
+# كـenum بـguided_json — فالنموذج ما يقدر فيزيائياً يرجّع حالة مو موجودة
+# بباك اند السستم، ولا اسم مندوب مخترَع.
+#
+# وهذا **أقوى** من الجداول المحذوفة: المرادفات كانت تُطابق نصياً فتقبل أي
+# صيغة قريبة، بينما الـenum قائمة مغلقة مشتقة من الحقيقة لحظة السؤال.
+#
+# ما بقي بالكود عمداً: أرقام الطلب والهاتف والتواريخ الصريحة (regex — صيغ
+# لا لغة)، وكل بناء الاستعلام والعرض والصفحات.
 
-    مصدر الحالات هو استعلام حي (`_known_statuses`) — أي حالة موجودة فعلياً
-    بباك اند السستم تُطابَق فوراً. المرادفات اللغوية (`_STATUS_SYNONYMS`)
-    تُترجم كلام الموظف الدارج («مكتمله») لكلمة موجودة بنص الحالة («تسليم»)
-    ثم تُطابق على الحالات الحقيقية — فلو ما اكو حالة فيها «تسليم» ينسقط
-    المرادف وحده.
+SUPPORT_INTENTS = (
+    "by_status",       # «شنو الطلبات قيد التوصيل؟»
+    "latest",          # «اخر طلب» — الأحدث، بحالة أو مطلقاً
+    "by_transporter",  # «مندوب فلان عنده كم طلب؟»
+    "by_date_range",   # «الشحنات من الشهر الماضي»
+    "list_all",        # «كل الطلبات» / «كم طلب عدنا؟»
+    "contacts",        # «انطيني ارقام الهواتف»
+    "none",            # مو استعلام دفتر — يروح لمسار الموديل+الأدوات
+)
 
-    نطابق الأطول أولاً: «قيد التوصيل» تحتوي «التوصيل»، ولو طابقنا الأقصر
-    أولاً كان صح بالصدفة هنا وغلط بحالات ثانية."""
-    normalized = normalize(message)
+
+@dataclass
+class SupportQuery:
+    """ما فهمه النموذج من سؤال الموظف — بعد التثبّت بجهة الخادم."""
+    intent: str
+    status: Optional[str] = None
+    transporter: Optional[str] = None
+    wants_count: bool = False
+    relative_range: str = "none"
+
+
+def build_support_query_schema(statuses: List[str], transporters: List[str]) -> dict:
+    """يبني مخطط guided_json من **البيانات الحية** لحظة السؤال.
+
+    المخطط يُبنى بكل طلب لا مرة وحدة عند الإقلاع: الحالات والمندوبين
+    يتغيرون بباك اند السستم، ومخطط مجمَّد يعني أن حالة جديدة تنضاف للنظام
+    ما يقدر النموذج يختارها — وهي بالضبط المشكلة اللي تجنّبها التصميم
+    الأصلي لما اشتق _known_statuses من البيانات بدل ما يكتبها بالكود."""
+    return {
+        "type": "object",
+        "properties": {
+            "intent": {"type": "string", "enum": list(SUPPORT_INTENTS)},
+            # "none" قيمة صريحة لا null — تبسّط الفحص وتتجنب اختلاف تعامل
+            # المولّدات المقيَّدة مع القيم الفارغة.
+            "status": {"type": "string", "enum": list(statuses) + ["none"]},
+            "transporter": {"type": "string", "enum": list(transporters) + ["none"]},
+            "wants_count": {"type": "boolean"},
+            "relative_range": {"type": "string", "enum": list(RELATIVE_RANGES)},
+        },
+        "required": ["intent", "status", "transporter", "wants_count", "relative_range"],
+        "additionalProperties": False,
+    }
+
+
+def parse_support_query(
+    raw: Optional[str], statuses: List[str], transporters: List[str],
+) -> SupportQuery:
+    """يفكّك ويتثبّت من مخرَج النموذج. أي شذوذ يسقط لـintent="none" بأمان،
+    فيروح السؤال لمسار الموديل+الأدوات العادي بدل ما يرجّع قائمة غلط.
+
+    نتثبّت رغم أن guided_json يضمن الشكل، لأن الضمانة تجي من خدمة خارجية
+    عبر الشبكة: إصدار يتغيّر، إعداد يُنسى، مسار احتياطي يشتغل بلا تقييد."""
+    if not raw:
+        return SupportQuery("none")
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("مخرَج فهم سؤال الدعم مو JSON صالح: %r", raw[:200])
+        return SupportQuery("none")
+    if not isinstance(data, dict):
+        return SupportQuery("none")
+
+    intent = data.get("intent")
+    if intent not in SUPPORT_INTENTS:
+        return SupportQuery("none")
+
+    # الحالة واسم المندوب يُقبلان **فقط** لو كانا من البيانات الحية حرفياً.
+    status = data.get("status")
+    status = status if status in statuses else None
+    transporter = data.get("transporter")
+    transporter = transporter if transporter in transporters else None
+
+    rel = data.get("relative_range")
+    rel = rel if rel in RELATIVE_RANGES else "none"
+
+    return SupportQuery(
+        intent=intent,
+        status=status,
+        transporter=transporter,
+        wants_count=bool(data.get("wants_count")),
+        relative_range=rel,
+    )
+
+
+async def understand_support_query(
+    message: str, api_key: str, history: Optional[List[dict]] = None, session_id: str = "",
+) -> SupportQuery:
+    """يحوّل سؤال الموظف الحر لاستعلام مُثبَّت عبر النموذج بمخطط مقيَّد.
+
+    `history` تُمرَّر للنموذج لفهم المتابعات: الموظف يسأل «مكتمله» ثم يوضّح
+    «المكتمله تعني التي تم توصيلها» ثم يگول «اعطني هذه الطلبات» — الرسالة
+    الأخيرة بلا سياق ما تعني شي، ومعه تعني حالة التسليم. (كان هذا يُعالَج
+    بـ_FOLLOWUP_WORDS وبحث رجعي بالتاريخ؛ النموذج يسوّيها طبيعياً.)
+
+    بلا نموذج جاهز يرجع intent="none" — الأسئلة اللي فيها رقم طلب أو هاتف
+    تبقى تشتغل محلياً لأنها تُحسم بـregex قبل الوصول هنا."""
     statuses = await _known_statuses(api_key, session_id)
-    best: Optional[tuple] = None
+    transporters = await _known_transporters(api_key, session_id)
 
-    # (١) الحالة مذكورة كما هي بالبيانات، أو جزء دالّ منها.
-    for status in statuses:
-        status_n = normalize(status)
-        candidates = [status_n] + [w for w in status_n.split() if len(w) >= 4]
-        for cand in candidates:
-            if cand in normalized and (best is None or len(cand) > best[0]):
-                best = (len(cand), status)
+    if not llm_engine.ready:
+        return SupportQuery("none")
 
-    if best:
-        return best[1]
-
-    # (٢) مرادف دارج → كلمة مفتاحية → الحالة الحقيقية اللي تحتويها.
-    for synonym, keyword in _STATUS_SYNONYMS.items():
-        if normalize(synonym) not in normalized:
-            continue
-        for status in statuses:
-            if keyword in normalize(status):
-                return status
-    return None
+    messages = build_support_query_prompt(message, history, statuses, transporters)
+    raw = await llm_engine.generate_full(
+        llm_engine.render_prompt(messages),
+        max_tokens=96,
+        # استخراج لا صياغة — نريد نفس المخرَج لنفس السؤال بكل مرة، حتى يبقى
+        # سلوك الدعم قابلاً لإعادة الإنتاج عند مراجعة أي شكوى.
+        temperature=0.0,
+        guided_json=build_support_query_schema(statuses, transporters),
+    )
+    return parse_support_query(raw, statuses, transporters)
 
 
 # «مندوب فلان عنده كم طلب؟» — عدّ/سرد الطلبات الموكَّلة لمندوب توصيل معيّن.
-# نفس فكرة extract_status/_known_statuses أعلاه بالضبط، بس مقابل حقل
+# نفس فكرة _known_statuses أعلاه بالضبط، بس مقابل حقل
 # assigned_transporter بدل status. الحقل TODO بـ
 # app/system_backend_schema.py::SystemOrder (باك اند السستم لسا ما يربط
 # assigned_transporter_id → transporters.name)، فالدالتين ترجعان قائمة/None
@@ -525,48 +568,21 @@ def _format_page(page: PagedOrders, heading: str) -> str:
 # متابعة تشير لجواب سابق بلا ما تسمّي الحالة («اعطني هذه الطلبات»، «اي هذول»).
 # بلا معالجتها كان الموظف يوضّح قصده فيسقط السؤال للموديل — وهو يرد «أبحثلك
 # هسه» بلا ما يبحث شي، لأنه ما عنده وصول للبيانات أصلاً (مرصود بلقطة إنتاج).
-_FOLLOWUP_WORDS = (
-    "هذه الطلبات", "هذي الطلبات", "هذول", "هاي الطلبات", "نفسها", "اياها",
-    "اللي گلتلك", "الي گلتلك", "نفس الطلبات", "هيه", "اي هذول",
-)
-
-# سؤال عدّ («كم طلب مكتمل؟») — الموظف يريد رقماً لا قائمة. نرجع الاثنين:
-# الرقم أولاً ثم التفصيل، حتى ما يضطر يعد بنفسه.
-_COUNT_WORDS = ("كم", "شكد", "عدد", "چم")
-
-# سؤال عن الأحدث («اخر طلب»). ترتيب orders.json هو ترتيب الإدخال، فالأخير
-# أحدثها — نفس ما راح يرجّعه ORDER BY created_at DESC بالنظام الحقيقي.
-_LATEST_WORDS = ("اخر طلب", "آخر طلب", "احدث طلب", "أحدث طلب", "اخر الطلبات", "آخر الطلبات")
-
-
 async def _bulk_query_answer(
-    message: str, api_key: str, history: Optional[List[dict]] = None, session_id: str = ""
+    message: str, api_key: str, query: "SupportQuery", session_id: str = "",
 ) -> Optional[str]:
     """يجاوب أسئلة الموظف التشغيلية عن دفتر الطلبات — باستعلام حي مباشر (أو
     كاش الجلسة لجلب القائمة الكاملة، انظر _list_all_cached).
 
-    البوت داخلي للشركة، فهذي استعلامات شغل مشروعة مو تسريب بيانات. تُحسم هنا
-    لا بالموديل لأن الموديل يخترع معرّفات وحالات (انظر _STATUS_SYNONYMS).
+    البوت داخلي للشركة، فهذي استعلامات شغل مشروعة مو تسريب بيانات.
 
-    `history` تُستعمل لفهم المتابعات: الموظف يسأل «مكتمله» ثم يوضّح «المكتمله
-    تعني التي تم توصيلها» ثم يگول «اعطني هذه الطلبات» — الرسالة الأخيرة بلا
-    سياق ما تعني شي، ومعه تعني حالة التسليم."""
-    normalized = normalize(message)
-
-    status = await extract_status(message, api_key, session_id)
-
-    # ما بالرسالة حالة صريحة؟ إذا كانت متابعة، ندوّر الحالة برسائل الموظف
-    # السابقة — الأحدث أولاً.
-    if not status and history and any(w in normalized for w in _FOLLOWUP_WORDS):
-        for past in reversed([m for m in history if m.get("role") == "user"]):
-            status = await extract_status(past.get("content", ""), api_key, session_id)
-            if status:
-                break
-
-    wants_count = any(w in normalized for w in _COUNT_WORDS)
+    `query` وصلت مُثبَّتة من understand_support_query: النموذج فهم **اللغة**
+    وحوّلها لحقول، وكل حقل تحقّق إنه من البيانات الحية. من هنا فصاعداً ما
+    اكو نموذج — بناء الاستعلام والعدّ والعرض كلها بالكود."""
+    status = query.status
 
     # «اخر طلب» — الأحدث، بحالة معيّنة أو مطلقاً.
-    if any(w in normalized for w in _LATEST_WORDS):
+    if query.intent == "latest":
         orders = (
             await order_status_provider.search_by_status(status, api_key)
             if status
@@ -580,8 +596,8 @@ async def _bulk_query_answer(
     # أسئلة الجرد تصير عدّاً حقيقياً (count_for_query — COUNT بالخادم لو دعمه)
     # بدل جلب-ثم-len(): استعلام ينقل آلاف السجلات يتحوّل لرقم واحد (العطل
     # B9). والقوائم تُقصّ بـ_MAX_LISTED مع إعلان العدد الكلي (العطل B8).
-    if status:
-        if wants_count:
+    if query.intent == "by_status" and status:
+        if query.wants_count:
             total = await order_status_provider.count_for_query(OrderQuery(status=status), api_key)
             return f"عدد الطلبات بحالة «{status}»: {total}."
         page = await order_status_provider.search(
@@ -589,39 +605,38 @@ async def _bulk_query_answer(
         )
         return _format_page(page, f"الطلبات {status}")
 
-    # «مندوب فلان عنده كم طلب؟» — يقابل extract_transporter فوق extract_status.
-    # ماكو فلتر مندوب بـOrderQuery (باك اند السستم ما يبحث بيه)، فالفلترة
-    # محلية على الدفتر المخزَّن — لكن العرض مسقَّف بنفس _MAX_LISTED.
-    transporter = await extract_transporter(message, api_key, session_id)
-    if transporter:
+    # «مندوب فلان عنده كم طلب؟» — ماكو فلتر مندوب بـOrderQuery (باك اند
+    # السستم ما يبحث بيه)، فالفلترة محلية على الدفتر المخزَّن — لكن العرض
+    # مسقَّف بنفس _MAX_LISTED.
+    if query.intent == "by_transporter" and query.transporter:
         orders = [
             o for o in await _list_all_cached(session_id, api_key)
-            if o.get("assigned_transporter") == transporter
+            if o.get("assigned_transporter") == query.transporter
         ]
-        if wants_count:
-            return f"عدد طلبات المندوب {transporter}: {len(orders)}."
+        if query.wants_count:
+            return f"عدد طلبات المندوب {query.transporter}: {len(orders)}."
         page = PagedOrders(orders=orders[:_MAX_LISTED], total=len(orders))
-        return _format_page(page, f"طلبات المندوب {transporter}")
+        return _format_page(page, f"طلبات المندوب {query.transporter}")
 
-    # عدّ/سرد الشحنات ضمن فترة تاريخ (تاريخ وتاريخ) — انظر extract_date_range
-    # أعلاه. إذا الرسالة فيها رقم هاتف كمان (مثلاً حالة الاستثناء اللي
-    # _deterministic_status_answer يمرّرها هنا بدل الرد المباشر)، نضيّق
-    # بالرقم فوق التاريخ حتى ما نرجّع شحنات زبائن ثانيين لموظف يسأل عن رقم
-    # معيّن بفترة معيّنة — كلاهما معياران بنفس OrderQuery.
-    date_range = extract_date_range(message)
-    if date_range:
-        date_from, date_to = date_range
-        query = OrderQuery(
-            date_from=date_from, date_to=date_to, phone=extract_phone(message), limit=_MAX_LISTED,
-        )
-        if wants_count:
-            total = await order_status_provider.count_for_query(query, api_key)
-            return f"عدد الشحنات بالفترة {date_from} - {date_to}: {total}."
-        page = await order_status_provider.search(query, api_key)
-        return _format_page(page, f"الشحنات من {date_from} لين {date_to}")
+    # عدّ/سرد الشحنات ضمن فترة تاريخ — انظر extract_date_range أعلاه. إذا
+    # الرسالة فيها رقم هاتف كمان، نضيّق بالرقم فوق التاريخ حتى ما نرجّع
+    # شحنات زبائن ثانيين لموظف يسأل عن رقم معيّن بفترة معيّنة.
+    if query.intent == "by_date_range":
+        date_range = extract_date_range(message, query.relative_range)
+        if date_range:
+            date_from, date_to = date_range
+            oq = OrderQuery(
+                date_from=date_from, date_to=date_to,
+                phone=extract_phone(message), limit=_MAX_LISTED,
+            )
+            if query.wants_count:
+                total = await order_status_provider.count_for_query(oq, api_key)
+                return f"عدد الشحنات بالفترة {date_from} - {date_to}: {total}."
+            page = await order_status_provider.search(oq, api_key)
+            return _format_page(page, f"الشحنات من {date_from} لين {date_to}")
 
-    if any(w in normalized for w in _LIST_ALL_WORDS):
-        if wants_count:
+    if query.intent == "list_all":
+        if query.wants_count:
             total = await order_status_provider.count_for_query(OrderQuery(), api_key)
             return f"عدد الطلبات الكلي: {total}."
         page = await order_status_provider.search(OrderQuery(limit=_MAX_LISTED), api_key)
@@ -629,7 +644,7 @@ async def _bulk_query_answer(
 
     # طلب أرقام هواتف بلا حالة محددة: نعطي الطلبات بأرقامها — القائمة
     # أصلاً تحمل الهاتف بكل سطر.
-    if any(w in normalized for w in _CONTACT_REQUEST_WORDS):
+    if query.intent == "contacts":
         page = await order_status_provider.search(OrderQuery(limit=_MAX_LISTED), api_key)
         return _format_page(page, "أرقام هواتف الطلبات")
 
@@ -648,11 +663,10 @@ async def _deterministic_status_answer(
     يومين») — hallucination خطير بميزة دعم. يرجع None إذا الرسالة ما فيها
     معرّف، فتذهب لمسار الموديل+الأدوات.
 
-    ⚠️ استثناء عمدي: رقم هاتف مع إشارة فترة تاريخ («من الشهر الماضي») يتجاوز
-    الرد المباشر أعلاه (اللي يرجع كل طلبات الرقم بلا فلترة) ويروح لـ
-    _bulk_query_answer، اللي يحسب الفترة فعلياً (extract_date_range) ويفلتر
-    بالرقم **و**التاريخ معاً — حتمي بالكامل، بلا حاجة للموديل هنا. انظر
-    _mentions_date_range.
+    ⚠️ استثناء عمدي: رقم هاتف مع فترة تاريخ («من الشهر الماضي») يتجاوز الرد
+    المباشر أعلاه (اللي يرجع كل طلبات الرقم بلا فلترة) ويروح لـ
+    _bulk_query_answer، اللي يحسب الفترة (extract_date_range) ويفلتر بالرقم
+    **و**التاريخ معاً. النموذج يميّز الحالتين، والحساب يبقى بالكود.
 
     `tool_calls` (اختياري): لو تم تمرير قائمة، نلحق فيها سجل الاستعلام
     (نفس شكل tool_calls اللي يبنيها run_with_tools) حتى لو الرد جا من هذا
@@ -672,8 +686,14 @@ async def _deterministic_status_answer(
             return _format_order_reply(order, mention_order_id=True)
         return "والله ماكو طلب بهذا الرقم عدنا — دقّق الرقم وگلي مرة ثانية."
 
+    # ما بيها رقم طلب: نفهم السؤال مرة وحدة هنا، ونمرّر الفهم لـ
+    # _bulk_query_answer بدل ما نستدعي النموذج مرتين. هذا أيضاً يحسم سؤال
+    # الهاتف أدناه: «طلبات هذا الرقم من الشهر الماضي» لازم تنفلتر بالتاريخ
+    # كمان، و«طلبات هذا الرقم» ترجع كلها — والفرق بينهما لغة، ما regex.
+    query = await understand_support_query(message, api_key, history, session_id)
+
     phone = extract_phone(message)
-    if phone and not _mentions_date_range(message):
+    if phone and query.intent != "by_date_range":
         orders = await order_status_provider.search_by_phone(phone, api_key)
         if tool_calls is not None:
             tool_calls.append({
@@ -687,7 +707,7 @@ async def _deterministic_status_answer(
     # ما بيها معرّف محدد: يمكن استعلام تشغيلي عن دفتر الطلبات (حالة/جرد).
     # يجي **بعد** المعرّفات عمداً: «حالة ORD-1001» لازم ترجع ذاك الطلب بالذات،
     # مو قائمة كل الطلبات اللي بنفس حالته.
-    return await _bulk_query_answer(message, api_key, history, session_id)
+    return await _bulk_query_answer(message, api_key, query, session_id)
 
 
 def _attempted_lookup_args(message: str) -> Optional[dict]:

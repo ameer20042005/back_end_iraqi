@@ -92,9 +92,8 @@ class SystemOrder(BaseModel):
     (`catalog.sell_items`).
 
     `status` نص عربي أو مرادفه — القيمة تُقرأ حرفياً كما هي من باك اند
-    السستم، بلا قائمة ثابتة هنا (نفس مبدأ app/guards.py؛ المرادفات اللغوية
-    بـ app/features/support/router.py::_STATUS_SYNONYMS تُطابَق ضدها وقت
-    التشغيل، لا تُفترض هنا).
+    السستم، بلا قائمة ثابتة هنا. النموذج يطابق صياغة الموظف بقيم الحالات
+    الحية التي يجلبها راوتر الدعم، فلا تُفترض أي مرادفات في هذا العقد.
 
     `current_stage`/`current_step`/`step_entered_at`/`assigned_transporter`
     (**TODO — باك اند السستم لا يرجّعها بعد**): تقابل جدول سير عمل الطلب

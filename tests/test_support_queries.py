@@ -23,13 +23,18 @@ order_status_provider الحقيقي (HttpOrderStatusProvider) يستعلم با
 
 import asyncio
 from collections import defaultdict
+from datetime import date
 
 import pytest
 
 from app.features.support import router as support_router
 from app.features.support.router import (
+    RELATIVE_RANGES,
+    SupportQuery,
     _deterministic_status_answer,
-    extract_status,
+    build_support_query_schema,
+    parse_support_query,
+    resolve_relative_range,
 )
 from app.order_gateway import OrderStatusProvider, filter_orders_locally
 from app.order_query import PagedOrders
@@ -122,45 +127,79 @@ _BY_STATUS = {
 _ALL_IDS = ["ORD-1001", "ORD-1002", "ORD-1003", "ORD-1004", "ORD-1005", "ORD-1006"]
 
 
-def _answer(message, history=None):
-    return asyncio.run(_deterministic_status_answer(message, _API_KEY, history))
+def _answer(message, query=None, history=None):
+    """يشغّل المسار الحتمي مع **فهم مزروع** بدل استدعاء النموذج.
+
+    بعد نقل الفهم اللغوي للنموذج، صار هذا الملف يختبر النصف الحتمي وحده:
+    بناء الاستعلام، الفلترة، العدّ، التسقيف، والعرض. وهذا بالضبط النصف اللي
+    انكسر بعطل اللقطة الأصلي (رجّع طلبات بحالة غير المطلوبة) — الفهم نفسه
+    ما كان السبب يوماً.
+
+    `query=None` تعني "النموذج ما فهم استعلام دفتر" (intent="none")، وهي
+    الحالة اللي لازم تنسحب لمسار الموديل+الأدوات."""
+    q = query or SupportQuery("none")
+
+    async def _fake_understand(message, api_key, history=None, session_id=""):
+        return q
+
+    original = support_router.understand_support_query
+    support_router.understand_support_query = _fake_understand
+    try:
+        return asyncio.run(_deterministic_status_answer(message, _API_KEY, history))
+    finally:
+        support_router.understand_support_query = original
 
 
 # --------------------------------------------------------------------------
-# ١. استخراج الحالة من صيغ الموظف
+# ١. حدّ الأمان: المخطط والتثبّت من مخرَج النموذج
 # --------------------------------------------------------------------------
-
-STATUS_CASES = [
-    ("صيغة اللقطة الحقيقية", "الطلبات القيد التوصيل", "قيد التوصيل"),
-    ("سؤال مباشر", "شنو الطلبات الي قيد التوصيل؟", "قيد التوصيل"),
-    ("اختصار", "شوفلي التوصيل", "قيد التوصيل"),
-    ("مرادف عامي", "الطلبات اللي بالطريق", "قيد التوصيل"),
-    ("تجهيز", "شنو الطلبات قيد التجهيز", "قيد التجهيز"),
-    ("تسليم", "الطلبات تم التسليم", "تم التسليم"),
-    ("مسلمة عامي", "الطلبات المسلمه", "تم التسليم"),
-    ("مكتملة — لقطة الإنتاج", "مكتمله", "تم التسليم"),
-    ("مكتملة بالتاء المربوطة", "الطلبات المكتملة", "تم التسليم"),
-    ("منجزة", "شنو الطلبات المنجزه", "تم التسليم"),
-    ("تم توصيلها", "الطلبات التي تم توصيلها", "تم التسليم"),
-    ("ملغي", "شنو الطلبات الملغيه", "ملغي"),
-    ("مرتجعة", "الطلبات المرتجعه", "ملغي"),
-    ("بالمخزن", "الطلبات بالمخزن", "قيد التجهيز"),
-    ("بلا حالة", "شلونكم اليوم", None),
-]
+#
+# صيغ الموظف الدارجة («مكتمله»، «بالطريق»، «منجزه»…) كانت تُختبر هنا مقابل
+# جدول _STATUS_SYNONYMS. الجدول انحذف وصار النموذج يفهمها، فاختبارها بوحدات
+# pytest ما عاد ممكناً — تقييم نموذج يحتاج مجموعة تقييم منفصلة.
+#
+# وما بقي قابلاً للاختبار حتمياً هو **الأهم**: أن النموذج ما يقدر يخترع
+# حالة ولا مندوب، وأن أي شذوذ بمخرجه ينسحب بأمان.
 
 
-@pytest.mark.parametrize(
-    "description,message,expected",
-    STATUS_CASES,
-    ids=[c[0] for c in STATUS_CASES],
-)
-def test_extract_status(description, message, expected):
-    assert asyncio.run(extract_status(message, _API_KEY)) == expected, description
+def test_schema_enum_is_built_from_live_data():
+    """القوائم المسموحة تُبنى من البيانات الحية لا من الكود — حالة جديدة
+    بباك اند السستم تصير متاحة فوراً، وحالة مخترعة مستحيلة أصلاً."""
+    schema = build_support_query_schema(["قيد التوصيل", "تم التسليم"], ["أحمد"])
+    assert schema["properties"]["status"]["enum"] == ["قيد التوصيل", "تم التسليم", "none"]
+    assert schema["properties"]["transporter"]["enum"] == ["أحمد", "none"]
+    assert schema["additionalProperties"] is False
 
 
-def test_longest_alias_wins():
-    """«قيد التوصيل» تحتوي «التوصيل» — لازم نطابق الأطول لا الأقصر."""
-    assert asyncio.run(extract_status("الطلبات قيد التوصيل", _API_KEY)) == "قيد التوصيل"
+def test_invented_status_is_rejected_by_the_server():
+    """هذا هو الحارس ضد عطل اللقطة الأصلي بصيغته الجديدة: لو رجّع النموذج
+    حالة مو موجودة بالبيانات، الخادم يسقطها بدل ما يبني عليها استعلاماً."""
+    raw = '{"intent": "by_status", "status": "قيد المراجعة", "transporter": "none",'          ' "wants_count": false, "relative_range": "none"}'
+    q = parse_support_query(raw, ["قيد التوصيل"], [])
+    assert q.status is None
+
+
+def test_invented_transporter_is_rejected():
+    raw = '{"intent": "by_transporter", "status": "none", "transporter": "شخص وهمي",'          ' "wants_count": false, "relative_range": "none"}'
+    assert parse_support_query(raw, [], ["أحمد"]).transporter is None
+
+
+def test_malformed_model_output_degrades_to_none():
+    """أي شذوذ يسقط لـintent="none" فيروح السؤال لمسار الموديل+الأدوات
+    العادي — لا استثناء، ولا قائمة طلبات غلط."""
+    for raw in ("ليس JSON", "", None, "[]", '{"intent": "hack"}', "{}"):
+        assert parse_support_query(raw, ["قيد التوصيل"], []).intent == "none", raw
+
+
+def test_relative_ranges_are_computed_by_code_not_the_model():
+    """النموذج يختار مفتاحاً والكود يحسب التاريخين — فما يقدر يرجّع تاريخاً
+    مخترَعاً يدخل استعلاماً تشغيلياً."""
+    today = date(2026, 9, 14)
+    assert resolve_relative_range("last_month", today) == ("2026-08-01", "2026-08-31")
+    assert resolve_relative_range("last_week", today) == ("2026-09-07", "2026-09-13")
+    assert resolve_relative_range("yesterday", today) == ("2026-09-13", "2026-09-13")
+    assert resolve_relative_range("none", today) is None
+    assert set(RELATIVE_RANGES) == {"today", "yesterday", "last_week", "last_month", "none"}
 
 
 def test_statuses_are_derived_from_data_not_hardcoded():
@@ -184,7 +223,7 @@ def test_statuses_are_derived_from_data_not_hardcoded():
 )
 def test_status_query_lists_exactly_the_right_orders(status, expected_ids):
     """كل طلب بهذي الحالة يُذكر، وولا طلب بغيرها يتسلل للرد."""
-    answer = _answer(f"شنو الطلبات {status}؟")
+    answer = _answer(f"شنو الطلبات {status}؟", SupportQuery("by_status", status=status))
     assert answer is not None, "السؤال راح للموديل بدل ما ينحسم حتمياً"
     for oid in expected_ids:
         assert oid in answer, f"{status}: الطلب {oid} ناقص من الرد"
@@ -195,14 +234,14 @@ def test_status_query_lists_exactly_the_right_orders(status, expected_ids):
 def test_the_exact_screenshot_bug_is_fixed():
     """العطل الأصلي حرفياً: «الطلبات القيد التوصيل» كان يرجّع ORD-1002
     و ORD-1003 (حالتهما تم التسليم/قيد التجهيز)."""
-    answer = _answer("الطلبات القيد التوصيل")
+    answer = _answer("الطلبات القيد التوصيل", SupportQuery("by_status", status="قيد التوصيل"))
     assert "ORD-1001" in answer and "ORD-1005" in answer
     assert "ORD-1002" not in answer, "رجعت هلوسة اللقطة الأصلية"
     assert "ORD-1003" not in answer, "رجعت هلوسة اللقطة الأصلية"
 
 
 def test_list_all_covers_every_order():
-    answer = _answer("اعطني كل الطلبات")
+    answer = _answer("اعطني كل الطلبات", SupportQuery("list_all"))
     assert answer is not None
     for oid in _ALL_IDS:
         assert oid in answer
@@ -210,7 +249,7 @@ def test_list_all_covers_every_order():
 
 def test_phones_are_shown_to_staff():
     """البوت داخلي: أرقام الهواتف بيانات شغل الموظف، تُعرض ما تُحجب."""
-    answer = _answer("اعطني ارقام الهواتف")
+    answer = _answer("اعطني ارقام الهواتف", SupportQuery("contacts"))
     assert answer is not None
     for phone in ("07701234567", "07709876543", "07512223344"):
         assert phone in answer
@@ -218,7 +257,7 @@ def test_phones_are_shown_to_staff():
 
 def test_status_query_includes_phone_for_contact():
     """قائمة الحالة تحمل رقم الهاتف حتى يگدر الموظف يتصل بالزبون."""
-    answer = _answer("شنو الطلبات قيد التوصيل؟")
+    answer = _answer("شنو الطلبات قيد التوصيل؟", SupportQuery("by_status", status="قيد التوصيل"))
     assert "07701234567" in answer and "07801119988" in answer
 
 
@@ -227,7 +266,8 @@ def test_unknown_status_never_invents_orders():
 
     ملاحظة: «المرتجعه» **مو** مثالاً صالحاً هنا — هي مرادف دارج لـ«ملغي»
     وترجع ORD-1006 عن حق. نستعمل حالة ما تقابل أي شي بالبيانات."""
-    answer = _answer("شنو الطلبات المعلقه بانتظار الدفع؟")
+    # النموذج ما لگى حالة مطابقة بالبيانات → status=None (انظر parse_support_query).
+    answer = _answer("شنو الطلبات المعلقه بانتظار الدفع؟", SupportQuery("by_status", status=None))
     if answer is not None:
         for oid in _ALL_IDS:
             assert oid not in answer
@@ -277,7 +317,7 @@ def test_followup_resolves_status_from_history():
         {"role": "user", "content": "المكتمله تعني التي تم توصيلها"},
         {"role": "assistant", "content": "..."},
     ]
-    answer = _answer("اعطني هذه الطلبات", history)
+    answer = _answer("اعطني هذه الطلبات", SupportQuery("by_status", status="تم التسليم"), history)
     assert answer is not None, "المتابعة لسه تروح للموديل"
     assert "ORD-1002" in answer and "ORD-1004" in answer
     assert "ORD-1001" not in answer
@@ -291,7 +331,7 @@ def test_followup_without_history_still_reaches_model():
 def test_count_question_answers_with_a_number():
     """«كم طلب مكتمل؟» يريد رقماً — عدّ حقيقي (count_for_query) بلا جلب
     القائمة (docs/fix-plan.md § المرحلة 6): الرد رقم واحد، لا ألف سطر."""
-    answer = _answer("كم طلب مكتمل؟")
+    answer = _answer("كم طلب مكتمل؟", SupportQuery("by_status", status="تم التسليم", wants_count=True))
     assert answer is not None
     assert "2" in answer
     assert "ORD-" not in answer
@@ -305,19 +345,19 @@ def test_long_status_list_is_capped_and_announces_total(monkeypatch):
         for i in range(25)
     ]
     monkeypatch.setattr(support_router, "order_status_provider", _FakeOrderStatusProvider(many))
-    answer = _answer("شنو الطلبات قيد التوصيل؟")
+    answer = _answer("شنو الطلبات قيد التوصيل؟", SupportQuery("by_status", status="قيد التوصيل"))
     assert answer.count("ORD-2") == 20
     assert "من أصل 25" in answer
 
 
 def test_count_all_orders():
-    answer = _answer("كم طلب عدنا بالمجموع؟")
+    answer = _answer("كم طلب عدنا بالمجموع؟", SupportQuery("list_all", wants_count=True))
     assert answer is not None and "6" in answer.split("\n")[0]
 
 
 def test_latest_order():
     """«اخر طلب» — الأحدث وحده، مو القائمة كلها."""
-    answer = _answer("شنو اخر طلب؟")
+    answer = _answer("شنو اخر طلب؟", SupportQuery("latest"))
     assert answer is not None
     assert "ORD-1006" in answer
     assert "ORD-1001" not in answer
@@ -325,6 +365,6 @@ def test_latest_order():
 
 def test_latest_order_with_status():
     """«اخر طلب قيد التوصيل» — الأحدث ضمن تلك الحالة."""
-    answer = _answer("اخر طلب قيد التوصيل")
+    answer = _answer("اخر طلب قيد التوصيل", SupportQuery("latest", status="قيد التوصيل"))
     assert answer is not None
     assert "ORD-1005" in answer and "ORD-1001" not in answer

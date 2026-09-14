@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # بسياق الطلب الحالي ليُمرَّر كما هو لباك اند السستم.
 #
 # ليش ContextVar مو معامل دالة؟ لأن api_key يمر عبر ~10 دوال بين الراوتر
-# وorder_gateway (_deterministic_status_answer، _list_all_cached، extract_status،
+# وorder_gateway (_deterministic_status_answer، _list_all_cached، بناء الاستعلام،
 # ...). إضافة معامل ثانٍ لكل واحدة تعديل واسع بلا فائدة. ContextVar يُضبط مرة
 # وحدة بأول الراوتر ويُقرأ بـ auth_headers() تحت — وكل طلب asyncio عنده نسخته
 # المعزولة من السياق، فما يتسرّب توكن مستخدم لطلب مستخدم ثانٍ. نفس فكرة

@@ -6,12 +6,41 @@
 المستثنى بـ .gitignore، أو Environment Variables بإعدادات RunPod Pod).
 """
 
+from dataclasses import dataclass
 from typing import Optional
 
-from pydantic_settings import BaseSettings
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.lang import Lang
+
+
+@dataclass(frozen=True)
+class SpeechToTextModel:
+    """نقطة تفتيش STT ومعطيات توليدها الخاصة باللغة."""
+
+    repository: str
+    language: Optional[str]
+
+
+@dataclass(frozen=True)
+class TextToSpeechModel:
+    """كل ملفات موديل F5-TTS اللازمة للغة واحدة، من مصدر إعداد واحد."""
+
+    repository: str
+    checkpoint: str
+    vocabulary: str
+    reference_audio: str
+    reference_text: str
+    reference_assets_on_hub: bool
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
     # الموديل — النسخة المدموجة (base + LoRA اللهجة العراقية مندمجين بالأوزان
     # فعلياً عبر merge_and_unload، انظر gemma_iraqi_merge_fixed.ipynb) تشمل
     # أبراج الرؤية/الصوت كاملة. يخدمه خادم vLLM منفصل (انظر start.sh) —
@@ -121,19 +150,108 @@ class Settings(BaseSettings):
     # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
     # مفرَّغ عليه اللهجة العربية (نموذج transformers عادي، يعمل بعملية FastAPI
     # نفسها — الصوت لا يمر بخادم vLLM)
-    whisper_model: str = "ayoubkirouane/whisper-small-ar"
+    whisper_model_ar: str = Field(
+        "ayoubkirouane/whisper-small-ar",
+        validation_alias=AliasChoices("WHISPER_MODEL_AR", "WHISPER_MODEL"),
+    )
+    whisper_language_ar: str = Field("arabic", validation_alias="WHISPER_LANGUAGE_AR")
 
     # تحويل نص لصوت باللهجة العراقية (app/features/voice_followup/tts.py) —
     # يخدم مسار المتابعة الصوتية للطلبات (سؤال الزبون سبب الرفض/الإلغاء
     # صوتياً). موديل transformers منفصل عن Whisper، يعيش بعملية FastAPI نفسها.
-    tts_model: str = "ameer4wisam/Habibi-TTS-IRQ"
+    tts_model_ar: str = Field(
+        "ameer4wisam/Habibi-TTS-IRQ",
+        validation_alias=AliasChoices("TTS_MODEL_AR", "TTS_MODEL"),
+    )
+    tts_ckpt_ar: str = Field("Specialized/IRQ/model_100000.safetensors", validation_alias="TTS_CKPT_AR")
+    tts_vocab_ar: str = Field("Specialized/IRQ/vocab.txt", validation_alias="TTS_VOCAB_AR")
+    tts_ref_audio_ar: str = Field("reference/IRQ.wav", validation_alias="TTS_REF_AUDIO_AR")
+    tts_ref_text_ar: str = Field(
+        "اا ما نقدر ناخذ وقت أكثر، ااا لأنه شروط كلش يحتاجلها وقت.",
+        validation_alias="TTS_REF_TEXT_AR",
+    )
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        # حقول قديمة بملفات .env سابقة (lora_path, dtype, quantization...)
-        # ما عادت مستخدمة بعد الانتقال لخادم vLLM — نتجاهلها بدل كسر الإقلاع.
-        extra = "ignore"
+    # -----------------------------------------------------------------
+    # الكردية السورانية (ckb)
+    # -----------------------------------------------------------------
+    #
+    # الشرح: القرار المعماري هنا أن الكردية **ما تحتاج كود جديد** — تحتاج
+    # نقاط تفتيش (checkpoints) ثانية بنفس الواجهتين الموجودتين:
+    #   · STT: موديل transformers عادي، نفس pipeline("automatic-speech-
+    #     recognition") المستعمل بالعربي (transcribe.py).
+    #   · TTS: موديل F5-TTS، نفس واجهة F5TTS(ckpt_file=..., vocab_file=...)
+    #     المستعملة بالعربي (voice_followup/tts.py) — بما فيها حاجته لصوت
+    #     مرجعي ونصّه الحرفي (zero-shot voice cloning).
+    # لذلك التفعيل = تعبئة هذي القيم + توجيه حسب اللغة، لا مسار مستقل.
+
+    # الشرح: Whisper الأصلي **ما يدعم الكردية إطلاقاً** — لغاته الـ99 ماكو
+    # بيها ku ولا ckb، وموديلنا العربي الحالي مفرَّغ على العربية وحدها.
+    # فلازم نقطة تفتيش مفرَّغة على السوراني. القيمة أدناه مفرَّغة من
+    # openai/whisper-small (نفس حجم موديلنا العربي) بمعدل خطأ كلمات ~24%.
+    #
+    whisper_model_ku: str = Field(
+        "roshna-omer/whisper-small-Kurdish-Sorani", validation_alias="WHISPER_MODEL_KU",
+    )
+
+    # الشرح: مهمة التوليد للموديل الكردي. **ما نمرر language="arabic"** كما
+    # بالعربي: الموديل مفرَّغ على الكردي، وفرض رمز لغة ثانية عليه يخرّب
+    # مخرجه. None تعني "خلّي إعدادات التوليد المحفوظة بالموديل نفسه تقرر"
+    # — وهي الصيغة الصحيحة لموديل مفرَّغ على لغة خارج قائمة Whisper.
+    whisper_language_ku: Optional[str] = Field(None, validation_alias="WHISPER_LANGUAGE_KU")
+
+    # الشرح: موديل TTS الكردي — F5-TTS مثل العربي بالضبط، من مبادرة
+    # TTS4All. المستودع فيه ثلاثة أصوات (audiobook-female / audiobook-male
+    # / studio-male). نختار **الأنثوي** لأن شخصية المتابعة الصوتية "صباح"
+    # أنثى (انظر SABAH_SYSTEM_PROMPT)، وتبديل جنس الصوت بين العربي والكردي
+    # يخلي نفس الموظفة تبدو شخصين مختلفين.
+    #
+    tts_model_ku: str = Field("aranemini/central-kurdish-tts", validation_alias="TTS_MODEL_KU")
+    tts_ckpt_ku: str = Field("model-audiobook-female.pt", validation_alias="TTS_CKPT_KU")
+    tts_vocab_ku: str = Field("vocab.txt", validation_alias="TTS_VOCAB_KU")
+
+    # الشرح: F5-TTS يحتاج صوتاً مرجعياً + نصّه الحرفي لكل توليد. المستودع
+    # الكردي يرفق زوجاً جاهزاً لكل صوت، فننزّلهما منه بدل ما نسجّل مرجعاً
+    # بأنفسنا — خلافاً للعربي اللي مرجعه ملف محلي (reference/IRQ.wav).
+    # النص ما نكتبه هنا: نقرأه من الملف المرافق وقت التحميل، لأن أي فرق
+    # حرف واحد بينه وبين التسجيل يخرّب جودة الاستنساخ.
+    #
+    tts_ref_audio_ku: str = Field("prompt-audiobook-female.wav", validation_alias="TTS_REF_AUDIO_KU")
+    tts_ref_text_ku: str = Field("prompt-audiobook-female.txt", validation_alias="TTS_REF_TEXT_KU")
+
+    # الشرح: تحميل كسول — الموديلات الكردية **ما تنحمّل عند الإقلاع**
+    # (خلافاً للعربية، انظر warmup بـmain.py). السبب تشغيلي موثّق بالكود
+    # نفسه: vLLM يحجز أغلب VRAM على A40، وتحميل موديلين إضافيين دائماً
+    # يخاطر بـOOM يسقط المسار العربي (الأكثر استعمالاً) عشان مسار أقل
+    # استعمالاً. يُحمّل الموديل أول ما يوصل زبون كردي فعلاً، ويُفرَّغ بعد
+    # خمول بهذي المدة لإرجاع الذاكرة. صفر = لا تفريغ أبداً.
+    #
+    ku_model_idle_unload_seconds: int = 900
+
+    def stt_model_for(self, language: Lang) -> SpeechToTextModel:
+        """اختيار STT المركزي؛ ما تبقى شروط موديلات موزعة بالراوترات."""
+        if language is Lang.KU:
+            return SpeechToTextModel(self.whisper_model_ku, self.whisper_language_ku)
+        return SpeechToTextModel(self.whisper_model_ar, self.whisper_language_ar)
+
+    def tts_model_for(self, language: Lang) -> TextToSpeechModel:
+        """اختيار TTS المركزي، شاملاً كل ملفات نقطة التفتيش والمرجع."""
+        if language is Lang.KU:
+            return TextToSpeechModel(
+                self.tts_model_ku,
+                self.tts_ckpt_ku,
+                self.tts_vocab_ku,
+                self.tts_ref_audio_ku,
+                self.tts_ref_text_ku,
+                True,
+            )
+        return TextToSpeechModel(
+            self.tts_model_ar,
+            self.tts_ckpt_ar,
+            self.tts_vocab_ar,
+            self.tts_ref_audio_ar,
+            self.tts_ref_text_ar,
+            False,
+        )
 
 
 settings = Settings()

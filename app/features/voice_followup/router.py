@@ -18,8 +18,8 @@ POST /voice_followup/respond.
 
 بلا أي تخزين محلي دائم — الجلسة تعيش بالذاكرة فقط بين الخطوتين 2 و3."""
 
+import json
 import logging
-import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import List, Optional
@@ -36,14 +36,16 @@ from app.features.voice_followup import session_store, tts
 from app.features.voice_followup.gateway import voice_followup_submitter, voice_postpone_submitter
 from app.features.voice_followup.prompts import (
     option_label,
+    option_label_ku,
     build_analyze_prompt,
     build_ask_prompt,
     build_postpone_dialogue_prompt,
     build_postpone_opening_prompt,
+    build_turn_understanding_prompt,
 )
 from app.features.voice_followup.schema import VoiceFollowupOrderRequest
+from app.lang import Lang, detect
 from app.system_backend import SystemBackendUnavailable
-from app.text_norm import normalize
 
 logger = logging.getLogger(__name__)
 
@@ -93,68 +95,31 @@ def _synthesize_or_503(text: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# مكالمة "صباح" (تأجيل التسليم) — منطق حتمي كامل، بلا أي قرار من النموذج
+# مكالمة "صباح" (تأجيل التسليم) — القرار حتمي، والفهم اللغوي بالنموذج
 # ---------------------------------------------------------------------------
 #
-# نفس فلسفة app/features/support/router.py: كل قرار (هل الرد يطابق خياراً؟
-# هل انتهت المكالمة؟) يُحسب هنا بمطابقة نصية صريحة على بيانات حقيقية (رد
-# الزبون المحوَّل من صوت لنص) — النموذج (انظر _generate_postpone_reply
-# أدناه) يُستدعى فقط بعد ما يُحسم القرار، ليصوغه بلهجة عراقية طبيعية.
+# **الخط الفاصل، بثلاث طبقات:**
+#
+#   ١. الفهم (نموذج): رد الزبون الحر — بأي لغة أو لهجة — يتحوّل لمفتاح من
+#      POSTPONE_CHOICES عبر TURN_SCHEMA. مقيَّد بـguided_json، فالنموذج ما
+#      يقدر يرجّع قيمة خارج الجدول أصلاً.
+#   ٢. التثبّت (كود): parse_understanding ترفض أي شذوذ وتسقطه لـ"unclear"،
+#      لأن ضمانة الطبقة ١ تجي من خدمة خارجية عبر الشبكة.
+#   ٣. القرار والحساب (كود): decide_turn تقرر مسار المكالمة،
+#      وresolve_postpone_date تحسب التاريخ. **ولا واحدة منهما تستدعي نموذجاً.**
+#
+# فما ينحفظ بباك اند السستم يبقى ناتج حساب حتمي على مفتاح من جدول مغلق.
+#
+# كانت الطبقة ١ مطابقة نصية على جداول كلمات ثابتة ("باجر"، "بكره"،
+# "اسبوعين"، أسماء الأيام…). انحذفت لسببين: أي صيغة مو بالقائمة تُعتبر
+# رداً غامضاً حتى لو معناها واضح، وكل لغة جديدة تحتاج نسخة كاملة من
+# الجداول بتطبيع خاص بحروفها.
 
 # الحد الأقصى للتأجيل. سقف ضروري لسببين: يمنع قيماً عبثية ("أجلها سنة")
 # تصير التزاماً تشغيلياً ما ننفّذه، ويمنع خطأ Whisper برقم منطوق (يسمع
 # "أربعين" بدل "أربعة") من تحويل مكالمة عادية لتأجيل مستحيل. أي رقم فوقه
 # يُعامَل كخيار غير مسموح، فتعيد صباح السؤال بدل ما تثبّته.
 MAX_POSTPONE_DAYS = 14
-
-# ترتيب الفحص أدناه **حرج**: نطابق الأطول والأخص أولاً. "بعد غدا" تحتوي
-# "غدا"، و"يومين" تحتوي "يوم"، و"اسبوعين" تحتوي "اسبوع" — فحص المختصر
-# أولاً يصنّف الطويل غلط. نفس تحذير extract_status بـsupport/router.py.
-#
-# كل القوائم مكتوبة بصيغتها **المطبَّعة** (بعد normalize): بلا همزات ولا
-# تاء مربوطة ("غداً"→"غدا"، "بكرة"→"بكره"، "أسبوع"→"اسبوع").
-_DAY_AFTER_TOMORROW_WORDS = ("بعد غدا", "بعد باچر", "بعد بكره", "عقب غدا", "عقب باچر")
-_TWO_DAYS_WORDS = ("يومين", "بيومين")
-_TWO_WEEKS_WORDS = ("اسبوعين", "باسبوعين")
-_ONE_WEEK_WORDS = ("اسبوع", "باسبوع", "جمعه")
-_TOMORROW_WORDS = ("غدا", "باچر", "بكره", "بجر")
-_ONE_DAY_WORDS = ("بعد يوم", "يوم واحد", "بيوم")
-_TODAY_WORDS = ("اليوم", "هسه", "نفس اليوم", "هذا اليوم", "الحين", "هلحين")
-
-# أسماء الأعداد المنطوقة — Whisper يكتبها حروفاً لا أرقاماً غالباً
-# ("بعد أربعة أيام" لا "بعد 4 أيام")، فلازم نغطي الشكلين.
-_NUMBER_WORDS = {
-    "يوم": 1, "يومين": 2, "ثلاث": 3, "ثلاثه": 3, "تلاث": 3, "تلاته": 3,
-    "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6,
-    "سبع": 7, "سبعه": 7, "ثمان": 8, "ثمانيه": 8, "تمن": 8, "تمانيه": 8,
-    "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10,
-}
-
-# أيام الأسبوع → ترقيم date.weekday() (الاثنين=0 … الأحد=6).
-_WEEKDAYS = {
-    "الاثنين": 0, "الاثنين": 0, "الثلاثاء": 1, "الاربعاء": 2,
-    "الخميس": 3, "الجمعه": 4, "السبت": 5, "الاحد": 6,
-    "اثنين": 0, "ثلاثاء": 1, "اربعاء": 2, "خميس": 3, "جمعه": 4, "سبت": 5, "احد": 6,
-}
-
-# "بعد ٤ ايام" / "بعد 4 يوم" — الأرقام وصلت إنجليزية بعد normalize.
-_DIGIT_DAYS_RE = re.compile(r"\b(\d{1,2})\s*(?:ايام|يوم|يوما)\b")
-# "بعد اربع ايام" — عدد منطوق متبوعاً بكلمة أيام.
-_WORD_DAYS_RE = re.compile(r"\b(" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r")\s*(?:ايام|يوم|يوما)\b")
-
-_YES_WORDS = ("نعم", "ايوه", "ايه", "اي", "تمام", "زين", "موافق", "صح", "اوكي")
-_NO_WORDS = ("لا", "كلا", "ماريد", "ما اريد", "تراجعت", "غيرها", "بديل")
-
-# رقم غلط / شخص غير مقصود — أولوية قصوى بغض النظر عن حالة المكالمة (انظر
-# decide_turn أدناه): تُقفل المكالمة فوراً بلا محاولة متابعة الموضوع.
-_WRONG_NUMBER_HINTS = ("مو طلبي", "رقم غلط", "غلط الرقم", "منو تريد", "ماعندي طلب", "خطا الرقم", "غلط رقم")
-
-
-def _contains_word(normalized: str, words: "tuple[str, ...]") -> bool:
-    """مطابقة بحدود كلمة (\\b) — يمنع مطابقة كاذبة لكلمات قصيرة مثل "لا"
-    داخل كلمة أطول ("لازم")، خلافاً لفحص substring بسيط."""
-    return any(re.search(rf"\b{re.escape(w)}\b", normalized) for w in words)
-
 
 def _days_choice(days: int) -> Optional[str]:
     """يحوّل عدد أيام لمفتاح خيار، أو None لو تجاوز السقف أو كان سالباً.
@@ -164,79 +129,102 @@ def _days_choice(days: int) -> Optional[str]:
     return "today" if days == 0 else f"plus_{days}"
 
 
-def extract_postpone_choice(message: str) -> Optional[str]:
-    """يستخرج خيار التأجيل من رد الزبون الحر (المحوَّل من صوت لنص).
-
-    الصيغ المدعومة:
-      - اليوم / هسه            → "today"
-      - غدا / باچر / بكره      → "plus_1"
-      - بعد غدا / بعد يومين    → "plus_2"
-      - بعد N أيام (رقماً أو حروفاً، لين MAX_POSTPONE_DAYS) → "plus_N"
-      - أسبوع / أسبوعين        → "plus_7" / "plus_14"
-      - اسم يوم بالأسبوع       → "weekday_D" (يُحسَب تاريخه لاحقاً)
-
-    يرجع None لرد غامض، أو موعد خارج السقف — وكلاهما يقود صباح لإعادة
-    السؤال بدل الحسم (انظر decide_turn).
-
-    ليش "weekday_D" ما ينحسب هنا لتاريخ مباشرة؟ لأن الحساب يحتاج تاريخ
-    اليوم، وتثبيته لحظة الاستخراج يخلي الدالة غير قابلة للاختبار بتاريخ
-    ثابت — نأجّله لـresolve_postpone_date اللي تستقبل `today` صراحة.
-    """
-    normalized = normalize(message)
-
-    # 1) بعد غد — قبل "غدا" وقبل الأرقام، لأنها تحتوي "غدا" حرفياً.
-    if any(w in normalized for w in _DAY_AFTER_TOMORROW_WORDS):
-        return "plus_2"
-
-    # 2) أسبوعان ثم أسبوع — "اسبوعين" تحتوي "اسبوع".
-    if any(w in normalized for w in _TWO_WEEKS_WORDS):
-        return _days_choice(14)
-
-    # 3) عدد صريح بالأرقام، ثم عدد منطوق حروفاً. يسبق باقي الكلمات لأن
-    #    "بعد يومين" تُطابق هنا برقم 2 بنفس النتيجة، بينما "بعد اربع ايام"
-    #    ما تطابق أي كلمة ثابتة.
-    m = _DIGIT_DAYS_RE.search(normalized)
-    if m:
-        return _days_choice(int(m.group(1)))
-    m = _WORD_DAYS_RE.search(normalized)
-    if m:
-        return _days_choice(_NUMBER_WORDS[m.group(1)])
-
-    # 4) يومان بصيغته المجردة ("خليها يومين").
-    if any(w in normalized for w in _TWO_DAYS_WORDS):
-        return "plus_2"
-
-    # 5) أسبوع مجرد. "جمعه" تعني أسبوعاً بالعراقي، وتُفحص هنا لا مع أيام
-    #    الأسبوع أدناه لأن "بعد جمعه" أشيع من قصد يوم الجمعة نفسه.
-    if any(w in normalized for w in _ONE_WEEK_WORDS):
-        return _days_choice(7)
-
-    # 6) اسم يوم بالأسبوع — بعد الأرقام حتى "بعد اربع ايام" ما تنسحب هنا.
-    for name, weekday in _WEEKDAYS.items():
-        if re.search(rf"\b{re.escape(name)}\b", normalized):
-            return f"weekday_{weekday}"
-
-    # 7) غداً ثم "بعد يوم" ثم اليوم — الأقصر والأعم آخراً.
-    if any(w in normalized for w in _TOMORROW_WORDS):
-        return "plus_1"
-    if any(w in normalized for w in _ONE_DAY_WORDS):
-        return "plus_1"
-    if any(w in normalized for w in _TODAY_WORDS):
-        return "today"
-    return None
+# ---------------------------------------------------------------------------
+# جدول الخيارات — المصدر الحتمي الوحيد للمواعيد
+# ---------------------------------------------------------------------------
+#
+# **ليش مولَّد بالكود لا مكتوب يدوياً؟** لأنه مشتق من MAX_POSTPONE_DAYS.
+# كتابته يدوياً يعني أن رفع السقف من 14 لـ21 يتطلب تذكّر تعديل قائمة ثانية
+# بمكان ثاني — وأول مرة تُنسى، النموذج يصير يقدر يرجّع خياراً ما يقدر
+# الخادم يحسبه. التوليد يخلي السقف رقماً واحداً يحكم المنظومة كلها.
+#
+# القيم هي **مفاتيح** لا تواريخ: "plus_3" لا "2026-09-17". التاريخ الفعلي
+# يُحسب بالخادم عبر resolve_postpone_date وقت التثبيت فقط. هذا الفصل هو
+# بيت القصيد — النموذج يختار من قائمة مغلقة، والحساب يبقى حتمياً بالكود.
+def _all_postpone_choices() -> "tuple[str, ...]":
+    """كل مفاتيح التأجيل المسموحة: اليوم + كل عدد أيام لين السقف + أيام
+    الأسبوع السبعة (بترقيم date.weekday(): الاثنين=0 … الأحد=6)."""
+    return (
+        ("today",)
+        + tuple(f"plus_{d}" for d in range(1, MAX_POSTPONE_DAYS + 1))
+        + tuple(f"weekday_{d}" for d in range(7))
+    )
 
 
-def _is_yes(message: str) -> bool:
-    return _contains_word(normalize(message), _YES_WORDS)
+POSTPONE_CHOICES = _all_postpone_choices()
 
 
-def _is_no(message: str) -> bool:
-    return _contains_word(normalize(message), _NO_WORDS)
+# الشرح: مخطط الاستخراج المقيَّد (guided_json). vLLM يفرضه **فعلياً** وقت
+# التوليد لا كتلميح بالبرومبت (انظر app/engine.py::_build_body) — يعني
+# النموذج **ما يقدر فيزيائياً** يرجّع قيمة خارج هذي القوائم.
+#
+# وهذا بالضبط الجواب على الخطر اللي يخلق لما ننقل الفهم للنموذج: السقف
+# (MAX_POSTPONE_DAYS) ما عاد يُفحص بشرط `if` ممكن ننساه — صار **مفروضاً
+# بالمخطط نفسه**، لأن "plus_20" أصلاً مو من ضمن القيم المولَّدة أعلاه.
+# النموذج يفهم اللغة، والحدود تبقى بالكود.
+#
+# intent مفصول عن choice عمداً: الزبون ممكن يگول "نعم" (تأكيد) أو "لا"
+# (تراجع) أو "رقم غلط" — وكلها ليست خيار موعد. دمجهما بحقل واحد يخلط
+# معنيين مختلفين ويجبر الخادم يخمّن أيهما قُصد.
+TURN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "intent": {
+            "type": "string",
+            "enum": ["choice", "yes", "no", "wrong_number", "unclear"],
+        },
+        "choice": {
+            "type": "string",
+            # "none" قيمة صريحة لا null — تبسّط الفحص بجهة الخادم وتتجنب
+            # اختلاف تعامل المولّدات المقيَّدة مع القيم الفارغة.
+            "enum": list(POSTPONE_CHOICES) + ["none"],
+        },
+    },
+    "required": ["intent", "choice"],
+    "additionalProperties": False,
+}
 
 
-def _is_wrong_number(message: str) -> bool:
-    normalized = normalize(message)
-    return any(h in normalized for h in _WRONG_NUMBER_HINTS)
+@dataclass
+class Understanding:
+    """ما فهمه النموذج من دور الزبون — بعد التثبّت بجهة الخادم."""
+    intent: str
+    choice: Optional[str]
+
+
+# الشرح: التثبّت بجهة الخادم. **ليش نتثبّت رغم أن guided_json يضمن الشكل؟**
+# لأن الضمانة تجي من خدمة خارجية (vLLM) عبر الشبكة: إصدار يتغيّر، إعداد
+# يُنسى، مسار احتياطي يشتغل بلا تقييد — وأي واحدة منها تحوّل الضمانة
+# لافتراض صامت. الكلفة سطور معدودة، والبديل تاريخ غلط ينحفظ بباك اند
+# السستم. أي رد ما يمر بالفحص يُعامَل كـ"unclear"، فتعيد صباح السؤال
+# بدل ما تثبّت شي مشكوك فيه — نفس سلوك الرد الغامض بالضبط.
+def parse_understanding(raw: Optional[str]) -> Understanding:
+    """يفكّك ويتثبّت من مخرَج النموذج. أي شذوذ يسقط لـ"unclear" بأمان."""
+    if not raw:
+        return Understanding("unclear", None)
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("مخرَج فهم الدور مو JSON صالح: %r", raw[:200])
+        return Understanding("unclear", None)
+
+    if not isinstance(data, dict):
+        return Understanding("unclear", None)
+
+    intent = data.get("intent")
+    if intent not in ("choice", "yes", "no", "wrong_number", "unclear"):
+        return Understanding("unclear", None)
+
+    choice = data.get("choice")
+    # الخيار يُقبل **فقط** مع intent="choice"، و**فقط** لو كان من الجدول
+    # المولَّد أعلاه. رد يقول intent="yes" ويحمل choice يُتجاهل خياره —
+    # ما نخلي النموذج يثبّت موعداً بدور مخصَّص للتأكيد.
+    if intent == "choice" and choice in POSTPONE_CHOICES:
+        return Understanding("choice", choice)
+    if intent == "choice":
+        logger.warning("خيار تأجيل خارج الجدول المسموح: %r", choice)
+        return Understanding("unclear", None)
+    return Understanding(intent, None)
 
 
 def postpone_days(choice: str, today: Optional[date] = None) -> int:
@@ -275,25 +263,30 @@ class TurnDecision:
 
 
 def decide_turn(
-    state: str, transcript: str, chosen: Optional[str], clarify_attempts: int,
+    state: str, understanding: Understanding, chosen: Optional[str], clarify_attempts: int,
 ) -> TurnDecision:
-    """يقرر حتمياً — بلا أي نموذج — كيف تتطور مكالمة التأجيل بهذا الدور،
-    بناءً على حالة الجلسة الحالية ورد الزبون. هذي الدالة **المصدر الوحيد**
-    لمنطق المكالمة (انظر شرح الفلسفة بأعلى هذا القسم).
+    """يقرر **حتمياً** كيف تتطور مكالمة التأجيل بهذا الدور.
 
-    رد فاضي (سكوت تام — transcribe يرجّع "" لو ماكو كلام مفهوم بالملف) يمر
-    بنفس مسار "clarify"/"reconfirm" أدناه بلا معالجة خاصة: extract_postpone_
-    choice/_is_yes/_is_no كلها ترجع سلباً لنص فاضٍ، فتنسحب تلقائياً لتوجيه
-    "أعيدي السؤال" بدل ما تحتاج فرعاً منفصلاً — يطابق قسم "حالات خاصة"
-    بـSABAH_SYSTEM_PROMPT (سكوت ورد غامض يُعامَلان بنفس التصعيد: محاولة
-    وحدة ثانية، وإلا إغلاق بأدب)."""
-    if _is_wrong_number(transcript):
+    ⚠️ **ما تغيّر وما بقي، بعد نقل الفهم للنموذج:**
+      · تغيّر: مصدر الفهم. كانت تستقبل نص الزبون الخام وتطابقه بجداول
+        كلمات (باجر/بكره/غدا…)، صارت تستقبل Understanding مُثبَّتة.
+      · بقي: **كل منطق المكالمة**. عدّ المحاولات، متى تُقفل، متى ترجع
+        لسؤال الموعد، أولوية الرقم الغلط — كلها هنا بالكود كما كانت،
+        بلا أي نموذج. النموذج يفهم اللغة فقط؛ لا يقرر ولا يحسب تاريخاً.
+
+    وهذا يحافظ على الوعد المكتوب بأعلى هذا القسم: ما ينحفظ بباك اند
+    السستم يبقى ناتج حساب حتمي (resolve_postpone_date) على مفتاح من
+    جدول مغلق — لا نصاً حراً من نموذج.
+
+    رد فاضٍ (سكوت تام) يوصل كـintent="unclear" فينسحب لمسار إعادة السؤال
+    بلا فرع خاص — يطابق قسم "حالات خاصة" بـSABAH_SYSTEM_PROMPT."""
+    if understanding.intent == "wrong_number":
         return TurnDecision("closed", "wrong_number", chosen, clarify_attempts)
 
     if state == "awaiting_confirmation":
-        if _is_yes(transcript):
+        if understanding.intent == "yes":
             return TurnDecision("closed", "confirmed", chosen, clarify_attempts)
-        if _is_no(transcript):
+        if understanding.intent == "no":
             return TurnDecision("awaiting_choice", "reset_choice", None, 0)
         attempts = clarify_attempts + 1
         if attempts > session_store.MAX_CLARIFY_ATTEMPTS:
@@ -301,9 +294,8 @@ def decide_turn(
         return TurnDecision("awaiting_confirmation", "reconfirm", chosen, attempts)
 
     # state == "awaiting_choice" (الحالة الافتراضية عند بدء المكالمة)
-    choice = extract_postpone_choice(transcript)
-    if choice:
-        return TurnDecision("awaiting_confirmation", "confirm_choice", choice, 0)
+    if understanding.intent == "choice" and understanding.choice:
+        return TurnDecision("awaiting_confirmation", "confirm_choice", understanding.choice, 0)
     attempts = clarify_attempts + 1
     if attempts > session_store.MAX_CLARIFY_ATTEMPTS:
         return TurnDecision("closed", "give_up", chosen, attempts)
@@ -315,7 +307,7 @@ def decide_turn(
 # الحالة لو الموديل غير جاهز (بلا GPU محلياً) — نفس فلسفة _FALLBACK_* أدناه.
 _CASE_NOTES = {
     "confirm_choice": "الزبون اختار {option}. أكّدي اختياره بجملة قصيرة وانتظري تأكيده (نعم/لا).",
-    "clarify": "ما وصل موعد واضح من الزبون (رد غامض، سكوت، أو موعد أبعد من أسبوعين). اسأليه بأدب يحدد موعد التسليم: اليوم، بكرة، بعد بكرة، أو أي يوم يناسبه خلال أسبوعين.",
+    "clarify": "ما وصل موعد واضح من الزبون (رد غامض، سكوت، أو موعد أبعد من أسبوعين). اسأليه بأدب يحدد موعد التسليم: اليوم، باجر، بعد باجر، أو أي يوم يناسبه خلال أسبوعين.",
     "give_up": "ما وضح اختيار الزبون رغم المحاولة. اعتذري بلطف، گولي إن فريقنا راح يعاود الاتصال، وانهي المكالمة.",
     "reset_choice": "الزبون رفض التأكيد وتراجع عن موعده. اسأليه من جديد يحدد الموعد اللي يناسبه.",
     "reconfirm": "رد الزبون على سؤال التأكيد غير واضح (احتمال سكوت أو كلام غير مفهوم). اسأليه بجملة أقصر: نعم لو لا بس.",
@@ -325,7 +317,7 @@ _CASE_NOTES = {
 
 _POSTPONE_FALLBACKS = {
     "confirm_choice": "تمام، خليها {option} إذن؟",
-    "clarify": "عذراً، ما وضحت زين. تحب توصلك اليوم، بكرة، لو أي يوم ثاني يناسبك؟",
+    "clarify": "عذراً، ما وضحت زين. تحب توصلك اليوم، باجر، لو أي يوم ثاني يناسبك؟",
     "give_up": "ما مشكلة، فريقنا راح يعاود الاتصال بعدين. تصبح على خير.",
     "reset_choice": "تمام، شنو الموعد اللي يناسبك؟",
     "reconfirm": "بس تأكد لي: نعم لو لا؟",
@@ -333,10 +325,41 @@ _POSTPONE_FALLBACKS = {
     "wrong_number": "عذراً على الإزعاج، يبدو صار خطأ بالرقم. تصبح على خير.",
 }
 
+# نفس الردود، لكن للسوراني. هذا مهم تحديداً بمسار fallback: قاعدة البرومبت
+# تضمن لغة الرد عندما النموذج جاهز، أما هنا فالخادم هو الذي يكتب النص بنفسه.
+# نبقي القاموسين منفصلين بدلاً من ترجمة آلية حتى تكون العبارة المنطوقة طبيعية
+# وتبقى خالية تماماً من العربية عند الزبون الكردي.
+_POSTPONE_FALLBACKS_KU = {
+    "confirm_choice": "باشە، بۆ {option} دایدەنین، ڕاستە؟",
+    "clarify": "ببورە، کاتی گونجاوت ڕوون نەبوو. ئەمڕۆ، سبەینێ، یان کەی بۆت باشترە؟",
+    "give_up": "کێشە نییە، تیمەکەمان دواتر پەیوەندیت پێوە دەکات. خوات لەگەڵ.",
+    "reset_choice": "باشە، کاتێکی تر کەی بۆت گونجاوە؟",
+    "reconfirm": "تکایە تەنها بەڵێ یان نەخێر بڵێ.",
+    "confirmed": "باشە، بۆ {option} دایدەنین. سوپاس بۆ کاتت، خوات لەگەڵ.",
+    "wrong_number": "ببورە بۆ ناڕەحەتییەکە، وایە ژمارەکە هەڵەیە. خوات لەگەڵ.",
+}
+
 _FALLBACK_POSTPONE_OPENING = (
     "هلا بيك، وياك صباح من خدمة العملاء. عدنا شحنتك بانتظار التسليم، "
     "حاب تستلمها اليوم، لو تفضّل موعد ثاني يناسبك؟"
 )
+
+
+def _postpone_option_label(chosen: Optional[str], language: Lang) -> str:
+    """تسمية الموعد بنفس لغة الرد الاحتياطي، أو نص فارغ إذا ماكو موعد."""
+    if not chosen:
+        return ""
+    days = postpone_days(chosen)
+    if language is Lang.KU:
+        return option_label_ku(chosen, days)
+    return option_label(chosen, days)
+
+
+def _postpone_fallback(reply_case: str, chosen: Optional[str], language: Lang) -> str:
+    """يرجع الرد الحتمي بلغته، بما فيه تسمية الموعد المؤكَّد."""
+    label = _postpone_option_label(chosen, language)
+    fallbacks = _POSTPONE_FALLBACKS_KU if language is Lang.KU else _POSTPONE_FALLBACKS
+    return fallbacks[reply_case].format(option=label)
 
 
 async def _generate_postpone_opening(order: VoiceFollowupOrderRequest) -> str:
@@ -355,11 +378,14 @@ async def _generate_postpone_reply(
     reply_case: str,
     chosen: Optional[str],
 ) -> str:
+    # آخر عنصر بالتاريخ هو رد الزبون الذي يُجاب عنه الآن. الكشف هنا يخص
+    # fallback فقط؛ حين النموذج جاهز يرى الرد والتعليمة الموحدة بنفسه.
+    language = detect(history[-1]["content"]) if history else Lang.AR
     # التسمية تحتاج عدد الأيام لا مفتاح الخيار — و"weekday_D" ما يحمل
     # عدداً بذاته، فنحسبه بتاريخ اليوم عبر postpone_days.
-    label = option_label(chosen, postpone_days(chosen)) if chosen else ""
+    label = _postpone_option_label(chosen, language)
     directive = _CASE_NOTES[reply_case].format(option=label)
-    fallback = _POSTPONE_FALLBACKS[reply_case].format(option=label)
+    fallback = _postpone_fallback(reply_case, chosen, language)
     if not llm_engine.ready:
         return fallback
     messages = build_postpone_dialogue_prompt(order, history, directive)
@@ -456,6 +482,33 @@ async def voice_postpone_start(
     )
 
 
+async def _understand_turn(transcript: str, state: str) -> Understanding:
+    """يحوّل رد الزبون الحر لفهم مُثبَّت عبر النموذج بمخطط مقيَّد.
+
+    ⚠️ **بلا نموذج جاهز** (تشغيل محلي بلا GPU) يرجع "unclear" دائماً. هذا
+    تراجع مقصود عن السلوك السابق: المطابقة النصية المحذوفة كانت تشتغل بلا
+    نموذج، فمكالمة التأجيل كانت قابلة للاختبار محلياً كاملة. بعد نقل الفهم
+    للنموذج صار مسار المكالمة يحتاجه فعلياً — والبديل (إبقاء الجداول
+    كاحتياطي) يعيد نفس عبء الصيانة اللي انحذفت لأجله، وينتج سلوكاً مختلفاً
+    بين المحلي والإنتاج وهو أسوأ من سلوك واحد واضح.
+
+    temperature=0.0 لأن هذي مهمة استخراج لا صياغة — نريد نفس المخرَج لنفس
+    الرد بكل مرة، حتى يبقى سلوك المكالمة قابلاً لإعادة الإنتاج عند التحقيق
+    بأي شكوى زبون."""
+    if not llm_engine.ready:
+        logger.warning("النموذج غير جاهز — يُعامَل رد الزبون كغامض")
+        return Understanding("unclear", None)
+
+    messages = build_turn_understanding_prompt(transcript, state)
+    raw = await llm_engine.generate_full(
+        llm_engine.render_prompt(messages),
+        max_tokens=64,
+        temperature=0.0,
+        guided_json=TURN_SCHEMA,
+    )
+    return parse_understanding(raw)
+
+
 @router.post("/postpone/respond")
 async def voice_postpone_respond(
     session_id: str,
@@ -486,7 +539,10 @@ async def voice_postpone_respond(
     # (انظر SABAH_SYSTEM_PROMPT قسم "حالات خاصة")، تُعامَل كرد غامض عادي
     # عبر decide_turn (تعيد السؤال مرة، ثم تقفل بأدب)، لا كخطأ HTTP.
 
-    decision = decide_turn(session.state, transcript, session.chosen, session.clarify_attempts)
+    understanding = await _understand_turn(transcript, session.state)
+    decision = decide_turn(
+        session.state, understanding, session.chosen, session.clarify_attempts,
+    )
     session.history.append({"role": "user", "content": transcript})
     session.state = decision.new_state
     session.chosen = decision.chosen

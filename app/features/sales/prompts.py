@@ -15,6 +15,8 @@ from typing import Dict, List, Optional
 
 from app.context_blocks import catalog_context_block
 
+from app.lang import KURDISH_PROMPT_RULES
+
 Message = Dict[str, str]
 
 SALES_SYSTEM_PROMPT = """أنت نموذج اسمه JENI من شركة DATUM. أنت وكيل مبيعات عراقي محترف وبارع بفن الإقناع، تتحدث باللهجة العراقية بالكامل.
@@ -95,3 +97,19 @@ def build_sales_prompt(
 # build_order_extraction_prompt حُذفت مع مخططها — استخراج الطلب من المحادثة
 # يستعمل build_order_intake_prompt (برومت plane.md) بـ
 # app/features/sales/router.py::_maybe_build_order.
+
+
+# ---------------------------------------------------------------------------
+# الكردية السورانية
+# ---------------------------------------------------------------------------
+#
+# القاعدة تُلحَق بالبرومبت بدل ما تُكتب داخله، حتى تبقى بمصدر واحد
+# (app/lang.py::KURDISH_PROMPT_RULES) يخدم الميزات الأربع — أي تحسين
+# بصياغتها يوصل للكل بلا ما ننساها بميزة.
+#
+# ⚠️ لاحظ أن القاعدة تنصّ صراحة على إبقاء **أسماء المنتجات والماركات
+# حرفية كما بالكتالوج** حتى بالرد الكردي. هذا مقصود ويطابق أشد قاعدة
+# بهذا البرومبت (ممنوع ذكر اسم منتج بلا سند حرفي) — ترجمة اسم منتج
+# للكردية تكسرها بلا ما يلاحظ أحد، لأن الاسم المترجم ما راح يطابق ولا
+# سطر بالكتالوج عند أي مراجعة.
+SALES_SYSTEM_PROMPT = SALES_SYSTEM_PROMPT + KURDISH_PROMPT_RULES

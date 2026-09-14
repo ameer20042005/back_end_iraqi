@@ -157,7 +157,10 @@ guided decoding يضمن JSON صالحاً فعلياً وقت التوليد ن
 | `GPU_MEMORY_UTILIZATION` | `0.90` | نسبة VRAM لموديل vLLM + KV cache (حسب الوصفة الرسمية) |
 | `MAX_MODEL_LEN` | `10000` | أقصى طول سياق — أقصر = KV cache يتسع لطلبات متزامنة أكثر |
 | `RAG_TOP_K` | `5` | عدد وثائق RAG المسترجَعة لكل سؤال |
-| `WHISPER_MODEL` | `ayoubkirouane/whisper-small-ar` | موديل تحويل الصوت لنص العربي (`app/features/order_intake/transcribe.py`) |
+| `WHISPER_MODEL_AR` (`WHISPER_MODEL` متوافق) | `ayoubkirouane/whisper-small-ar` | موديل تحويل الصوت لنص العربي |
+| `WHISPER_MODEL_KU` | `roshna-omer/whisper-small-Kurdish-Sorani` | موديل تحويل الصوت لنص السوراني |
+| `TTS_MODEL_AR` (`TTS_MODEL` متوافق) | `ameer4wisam/Habibi-TTS-IRQ` | موديل النطق العراقي |
+| `TTS_MODEL_KU` | `aranemini/central-kurdish-tts` | موديل النطق السوراني |
 | `SYSTEM_BACKEND_BASE_URL` | `http://127.0.0.1:9000` | رابط باك اند السستم (بيانات المنتجات/الطلبات الحقيقية) — انظر § باك اند السستم أعلاه |
 | `SALES_API_KEY` / `SUPPORT_API_KEY` / `ORDERS_API_KEY` | ثابتة بـ `app/config.py` (انظر تحذير أدناه) | مفاتيح X-API-Key لكل خدمة — انظر [API.md § المصادقة](docs/API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة) |
 
@@ -169,7 +172,10 @@ guided decoding يضمن JSON صالحاً فعلياً وقت التوليد ن
 
 - **المكتبات**: `start.sh` يبني كل شي من الصفر على Ubuntu 22.04 خام بأول إقلاع — Python/pip وأدوات بناء، متطلبات FastAPI (`requirements.txt`/`requirements-gpu.txt`، بإصدارات مثبَّتة بالضبط)، `ffmpeg`/`libsndfile1`، وأخيراً vLLM nightly بدعم Gemma 4 (يجيب معه torch المتوافق تلقائياً).
 - **الموديل المدموج** (`MODEL_NAME`): ينزّله خادم vLLM من Hugging Face Hub أول إقلاع ([start.sh](start.sh))، ويُخزَّن بذاكرة التخزين المؤقت (`~/.cache/huggingface` أو `HF_HOME`) فيُعاد استخدامه بالتشغيلات اللاحقة على نفس الـ pod/volume بدون إعادة تنزيل.
-- **موديل تحويل الصوت** (`WHISPER_MODEL`): ينزّله `transformers.pipeline` تلقائياً أول استخدام لـ `/orders/create` بصوت (أول طلب أبطأ بسبب التنزيل، بعدها من الكاش). يُحمَّل على الـ GPU بنصف الدقة إن توفّر (وإلا CPU)، ويشتغل بخيط منفصل حتى ما يجمّد باقي الطلبات، مع تقطيع تلقائي كل 30 ثانية للرسائل الصوتية الطويلة.
+- **موديلات الصوت**: اختيار العربي والسوراني صار مركزياً في `app/config.py` عبر
+  `stt_model_for()` و`tts_model_for()`. ينزّل `transformers.pipeline` موديل
+  التحويل المناسب تلقائياً أول استخدام (أول طلب أبطأ بسبب التنزيل، بعدها من
+  الكاش)، ويُحمَّل على الـ GPU بنصف الدقة إن توفّر مع تقطيع تلقائي كل 30 ثانية.
 
 **خطوة لازمة قبل أول تشغيل — إعداد `HF_TOKEN`:**
 
