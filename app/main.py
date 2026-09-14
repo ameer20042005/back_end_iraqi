@@ -27,6 +27,7 @@ from app.features.sales.router import router as sales_router
 from app.features.support.router import router as support_router
 from app.features.voice_followup.router import router as voice_followup_router
 from app.features.voice_followup.tts import warmup as warmup_tts
+from app.system_backend import close_client as close_system_backend_client
 
 try:
     import torch
@@ -99,6 +100,9 @@ async def lifespan(app: FastAPI):
     warmup_task.cancel()
     tts_warmup_task.cancel()
     await llm_engine.shutdown()
+    # العميل المشترك لباك اند السستم (app/system_backend.py::get_client) —
+    # يُغلق هنا حتى تُحرَّر اتصالات keep-alive عند إيقاف الخادم.
+    await close_system_backend_client()
 
 
 app = FastAPI(

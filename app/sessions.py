@@ -5,8 +5,12 @@
 start.sh) لأنها غير مشتركة بين عدة عمليات.
 """
 
+import json
+import time
 from collections import OrderedDict, defaultdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+from app.order_query import OrderQuery
 
 _MAX_TURNS = 12  # آخر N رسالة (مستخدم + مساعد) تُرسل كسياق
 _MAX_PRODUCTS = 12  # آخر N منتج ظهر بالجلسة يبقى مرجعاً موثوقاً للدروع
@@ -16,10 +20,28 @@ _sessions: Dict[str, List[Dict[str, str]]] = defaultdict(list)
 _session_products: Dict[str, List[dict]] = defaultdict(list)
 # آخر موقع ذكره العميل بهذه الجلسة — انظر remember_location().
 _session_location: Dict[str, dict] = {}
-# كاش قائمة الطلبات الكاملة (list_all) بحدود الجلسة — انظر
-# cached_orders()/cache_orders(). يُمسح فقط عند invalidate_orders() (بعد
-# تثبيت طلب جديد) أو نهاية الجلسة نفسها؛ لا TTL زمني.
-_session_orders_cache: Dict[str, List[dict]] = {}
+
+# كاش قائمة الطلبات الكاملة (list_all) بحدود الجلسة، **بـTTL قصير** — انظر
+# cached_orders()/cache_orders(). لم يعد يُحقن بالبرومبت (docs/fix-plan.md
+# § المرحلة 4)؛ مستهلكه الوحيد الآن اشتقاق الحالات/المندوبين الموجودين
+# فعلاً بالبيانات (app/features/support/router.py::_known_statuses/
+# _known_transporters — العطل B9) لحين ما يوفّر باك اند السستم مساراً
+# لقائمة الحالات. الـTTL يعالج العطل B4 (كاش بلا حد ولا انتهاء لكل جلسة):
+# حالات الطلبات تتغيّر باستمرار بجهات أخرى، ودقيقة وحدة تكفي لامتصاص
+# الاستدعاءات المتكررة داخل الرسالة الواحدة (extract_status يُستدعى مرتين+).
+_ORDERS_TTL_SECONDS = 60
+_session_orders_cache: Dict[str, Tuple[List[dict], float]] = {}
+
+# كاش نتائج استعلامات الطلبات (أداة get_order_status) بحدود الجلسة — مفتاح
+# مشتق من معايير OrderQuery نفسها (query_cache_key). TTL قصير (60 ثانية):
+# الموظف يعيد صياغة سؤاله خلال ثوانٍ فيصيب الكاش، لكن بعد دقيقة البيانات
+# لازم تنعاد — حالة قديمة بميزة تتبع تشغيلي أسوأ من استدعاء إضافي. لاحظ
+# الفرق عن كاش الكتالوج (300 ثانية أدناه): الطلبات أسرع تغيّراً.
+# سقف 16 استعلاماً لكل جلسة (LRU): بدونه جلسة طويلة بأسئلة متنوعة تراكم
+# كاشات بلا حد — تسريب أبطأ من كاش الدفتر لكنه تسريب (العطل B4).
+_QUERY_TTL_SECONDS = 60
+_MAX_QUERY_CACHE = 16
+_session_query_cache: Dict[str, "OrderedDict[str, Tuple[dict, float]]"] = defaultdict(OrderedDict)
 
 # كاش نتائج بحث المنتجات (search_products_tool) بحدود الجلسة — مفتاح مركّب
 # (session_id + نص الاستعلام والفلاتر) لأن كل استعلام مختلف عن الآخر، خلافاً
@@ -33,14 +55,16 @@ _session_orders_cache: Dict[str, List[dict]] = {}
 _MAX_PRODUCT_SEARCH_CACHE = 24  # أقصى عدد استعلامات مختلفة تبقى بذاكرة الجلسة
 _session_product_search_cache: Dict[str, "OrderedDict[str, List[dict]]"] = defaultdict(OrderedDict)
 
-# كاش الكتالوج الكامل (list_all) بحدود الجلسة — نفس نمط _session_orders_cache
-# تماماً: قائمة واحدة كاملة، لا مفتاح استعلام. يُجلب مرة وحدة أول ما يحتاجه
-# الموديل بأي جلسة مبيعات (search_products_tool) ثم يُحقن بكل رسالة لاحقة
-# بنفس الجلسة (app/context_blocks.py::catalog_context_block عبر
-# build_sales_prompt) — الموديل نفسه يدوّر بالكتالوج الكامل بدل بحث ضيّق
-# لكل منتج. بلا TTL ولا invalidate (الكتالوج ما يتغيّر بفعل العميل، بعكس
-# دفتر الطلبات اللي يُبطَل بعد تثبيت طلب جديد).
-_session_catalog_cache: Dict[str, List[dict]] = {}
+# كاش الكتالوج الكامل (list_all) بحدود الجلسة — قائمة واحدة كاملة، لا مفتاح
+# استعلام. يُجلب مرة وحدة أول ما تحتاجه جلسة مبيعات (app/tools/products.py::
+# load_catalog) ثم يُحقن بكل رسالة لاحقة بنفس الجلسة (app/context_blocks.py::
+# catalog_context_block عبر build_sales_prompt).
+# TTL خمس دقائق (العطل B3): التبرير القديم لغياب الإبطال — «الكتالوج ما يتغيّر
+# بفعل العميل» — صحيح، لكنه يتغيّر بفعل **زبائن آخرين**: آخر قطعة تنباع بجلسة
+# ثانية، وبوتنا يظل يبيعها. 300 ثانية توازن معقول بين طزاجة المخزون وعدم
+# إعادة جلب الكتالوج بكل رسالة.
+_CATALOG_TTL_SECONDS = 300
+_session_catalog_cache: Dict[str, Tuple[List[dict], float]] = {}
 
 
 def get(session_id: str) -> List[Dict[str, str]]:
@@ -104,25 +128,60 @@ def known_location(session_id: str) -> dict:
 
 def cached_orders(session_id: str) -> Optional[List[dict]]:
     """قائمة الطلبات الكاملة (list_all) المخزَّنة بهذه الجلسة، أو None إذا
-    ما محفوظة بعد — يميّز "محفوظة وفاضية" عن "غير محفوظة أصلاً".
+    ما محفوظة بعد أو **انتهت صلاحيتها** (_ORDERS_TTL_SECONDS) — يميّز
+    "محفوظة وفاضية" عن "غير محفوظة أصلاً".
 
     السبب: _known_statuses تُستدعى من extract_status، والذي يُستدعى مرتين+
     بكل رسالة دعم واحدة (مرة للرسالة الحالية، ومرات لرسائل history عند
     المتابعة) — كل استدعاء كان يجيب *كل* الطلبات من باك اند السستم من
-    الصفر. بحدود نفس الجلسة، دفتر الطلبات ما يتغيّر بين رسالتين متتاليتين
-    من نفس الموظف، فلا داعي لإعادة الجلب إلا بعد تثبيت طلب جديد."""
-    return _session_orders_cache.get(session_id)
+    الصفر. الكاش يمتص هذا التكرار داخل الدقيقة نفسها، وبعدها يُعاد الجلب
+    لأن الدفتر يتغيّر بجهات أخرى."""
+    entry = _session_orders_cache.get(session_id)
+    if entry is None:
+        return None
+    orders, stored_at = entry
+    if time.monotonic() - stored_at > _ORDERS_TTL_SECONDS:
+        del _session_orders_cache[session_id]
+        return None
+    return orders
 
 
 def cache_orders(session_id: str, orders: List[dict]) -> None:
-    """يخزّن قائمة الطلبات الكاملة بهذه الجلسة (انظر cached_orders)."""
-    _session_orders_cache[session_id] = orders
+    """يخزّن قائمة الطلبات الكاملة بهذه الجلسة مع وقت التخزين (انظر cached_orders)."""
+    _session_orders_cache[session_id] = (orders, time.monotonic())
 
 
-def invalidate_orders(session_id: str) -> None:
-    """يمسح كاش الطلبات بهذه الجلسة — يُستدعى بعد تثبيت طلب جديد حتى لا
-    يبقى الجرد المخزَّن ناقصاً عن الواقع."""
-    _session_orders_cache.pop(session_id, None)
+def query_cache_key(query: OrderQuery) -> str:
+    """مفتاح كاش مشتق من معايير الاستعلام نفسها. sort_keys ضروري: نفس
+    المعايير بترتيب مختلف بالـdict لازم تعطي نفس المفتاح، وإلا صار الكاش
+    عديم الفائدة (إصابة صفر) بلا ما ينتبه أحد. exclude_none: غياب فلتر
+    وNone له نفس المعنى فلازم نفس المفتاح."""
+    return json.dumps(query.model_dump(exclude_none=True), sort_keys=True, ensure_ascii=False)
+
+
+def cached_query(session_id: str, key: str) -> Optional[dict]:
+    """رد أداة get_order_status لنفس المعايير بهذه الجلسة خلال آخر
+    _QUERY_TTL_SECONDS، أو None (غير محفوظ أو منتهٍ)."""
+    cache = _session_query_cache[session_id]
+    entry = cache.get(key)
+    if entry is None:
+        return None
+    payload, stored_at = entry
+    if time.monotonic() - stored_at > _QUERY_TTL_SECONDS:
+        del cache[key]
+        return None
+    cache.move_to_end(key)
+    return payload
+
+
+def cache_query(session_id: str, key: str, payload: dict) -> None:
+    """يخزّن رد أداة get_order_status لمعايير معيّنة — بحد أقصى
+    _MAX_QUERY_CACHE استعلاماً لكل جلسة، الأقدم يُطرح أولاً (LRU)."""
+    cache = _session_query_cache[session_id]
+    cache[key] = (payload, time.monotonic())
+    cache.move_to_end(key)
+    if len(cache) > _MAX_QUERY_CACHE:
+        cache.popitem(last=False)
 
 
 def cached_product_search(session_id: str, cache_key: str) -> Optional[List[dict]]:
@@ -150,14 +209,21 @@ def cache_product_search(session_id: str, cache_key: str, results: List[dict]) -
 
 
 def cached_catalog(session_id: str) -> Optional[List[dict]]:
-    """الكتالوج الكامل المخزَّن بهذه الجلسة، أو None إذا ما انجاب بعد —
-    يميّز "محفوظ وفاضي" (كتالوج حقيقي فارغ) عن "غير محفوظ أصلاً" (لسا ما
-    استُدعيت الأداة هذي الجلسة)، نفس مبدأ cached_orders أعلاه."""
-    return _session_catalog_cache.get(session_id)
+    """الكتالوج الكامل المخزَّن بهذه الجلسة، أو None إذا ما انجاب بعد أو
+    **انتهت صلاحيته** (_CATALOG_TTL_SECONDS) — يميّز "محفوظ وفاضي" (كتالوج
+    حقيقي فارغ) عن "غير محفوظ أصلاً"، نفس مبدأ cached_orders أعلاه."""
+    entry = _session_catalog_cache.get(session_id)
+    if entry is None:
+        return None
+    products, loaded_at = entry
+    if time.monotonic() - loaded_at > _CATALOG_TTL_SECONDS:
+        del _session_catalog_cache[session_id]
+        return None
+    return products
 
 
 def cache_catalog(session_id: str, products: List[dict]) -> None:
-    """يخزّن الكتالوج الكامل بهذه الجلسة (انظر cached_catalog) — استدعاء
-    وحد لكل جلسة عملياً؛ الاستدعاءات اللاحقة بـsearch_products_tool تلگى
-    الكاش مباشرة بدل إعادة الجلب."""
-    _session_catalog_cache[session_id] = products
+    """يخزّن الكتالوج الكامل بهذه الجلسة مع وقت التحميل (انظر cached_catalog)
+    — استدعاء وحد لكل جلسة عملياً ضمن الـTTL؛ الاستدعاءات اللاحقة
+    (load_catalog بـ app/tools/products.py) تلگى الكاش بدل إعادة الجلب."""
+    _session_catalog_cache[session_id] = (products, time.monotonic())

@@ -12,7 +12,8 @@ test_support_queries.py): استخراج خيار التأجيل من نص ال�
 
 from datetime import date
 
-from app.features.voice_followup.prompts import option_label
+from app.features.voice_followup.prompts import build_ask_prompt, option_label
+from app.features.voice_followup.schema import VoiceFollowupOrderRequest
 from app.features.voice_followup.router import (
     MAX_POSTPONE_DAYS,
     decide_turn,
@@ -24,6 +25,21 @@ from app.features.voice_followup.router import (
     _is_yes,
 )
 from app.features.voice_followup.session_store import MAX_CLARIFY_ATTEMPTS
+
+
+def test_followup_prompt_never_receives_customer_name():
+    """اسم الشخص يبقى خارج سياق نموذج الصوت، فلا يمكن أن ينطقه بالمكالمة."""
+    order = VoiceFollowupOrderRequest(
+        order_id="ORD-1001",
+        status="ملغي",
+        customer_name="أمير وسام",
+        items=[],
+    )
+
+    prompt_text = "\n".join(message["content"] for message in build_ask_prompt(order))
+
+    assert "أمير وسام" not in prompt_text
+    assert "ممنوع تذكر أو تخمّن أي اسم شخص" in prompt_text
 
 
 # ---------------------------------------------------------------------------

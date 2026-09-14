@@ -31,6 +31,8 @@ from app.features.support.router import (
     _deterministic_status_answer,
     extract_status,
 )
+from app.order_gateway import OrderStatusProvider, filter_orders_locally
+from app.order_query import PagedOrders
 from app.text_norm import normalize
 
 _API_KEY = "test-key"
@@ -51,9 +53,12 @@ _ORDERS = [
 ]
 
 
-class _FakeOrderStatusProvider:
+class _FakeOrderStatusProvider(OrderStatusProvider):
     """مزوّد استعلام وهمي بالذاكرة — نفس عقد OrderStatusProvider، يحمل بيانات
-    ثابتة مطابقة لـ app/data/orders.json التجريبية القديمة حرفياً."""
+    ثابتة مطابقة لـ app/data/orders.json التجريبية القديمة حرفياً.
+
+    يرث الواجهة المجرّدة فعلاً حتى يستفيد من count_for_query الملموسة، ويطبّق
+    search() بنفس الخطة البديلة للمزوّد الحقيقي (filter_orders_locally)."""
 
     def __init__(self, orders):
         self.orders = orders
@@ -77,6 +82,27 @@ class _FakeOrderStatusProvider:
 
     async def list_all(self, api_key):
         return list(self.orders)
+
+    async def search(self, query, api_key):
+        if query.status:
+            candidates = await self.search_by_status(query.status, api_key)
+        elif query.phone:
+            candidates = await self.search_by_phone(query.phone, api_key)
+        else:
+            candidates = list(self.orders)
+        matched = filter_orders_locally(candidates, query)
+        return PagedOrders(
+            orders=matched[query.offset: query.offset + query.limit],
+            total=len(matched),
+            offset=query.offset,
+        )
+
+    async def count(self, api_key, phone=None, status=None, date_from=None, date_to=None):
+        # لا عدّ بجهة "الخادم" الوهمي — count_for_query يسقط لـ search().total
+        return None
+
+    async def get_history(self, order_id, api_key):
+        return None
 
 
 @pytest.fixture(autouse=True)
@@ -263,12 +289,25 @@ def test_followup_without_history_still_reaches_model():
 
 
 def test_count_question_answers_with_a_number():
-    """«كم طلب مكتمل؟» يريد رقماً، والقائمة وحدها تخلي الموظف يعد بنفسه."""
+    """«كم طلب مكتمل؟» يريد رقماً — عدّ حقيقي (count_for_query) بلا جلب
+    القائمة (docs/fix-plan.md § المرحلة 6): الرد رقم واحد، لا ألف سطر."""
     answer = _answer("كم طلب مكتمل؟")
     assert answer is not None
-    assert "2" in answer.split("\n")[0]
-    # والتفصيل يبقى موجوداً حتى يشوف أي طلبات هي.
-    assert "ORD-1002" in answer and "ORD-1004" in answer
+    assert "2" in answer
+    assert "ORD-" not in answer
+
+
+def test_long_status_list_is_capped_and_announces_total(monkeypatch):
+    """قائمة أطول من _MAX_LISTED تُقصّ **مع إعلان العدد الكلي** — الحد لازم
+    يوصل الموظف صراحةً (العطل B8/B1)."""
+    many = [
+        {"order_id": f"ORD-2{i:03d}", "phone": "07700000000", "status": "قيد التوصيل", "items": []}
+        for i in range(25)
+    ]
+    monkeypatch.setattr(support_router, "order_status_provider", _FakeOrderStatusProvider(many))
+    answer = _answer("شنو الطلبات قيد التوصيل؟")
+    assert answer.count("ORD-2") == 20
+    assert "من أصل 25" in answer
 
 
 def test_count_all_orders():

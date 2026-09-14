@@ -54,7 +54,8 @@ from app.tool_loop import (
     run_with_tools,
     stream_final_answer,
 )
-from app.tools.products import search_products_tool
+from app.system_backend import SystemBackendUnavailable
+from app.tools.products import load_catalog, search_products_tool
 from app.vision_utils import PIL_AVAILABLE, decode_image_bytes
 
 logger = logging.getLogger(__name__)
@@ -217,6 +218,29 @@ _SAFE_REDIRECT = (
     "عذراً حبيبي، خليني أتأكدلك من التفاصيل الدقيقة قبل لا أگلك شي — "
     "تحب أدورلك عليه هسه؟"
 )
+
+# رد واضح لما يكون باك اند السستم (مصدر الكتالوج) مطفأ — بدل 500 عارية
+# (العطل A6: الدعم كان يلتقط SystemBackendUnavailable والمبيعات لا).
+_BACKEND_DOWN_ANSWER = "معذرة حبيبي، تعذّر الوصول لكتالوج المنتجات حالياً — جرّب بعد شوي."
+
+
+async def _preload_catalog(session_key: str, api_key: str, message: str, image) -> bool:
+    """يحمّل الكتالوج **استباقياً** قبل جولة الموديل (العطل B5 — فجوة الدور
+    الأول): سابقاً catalog=None بأول رسالة، والجواب يتوقف على أن يقرر الموديل
+    استدعاء search_products — سلوك موثَّق أنه غير موثوق. الآن الكتالوج محقون
+    من أول رسالة منتج، والأداة تبقى للبحث الأدق (query).
+
+    يُتجاوز بلا موديل (fallback ما يستعمل الكتالوج) وبرسالة دردشة بحتة بلا
+    صورة (ما تحتاج بيانات). ترجع False لو باك اند السستم مطفأ — المستدعي
+    يرد بـ_BACKEND_DOWN_ANSWER بدل ما يترك الموديل بلا مصدر بيانات."""
+    if not llm_engine.ready or (image is None and is_pure_chitchat(message)):
+        return True
+    try:
+        await load_catalog(api_key, session_key)
+    except SystemBackendUnavailable as exc:
+        logger.warning("تعذّر تحميل الكتالوج استباقياً (session=%s): %s", session_key, exc)
+        return False
+    return True
 
 # تعليمة تُلحَق برسالة العميل الحالية لمّا يرفق صورة منتج — انظر
 # _attach_image_to_last_message. تحيل على قواعد "المرونة بالبدائل والصور"
@@ -455,16 +479,18 @@ async def _maybe_build_order(session_key: str, api_key: str) -> Optional[OrderCo
 
 async def _run_sales_turn(
     key: str, req: SalesChatRequest, history: List[dict], api_key: str,
-    catalog: Optional[List[dict]], image=None,
+    catalog: Optional[List[dict]], image=None, catalog_total: int = 0,
 ) -> tuple:
     """يولّد رد المبيعات عبر حلقة الأدوات (search_products) ويرجع
     (answer, order_ready, engine_name, tool_calls).
 
-    `catalog`: الكتالوج الكامل المخزَّن بالجلسة قبل بداية هذا الدور (أو
-    None إذا لسا ما انحمّل) — يُحقن بالبرومبت (build_sales_prompt).
+    `catalog`: الكتالوج المخزَّن بالجلسة قبل بداية هذا الدور، مقصوصاً بسقف
+    الحقن (أو None إذا لسا ما انحمّل) — يُحقن بالبرومبت (build_sales_prompt).
+    `catalog_total`: العدد الأصلي قبل القصّ — يُعلَن للموديل لو أكبر من
+    المعروض (انظر app/context_blocks.py::catalog_context_block).
     `image`: صورة PIL مفكوكة (app/vision_utils.decode_image_bytes) إن
     أرفقها العميل هذا الدور، أو None."""
-    messages = build_sales_prompt(history, req.message, catalog=catalog)
+    messages = build_sales_prompt(history, req.message, catalog=catalog, catalog_total=catalog_total)
     multi_modal_data = {"image": image} if image is not None else None
     if image is not None:
         _attach_image_to_last_message(messages, image)
@@ -500,16 +526,24 @@ async def _complete_sales_turn(
 ) -> tuple:
     """يشغّل دور المبيعات كاملاً (توليد + بوابة الاكتمال + حفظ الجلسة + بناء
     الطلب) — مشترك بين /chat و /chat/stream حتى لا يتكرر منطق البوابة."""
+    # تحميل استباقي للكتالوج (انظر _preload_catalog) — لو باك اند السستم
+    # مطفأ نرد برسالة مفهومة ونحفظها بالجلسة بدل 500 عارية أو موديل بلا بيانات.
+    if not await _preload_catalog(key, api_key, req.message, image):
+        sessions.append(key, "user", req.message)
+        sessions.append(key, "assistant", _BACKEND_DOWN_ANSWER)
+        return _BACKEND_DOWN_ANSWER, None, "vllm", []
+
     # القصّ هنا (لا داخل sessions.cached_catalog) — الكاش نفسه يبقى كاملاً؛
     # هذا نسخة "ما يشوفه الموديل فعلياً هذا الدور" فقط، تُستخدم لكل من الحقن
     # بالبرومبت وحرّاس الأرقام/الأسماء أدناه (يجب يطابقا بعض تماماً — انظر
-    # app/context_blocks.py::cap_for_model).
-    catalog = cap_for_model(
+    # app/context_blocks.py::cap_for_model). catalog_total يوصل للبرومبت حتى
+    # يعرف الموديل أن المعروض جزئي لو انقصّ (العطل B1).
+    catalog, catalog_total = cap_for_model(
         sessions.cached_catalog(key) or [], settings.max_injected_records,
         label=f"catalog injection (session={session_id})",
     )
     answer, order_ready, engine_name, tool_calls = await _run_sales_turn(
-        key, req, history, api_key, catalog=catalog, image=image
+        key, req, history, api_key, catalog=catalog, image=image, catalog_total=catalog_total,
     )
 
     # حارسا الأرقام وأسماء المنتجات (app/guards.py) — يسبقان كل شي ويغلبان
@@ -598,12 +632,23 @@ async def sales_chat_stream(req: SalesChatRequest, api_key: str = Depends(requir
             ) + "\n\n"
             return
 
+        # نفس التحميل الاستباقي بـ_complete_sales_turn — انظر _preload_catalog.
+        if not await _preload_catalog(key, api_key, req.message, image):
+            sessions.append(key, "user", req.message)
+            sessions.append(key, "assistant", _BACKEND_DOWN_ANSWER)
+            yield f"data: {json.dumps({'delta': _BACKEND_DOWN_ANSWER}, ensure_ascii=False)}\n\n"
+            yield "data: " + json.dumps(
+                {"done": True, "session_id": session_id, "order": None, "tool_calls": []},
+                ensure_ascii=False,
+            ) + "\n\n"
+            return
+
         # نفس منطق القصّ بـ_complete_sales_turn أعلاه — انظر تعليقه.
-        catalog = cap_for_model(
+        catalog, catalog_total = cap_for_model(
             sessions.cached_catalog(key) or [], settings.max_injected_records,
             label=f"catalog injection (session={session_id})",
         )
-        messages = build_sales_prompt(history, req.message, catalog=catalog)
+        messages = build_sales_prompt(history, req.message, catalog=catalog, catalog_total=catalog_total)
         multi_modal_data = {"image": image} if image is not None else None
         if image is not None:
             _attach_image_to_last_message(messages, image)

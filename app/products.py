@@ -19,11 +19,10 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-import httpx
 from pydantic import ValidationError
 
 from app.config import settings
-from app.system_backend import request as backend_request
+from app.system_backend import get_client, request as backend_request
 from app.system_backend_schema import SystemProduct
 
 logger = logging.getLogger(__name__)
@@ -89,6 +88,15 @@ class HttpProductRepository(ProductRepository):
     def _headers(self, api_key: str) -> dict:
         return {"X-API-Key": api_key}
 
+    def _url(self, path: str) -> str:
+        # رابط كامل لا مسار نسبي: العميل المشترك (system_backend.get_client)
+        # مضبوط على settings.system_backend_base_url، والرابط الكامل يتجاوزه —
+        # فيبقى تمرير base_url مختلف للمُنشئ (اختبارات/بيئات) شغّالاً.
+        return self._base_url.rstrip("/") + path
+
+    # ماكو resp.raise_for_status() بعد الآن بأي ميثود هنا: backend_request صار
+    # يلتقط كل 4xx/5xx بنفسه ويرمي SystemBackendUnavailable برسالة عربية
+    # (العطل A5) — أي رد يرجع منه هو نجاح أو 404. انظر app/system_backend.py.
     async def search(
         self,
         query: str,
@@ -102,28 +110,24 @@ class HttpProductRepository(ProductRepository):
             params["category"] = category
         if in_stock_only:
             params["in_stock_only"] = "true"
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-            resp = await backend_request(
-                client, "GET", "/products/search",
-                params=params,
-                headers=self._headers(api_key),
-            )
-            resp.raise_for_status()
-            return _parse_products(resp.json().get("results", []))
+        resp = await backend_request(
+            get_client(), "GET", self._url("/products/search"),
+            params=params, headers=self._headers(api_key), timeout=self._timeout,
+        )
+        return _parse_products(resp.json().get("results", []))
 
     async def get_by_id(self, product_id: str, api_key: str) -> Optional[dict]:
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-            resp = await backend_request(
-                client, "GET", f"/products/{product_id}", headers=self._headers(api_key)
-            )
-            if resp.status_code == 404:
-                return None
-            resp.raise_for_status()
-            try:
-                return SystemProduct.model_validate(resp.json()).model_dump()
-            except ValidationError as exc:
-                logger.warning("منتج %s لا يطابق عقد SystemProduct: %s", product_id, exc)
-                return None
+        resp = await backend_request(
+            get_client(), "GET", self._url(f"/products/{product_id}"),
+            headers=self._headers(api_key), timeout=self._timeout,
+        )
+        if resp.status_code == 404:
+            return None
+        try:
+            return SystemProduct.model_validate(resp.json()).model_dump()
+        except ValidationError as exc:
+            logger.warning("منتج %s لا يطابق عقد SystemProduct: %s", product_id, exc)
+            return None
 
     async def list_all(self, api_key: str) -> List[dict]:
         # ماكو endpoint منفصل موثَّق بـAPI.md لكل الكتالوج (بعكس الطلبات
@@ -132,14 +136,11 @@ class HttpProductRepository(ProductRepository):
         # يرجّع باك اند السستم افتراضيه القصير (5) لو طبّق q الفارغ كاستعلام
         # عادي. عدّل هذا فقط عند توفر مسار "كل الكتالوج" الحقيقي.
         params = {"top_k": 10_000}
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-            resp = await backend_request(
-                client, "GET", "/products/search",
-                params=params,
-                headers=self._headers(api_key),
-            )
-            resp.raise_for_status()
-            return _parse_products(resp.json().get("results", []))
+        resp = await backend_request(
+            get_client(), "GET", self._url("/products/search"),
+            params=params, headers=self._headers(api_key), timeout=self._timeout,
+        )
+        return _parse_products(resp.json().get("results", []))
 
 
 product_repository: ProductRepository = HttpProductRepository()

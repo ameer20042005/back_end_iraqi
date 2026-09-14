@@ -10,17 +10,16 @@ from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app import sessions
 from app.auth import require_support_api_key
-from app.config import settings
-from app.context_blocks import cap_for_model
 from app.engine import llm_engine
 from app.features.support.prompts import build_support_prompt
 from app.intent_router import is_pure_chitchat
-from app.order_gateway import created_at_in_range, order_status_provider
-from app.system_backend import SystemBackendUnavailable
+from app.order_gateway import order_status_provider
+from app.order_query import OrderQuery, PagedOrders
+from app.system_backend import SystemBackendUnavailable, caller_auth_token
 from app.text_norm import normalize
 from app.tool_loop import (
     EXHAUSTED_FALLBACK,
@@ -190,6 +189,12 @@ _NON_DIGITS_RE = re.compile(r"\D")
 class SupportChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    # توكن JWT الخاص بالمستخدم الأصلي، يرسله jbot (الوسيط) مع كل رسالة. ما
+    # نفكّه ولا نفهمه هنا — نمرره فقط لباك اند السستم بترويسة Authorization
+    # (انظر app/system_backend.py::caller_auth_token) حتى يرجّع بيانات شركة
+    # هذا المستخدم تحديداً. اختياري: عميل يستدعي /support/chat مباشرة بلا
+    # وسيط يبقى يشتغل كما كان.
+    auth_token: Optional[str] = None
 
 
 class SupportChatResponse(BaseModel):
@@ -204,11 +209,13 @@ class SupportChatResponse(BaseModel):
 
 
 async def _list_all_cached(session_id: str, api_key: str) -> List[dict]:
-    """list_all() مع كاش بحدود الجلسة — انظر sessions.cached_orders().
+    """list_all() مع كاش بحدود الجلسة وبـTTL — انظر sessions.cached_orders().
 
-    دفتر الطلبات ما يتغيّر بين رسالتين متتاليتين من نفس الموظف، وextract_status
-    (عبر _known_statuses) يستدعي list_all مرتين أو أكثر بكل رسالة واحدة. أول
-    استدعاء بالجلسة يجيب من باك اند السستم ويخزّن؛ الباقي يقرأ من الذاكرة."""
+    لم يعد يُحقن بالبرومبت (docs/fix-plan.md § المرحلة 4). مستهلكه الوحيد
+    الآن اشتقاق الحالات/المندوبين الموجودين فعلاً بالبيانات (_known_statuses/
+    _known_transporters) — extract_status يستدعيها مرتين أو أكثر بكل رسالة
+    واحدة، والكاش يمتص التكرار داخل الدقيقة. يبقى لحين ما يوفّر باك اند
+    السستم مساراً لقائمة الحالات (العطل B9)."""
     cached = sessions.cached_orders(session_id)
     if cached is not None:
         return cached
@@ -217,44 +224,126 @@ async def _list_all_cached(session_id: str, api_key: str) -> List[dict]:
     return orders
 
 
+_QUERY_ARGS_HELP = (
+    "المسموح: phone, order_id, status, city, customer_name, date_from, date_to, "
+    "limit (1-50), offset"
+)
+
+
+def _parse_query_args(args: dict) -> OrderQuery:
+    """يبني OrderQuery من args التي أرسلها الموديل. التمرير عبر النموذج لا
+    استعمال args مباشرة: أي معامل مخترَع يُرفَض هنا (ValidationError) برسالة
+    واضحة للموديل فيصحّح نفسه بالجولة التالية — بدل ما يُتجاهَل صامتاً ويظن
+    فلتره مطبَّقاً. "all": true من البرومبت القديم يُهمَل بتسامح (كان يعني
+    "بلا معايير" وهذا هو الافتراضي أصلاً)."""
+    return OrderQuery(**{k: v for k, v in args.items() if k != "all"})
+
+
+def _invalid_args_error(exc: ValidationError) -> dict:
+    # ValidationError تُلتقط وتُرجَع كنص عربي: رد الأداة يدخل سياق الموديل،
+    # فلازم يكون مفهوماً له لا stack trace.
+    return {"error": f"معاملات غير صالحة: {exc.error_count()} حقل — {_QUERY_ARGS_HELP}"}
+
+
 async def _get_order_status_tool(args: dict, api_key: str, session_id: str = "") -> dict:
-    """أداة الموديل. تدعم أربعة استعلامات — البوت داخلي فكل البيانات متاحة.
+    """أداة الموديل — بحث مصفّح بمعايير مركّبة (app/order_query.py).
 
-    الاستعلام بالحالة والجرد كانا ناقصين، وهذا هو السبب الجذري لهلوسة الموديل:
-    كان مأموراً «لا تجاوب من عندك» بينما الأداة ترفض كل صيغة يسألها بالحالة،
-    فما بقي أمامه إلا الاختراع.
+    الموديل ليس محرك بحث؛ هو **مترجم** بين كلام الموظف والمعايير. البحث
+    نفسه يصير بالمستودع/باك اند السستم ويرجع صفحة صغيرة + العدد الكلي
+    (docs/fix-plan.md § المرحلة 3 — يعالج B1 · B2).
 
-    `api_key` تُربط بالدالة عبر functools.partial وقت التسجيل بـ
-    run_with_tools (انظر support_chat أدناه)، فما تمر بـ args التي يرسلها
-    النموذج — نفس مبدأ search_products_tool بالمبيعات.
+    الحقول بالرد مقصودة كلها:
+      showing — كم وصل فعلاً (الموديل يعدّ بصرياً بشكل رديء، نعطيه الرقم)
+      total   — كم موجود بالنظام ← الحقل الحاسم، هو إصلاح العطل B1
+      hint    — تعليمة عربية صريحة عند وجود بقية: أوامر الأداة تصل الموديل
+                كنص، والموديل مضبوط على العراقي فيمتثل لها أفضل من علم منطقي.
+    الفرق بين «ماكو طلبات لسارة» و«لگيت 10 من أصل 340 — تريد أضيّق أكثر؟».
 
-    رقم الهاتف هو معيار البحث الأساسي (يُفحص قبل order_id): الزبون يتذكره
-    دايماً بعكس رقم الطلب الداخلي، ويدعم فلترة اختيارية بفترة تاريخ
-    (date_from/date_to، ISO "YYYY-MM-DD") يحسبها الموديل من كلام الموظف
-    الدارج — انظر SUPPORT_SYSTEM_PROMPT."""
+    نفس المعايير خلال 60 ثانية بنفس الجلسة تُجاب من الكاش
+    (sessions.cached_query) — الموظف يعيد صياغة سؤاله فلا نعيد الاستعلام.
+
+    `api_key` تُربط بالدالة عبر functools.partial وقت التسجيل (_build_tools)،
+    فما تمر بـ args التي يرسلها النموذج."""
+    try:
+        query = _parse_query_args(args)
+    except ValidationError as exc:
+        return _invalid_args_error(exc)
+
+    cache_key = sessions.query_cache_key(query)
+    if session_id:
+        cached = sessions.cached_query(session_id, cache_key)
+        if cached is not None:
+            return cached
+
+    page = await order_status_provider.search(query, api_key)
+    if not page.orders:
+        result = {"found": False, "total": 0, "orders": [], "message": "ماكو طلبات مطابقة للمعايير المطلوبة"}
+    else:
+        result = {
+            "found": True,
+            "showing": len(page.orders),
+            "total": page.total,
+            "orders": page.orders,
+        }
+        if page.has_more:
+            result["hint"] = (
+                f"هذي {len(page.orders)} من أصل {page.total}. گول للموظف العدد "
+                "الكلي، ولا تدّعي إنها كل النتائج. إذا راد الباقي استدعِ الأداة "
+                f"مرة ثانية بـ offset={page.offset + len(page.orders)}."
+            )
+    if session_id:
+        sessions.cache_query(session_id, cache_key, result)
+    return result
+
+
+def _build_tools(api_key: str, session_key: str) -> dict:
+    """أدوات ميزة الدعم الثلاث، جاهزة لـrun_with_tools/run_decision_rounds.
+
+    مصدر وحيد: /chat و/chat/stream يستدعيانها، فإضافة أداة تصير بمكان واحد
+    ولا ننسى أحد المسارين (خطأ سهل جداً لما كان القاموس مكتوباً حرفياً
+    بموضعين).
+
+    api_key وsession_id يُربطان بـpartial وقت التسجيل فما يمران بـargs اللي
+    يرسلها الموديل — الموديل ما يشوف المفتاح ولا يقدر يزوّره."""
+    return {
+        "get_order_status": partial(_get_order_status_tool, api_key=api_key, session_id=session_key),
+        "count_orders": partial(_count_orders_tool, api_key=api_key, session_id=session_key),
+        "get_order_history": partial(_get_order_history_tool, api_key=api_key, session_id=session_key),
+    }
+
+
+async def _count_orders_tool(args: dict, api_key: str, session_id: str = "") -> dict:
+    """عدّ الطلبات بمعايير — «كم طلب عدنا هالشهر؟»، «كم طلب قيد التوصيل؟».
+
+    **ليش أداة منفصلة مو عدّ نتيجة get_order_status؟** لأن get_order_status
+    يرجّع صفحة وحدة، فعدّها مو العدد الكلي. الموديل ما يعرف الفرق، فلو تركناه
+    يعدّ بنفسه راح يعطي رقماً واثقاً وغلط — ونفس علّة الهلوسة القديمة: مأمور
+    «لا تجاوب من عندك» بينما ماكو أداة تجاوب، فيخترع.
+
+    بلا أي معيار = العدد الكلي (`{}` أو `{"all": true}`). نفس معايير
+    get_order_status (OrderQuery) حتى يكون العدّ والبحث بلغة وحدة للموديل؛
+    القرار "عدّ بالخادم أم محلياً" داخل order_gateway.count_for_query."""
+    try:
+        query = _parse_query_args(args)
+    except ValidationError as exc:
+        return _invalid_args_error(exc)
+    return {"count": await order_status_provider.count_for_query(query, api_key)}
+
+
+async def _get_order_history_tool(args: dict, api_key: str, session_id: str = "") -> dict:
+    """سجل مراحل طلب — «بأي مرحلة الطلب؟»، «ليش متأخر؟»، «شگد صار بالمخزن؟».
+
+    كل حدث يحمل المرحلة، ومتى دخلها الطلب، وكم ساعة بقى بيها
+    (`duration_hours`). `duration_hours = None` بآخر حدث معناها **لسا بهذي
+    المرحلة** — الموديل مأمور بالبرومبت لا يقرأها كصفر.
+
+    تحتاج `order_id` صراحةً: سجل المراحل لطلب واحد بعينه، ماكو معنى لسجل
+    مجموعة طلبات."""
     order_id = args.get("order_id")
-    phone = args.get("phone")
-    status = args.get("status")
-    if phone:
-        orders = await order_status_provider.search_by_phone(
-            str(phone), api_key,
-            date_from=args.get("date_from"), date_to=args.get("date_to"),
-        )
-        return {"orders": orders} if orders else {"error": "ماكو طلبات بهذا الرقم بالفترة المطلوبة"}
-    if order_id:
-        order = await order_status_provider.get_by_order_id(str(order_id), api_key)
-        return order or {"error": "ماكو طلب بهذا الرقم"}
-    if status:
-        orders = await order_status_provider.search_by_status(str(status), api_key)
-        return {"orders": orders} if orders else {"error": f"ماكو طلبات بحالة {status}"}
-    if args.get("all"):
-        orders = await _list_all_cached(session_id, api_key)
-        orders = cap_for_model(
-            orders, settings.max_injected_records,
-            label=f"get_order_status(all=true) (session={session_id})",
-        )
-        return {"orders": orders}
-    return {"error": "لازم تزودني برقم الطلب أو رقم الهاتف أو الحالة"}
+    if not order_id:
+        return {"error": "لازم تزودني برقم الطلب حتى أجيب مراحله"}
+    history = await order_status_provider.get_history(str(order_id), api_key)
+    return history or {"error": "ماكو سجل مراحل لهذا الطلب"}
 
 
 def _format_order_reply(order: dict, mention_order_id: bool = False) -> str:
@@ -409,13 +498,28 @@ def _format_order_line(order: dict) -> str:
     return line
 
 
-def _format_order_list(orders: List[dict], heading: str) -> str:
+def _format_order_list(orders: List[dict], heading: str, total: Optional[int] = None) -> str:
     """قائمة طلبات مبنية حتمياً من المصدر — كل معرّف وحالة بيها من
-    orders.json حرفياً، ما بيها ولا رقم من عند الموديل."""
+    البيانات حرفياً، ما بيها ولا رقم من عند الموديل. `total` (العدد الكلي
+    بالنظام) يُعرض بالعنوان لو مُرِّر، وإلا عدد المعروض."""
     if not orders:
         return f"ماكو {heading} حالياً."
     lines = "\n".join("• " + _format_order_line(o) for o in orders)
-    return f"{heading} ({len(orders)}):\n{lines}"
+    return f"{heading} ({total if total is not None else len(orders)}):\n{lines}"
+
+
+# القوائم الحتمية تُقصّ لعشرين سطراً مع ذكر العدد الكلي صراحةً (العطل B8).
+# عشرون رقم عملي: يملأ شاشة واحدة ويبقى مقروءاً. الجملة الختامية ليست
+# تجميلاً — بدونها يظن الموظف أن العشرين هي كل شيء، وهو نفس عطل الكتمان (B1)
+# الذي نصلحه بجهة الموديل. الحد لازم يُعلَن لأي مستهلك، إنساناً كان أم نموذجاً.
+_MAX_LISTED = 20
+
+
+def _format_page(page: PagedOrders, heading: str) -> str:
+    reply = _format_order_list(page.orders, heading, total=page.total)
+    if page.has_more:
+        reply += f"\n\n(معروض {len(page.orders)} من أصل {page.total} — ضيّق البحث للباقي.)"
+    return reply
 
 
 # متابعة تشير لجواب سابق بلا ما تسمّي الحالة («اعطني هذه الطلبات»، «اي هذول»).
@@ -473,68 +577,61 @@ async def _bulk_query_answer(
         heading = f"آخر طلب {status}" if status else "آخر طلب"
         return f"{heading}:\n• " + _format_order_line(orders[-1])
 
+    # أسئلة الجرد تصير عدّاً حقيقياً (count_for_query — COUNT بالخادم لو دعمه)
+    # بدل جلب-ثم-len(): استعلام ينقل آلاف السجلات يتحوّل لرقم واحد (العطل
+    # B9). والقوائم تُقصّ بـ_MAX_LISTED مع إعلان العدد الكلي (العطل B8).
     if status:
-        orders = await order_status_provider.search_by_status(status, api_key)
-        heading = f"الطلبات {status}"
         if wants_count:
-            # سؤال عدّ: الرقم أولاً — بس نلحقه بالتفصيل حتى يشوف أي طلبات هي.
-            return f"عدد الطلبات {status}: {len(orders)}.\n" + _format_order_list(
-                orders, "التفاصيل"
-            )
-        return _format_order_list(orders, heading)
+            total = await order_status_provider.count_for_query(OrderQuery(status=status), api_key)
+            return f"عدد الطلبات بحالة «{status}»: {total}."
+        page = await order_status_provider.search(
+            OrderQuery(status=status, limit=_MAX_LISTED), api_key
+        )
+        return _format_page(page, f"الطلبات {status}")
 
     # «مندوب فلان عنده كم طلب؟» — يقابل extract_transporter فوق extract_status.
-    # None دايماً لحد ما assigned_transporter يوصل من باك اند السستم (TODO)،
-    # فالفرع يرجع "ماكو طلبات لهذا المندوب" مؤقتاً — يشتغل فوراً بلا تعديل
-    # وقت ما الحقل يتربط فعلياً.
+    # ماكو فلتر مندوب بـOrderQuery (باك اند السستم ما يبحث بيه)، فالفلترة
+    # محلية على الدفتر المخزَّن — لكن العرض مسقَّف بنفس _MAX_LISTED.
     transporter = await extract_transporter(message, api_key, session_id)
     if transporter:
         orders = [
             o for o in await _list_all_cached(session_id, api_key)
             if o.get("assigned_transporter") == transporter
         ]
-        heading = f"طلبات المندوب {transporter}"
         if wants_count:
-            return f"عدد طلبات المندوب {transporter}: {len(orders)}.\n" + _format_order_list(
-                orders, "التفاصيل"
-            )
-        return _format_order_list(orders, heading)
+            return f"عدد طلبات المندوب {transporter}: {len(orders)}."
+        page = PagedOrders(orders=orders[:_MAX_LISTED], total=len(orders))
+        return _format_page(page, f"طلبات المندوب {transporter}")
 
     # عدّ/سرد الشحنات ضمن فترة تاريخ (تاريخ وتاريخ) — انظر extract_date_range
     # أعلاه. إذا الرسالة فيها رقم هاتف كمان (مثلاً حالة الاستثناء اللي
-    # _deterministic_status_answer يمرّرها هنا بدل الرد المباشر)، نفلتر
-    # بالرقم فوق فلترة التاريخ حتى ما نرجّع شحنات زبائن ثانيين لموظف يسأل
-    # عن رقم معيّن بفترة معيّنة.
+    # _deterministic_status_answer يمرّرها هنا بدل الرد المباشر)، نضيّق
+    # بالرقم فوق التاريخ حتى ما نرجّع شحنات زبائن ثانيين لموظف يسأل عن رقم
+    # معيّن بفترة معيّنة — كلاهما معياران بنفس OrderQuery.
     date_range = extract_date_range(message)
     if date_range:
         date_from, date_to = date_range
-        orders = [
-            o for o in await _list_all_cached(session_id, api_key)
-            if created_at_in_range(o.get("created_at"), date_from, date_to)
-        ]
-        phone = extract_phone(message)
-        if phone:
-            orders = [o for o in orders if o.get("phone") == phone]
-        heading = f"الشحنات من {date_from} لين {date_to}"
+        query = OrderQuery(
+            date_from=date_from, date_to=date_to, phone=extract_phone(message), limit=_MAX_LISTED,
+        )
         if wants_count:
-            return f"عدد الشحنات بالفترة {date_from} - {date_to}: {len(orders)}.\n" + _format_order_list(
-                orders, "التفاصيل"
-            )
-        return _format_order_list(orders, heading)
+            total = await order_status_provider.count_for_query(query, api_key)
+            return f"عدد الشحنات بالفترة {date_from} - {date_to}: {total}."
+        page = await order_status_provider.search(query, api_key)
+        return _format_page(page, f"الشحنات من {date_from} لين {date_to}")
 
     if any(w in normalized for w in _LIST_ALL_WORDS):
-        orders = await _list_all_cached(session_id, api_key)
         if wants_count:
-            return f"عدد الطلبات الكلي: {len(orders)}.\n" + _format_order_list(
-                orders, "التفاصيل"
-            )
-        return _format_order_list(orders, "كل الطلبات")
+            total = await order_status_provider.count_for_query(OrderQuery(), api_key)
+            return f"عدد الطلبات الكلي: {total}."
+        page = await order_status_provider.search(OrderQuery(limit=_MAX_LISTED), api_key)
+        return _format_page(page, "كل الطلبات")
 
-    # طلب أرقام هواتف بلا حالة محددة: نعطي كل الطلبات بأرقامها — القائمة
+    # طلب أرقام هواتف بلا حالة محددة: نعطي الطلبات بأرقامها — القائمة
     # أصلاً تحمل الهاتف بكل سطر.
     if any(w in normalized for w in _CONTACT_REQUEST_WORDS):
-        orders = await _list_all_cached(session_id, api_key)
-        return _format_order_list(orders, "أرقام هواتف الطلبات")
+        page = await order_status_provider.search(OrderQuery(limit=_MAX_LISTED), api_key)
+        return _format_page(page, "أرقام هواتف الطلبات")
 
     return None
 
@@ -622,6 +719,9 @@ async def _fallback_support_answer(
 
 @router.post("/chat", response_model=SupportChatResponse)
 async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_support_api_key)):
+    # يُضبط مرة وحدة هنا ويقرأه order_gateway._headers بكل نداء لباك اند السستم
+    # خلال هذا الطلب — بلا تمرير معامل إضافي عبر سلسلة الدوال.
+    caller_auth_token.set(req.auth_token)
     session_id = req.session_id or str(uuid.uuid4())
     key = _SESSION_PREFIX + session_id
     history = sessions.get(key)
@@ -655,20 +755,15 @@ async def support_chat(req: SupportChatRequest, api_key: str = Depends(require_s
         # answer رجّع None). لو كانت كمان تحية/شكر/هوية بحتة، نتجاوز
         # get_order_status كلياً بدل التعرّض لاستدعاء غير لازم (next.md §2).
         #
-        # دفتر الطلبات الكامل (_list_all_cached — نفس الكاش المستخدَم بالمسار
-        # الحتمي أعلاه، انظر cached_orders/cache_orders بـapp/sessions.py)
-        # يُحقن بالبرومبت (build_support_prompt) حتى يبحث الموديل باسم الزبون
-        # مباشرة بلا استدعاء أداة جديد كل سؤال — انظر next.md.
-        orders = cap_for_model(
-            await _list_all_cached(key, api_key), settings.max_injected_records,
-            label=f"orders injection (session={session_id})",
-        )
-        messages = build_support_prompt(history, req.message, orders=orders)
+        # ما فيه حقن لدفتر الطلبات (docs/fix-plan.md § المرحلة 4): الأدوات
+        # (_build_tools) هي مصدر البيانات الوحيد للموديل — يترجم السؤال
+        # لمعايير ويستدعي get_order_status/count_orders.
+        messages = build_support_prompt(history, req.message)
         if is_pure_chitchat(req.message):
             answer = await answer_without_tools(messages)
             tool_calls = []
         else:
-            tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key, session_id=key)}
+            tools = _build_tools(api_key, key)
             data = await run_with_tools(messages, tools=tools)
             answer = data["final_answer"]
             tool_calls = data.get("tool_calls") or []
@@ -692,11 +787,16 @@ async def support_chat_stream(req: SupportChatRequest, api_key: str = Depends(re
     /sales/chat/stream: جولة قرار مصغّرة (get_order_status) ثم جولة نص حرة
     مبثوثة. المسار الحتمي (رقم طلب/هاتف/حالة) يبقى فورياً كما هو — يُرسَل
     كدلتا واحدة لأنه أصلاً بلا زمن استدلال ينتظره العميل."""
+    caller_auth_token.set(req.auth_token)
     session_id = req.session_id or str(uuid.uuid4())
     key = _SESSION_PREFIX + session_id
     history = sessions.get(key)
 
     async def event_source():
+        # يُعاد ضبطه داخل المولّد كمان: Starlette يستهلك body_iterator بمهمة
+        # قد تكون بسياق منسوخ، فالضبط هنا يضمن بقاء التوكن مرئياً لكل
+        # استدعاء لباك اند السستم أثناء البث مهما كانت طريقة الجدولة.
+        caller_auth_token.set(req.auth_token)
         tool_calls: List[dict] = []
         try:
             deterministic = await _deterministic_status_answer(
@@ -715,13 +815,8 @@ async def support_chat_stream(req: SupportChatRequest, api_key: str = Depends(re
             answer = deterministic
             yield f"data: {json.dumps({'delta': answer}, ensure_ascii=False)}\n\n"
         elif llm_engine.ready:
-            # نفس دفتر الطلبات المحقون بمسار /chat غير المتدفق (support_chat)
-            # — انظر تعليقه هناك.
-            orders = cap_for_model(
-                await _list_all_cached(key, api_key), settings.max_injected_records,
-                label=f"orders injection (session={session_id})",
-            )
-            messages = build_support_prompt(history, req.message, orders=orders)
+            # بلا حقن لدفتر الطلبات — نفس مسار /chat غير المتدفق (support_chat).
+            messages = build_support_prompt(history, req.message)
             # نفس الراوتر المحافظ أعلاه (support_chat) — رسالة دردشة/هوية
             # بحتة تتجاوز جولة القرار كلياً (working_messages=messages بلا
             # أي رسائل أداة مضافة)، فباقي الدالة (البث الحر) يشتغل بلا أي
@@ -729,7 +824,7 @@ async def support_chat_stream(req: SupportChatRequest, api_key: str = Depends(re
             if is_pure_chitchat(req.message):
                 working_messages, tool_calls = messages, []
             else:
-                tools = {"get_order_status": partial(_get_order_status_tool, api_key=api_key, session_id=key)}
+                tools = _build_tools(api_key, key)
                 working_messages, _decision, tool_calls = await run_decision_rounds(messages, tools=tools)
 
             answer = ""

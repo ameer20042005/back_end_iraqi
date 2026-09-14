@@ -6,7 +6,7 @@
 
 import json
 import logging
-from typing import List
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -50,28 +50,38 @@ def locations_context_block(rag_locations: List[dict], state_names: List[str]) -
     return block
 
 
-def cap_for_model(items: List[dict], max_items: int, label: str) -> List[dict]:
+def cap_for_model(items: List[dict], max_items: int, label: str) -> Tuple[List[dict], int]:
     """يقصّ `items` لأول `max_items` فقط عند التسليم الفعلي للموديل (حقن
-    بالبرومبت، أو رد أداة بأول استدعاء) — الكاش الكامل وراءه (app/sessions.py)
-    يبقى بلا مساس؛ هذا القصّ لحظي وقت البناء فقط، حماية لميزانية التوكِن
-    (settings.max_injected_records، انظر app/config.py). يسجّل تحذيراً لو
-    انقصّ فعلياً — شفافية تشغيلية بدل ابتار صامت لتاريخ المحادثة أو فشل
-    توليد لو كبر الكتالوج/دفتر الطلبات الحقيقي فوق المتوقَّع."""
-    if len(items) <= max_items:
-        return items
+    بالبرومبت، أو رد أداة) — الكاش الكامل وراءه (app/sessions.py) يبقى بلا
+    مساس؛ هذا القصّ لحظي وقت البناء فقط، حماية لميزانية التوكِن
+    (settings.max_injected_records، انظر app/config.py).
+
+    ترجع (القائمة المقصوصة، العدد الأصلي) لا القائمة وحدها — جذر العطل B1
+    بـ docs/fix-plan.md § 6: المتصل يحتاج يعرف "هل انقصّ؟" حتى يكتبها للموديل
+    صراحةً، وإلا ظن الموديل أن الناقص غير موجود وقال «ماكو». tuple لا قائمة
+    عمداً: يجبر كل مستدعٍ يتعامل مع الحقيقة بدل تجاهلها صامتاً. القاعدة
+    العامة: **كل حدّ لازم يصل المستهلِك صراحةً بالنص — نموذجاً كان أم إنساناً.**
+    القصّ يبقى، الكتمان هو العطل."""
+    total = len(items)
+    if total <= max_items:
+        return items, total
     logger.warning(
         "%s: %s عنصر يفوق سقف الحقن max_injected_records=%s — تم القصّ لأول %s.",
-        label, len(items), max_items, max_items,
+        label, total, max_items, max_items,
     )
-    return items[:max_items]
+    return items[:max_items], total
 
 
-def catalog_context_block(products: List[dict]) -> str:
-    """كتالوج المنتجات **الكامل** (محمَّل مرة وحدة لهذي الجلسة عبر
-    search_products_tool، انظر app/sessions.py::cache_catalog) — يُحقن بكل
-    رسالة مبيعات لاحقة بنفس الجلسة (app/features/sales/prompts.py::
-    build_sales_prompt) حتى يدوّر الموديل بالكتالوج كاملاً بدل استدعاء
-    أداة جديد لكل منتج يُسأل عنه.
+def catalog_context_block(products: List[dict], total: Optional[int] = None) -> str:
+    """كتالوج المنتجات (محمَّل مرة وحدة لهذي الجلسة عبر search_products_tool،
+    انظر app/sessions.py::cache_catalog) — يُحقن بكل رسالة مبيعات لاحقة بنفس
+    الجلسة (app/features/sales/prompts.py::build_sales_prompt) حتى يدوّر
+    الموديل بالكتالوج بدل استدعاء أداة جديد لكل منتج يُسأل عنه.
+
+    `total`: العدد الأصلي قبل القصّ (من cap_for_model). لو أكبر من المعروض،
+    البرومبت يقول للموديل صراحةً إن الكتالوج **جزئي** ويوجّهه لأداة
+    search_products بـ query للباقي — بدل الادعاء القديم "الكتالوج الكامل" الذي
+    كان يخلي الموديل ينفي وجود منتج موجود فعلاً (العطل B1).
 
     JSON سطر لكل منتج — نفس شكل `[نتيجة الأداة search_products]` تماماً
     (انظر app/tool_loop.py) حتى تبقى قواعد SALES_SYSTEM_PROMPT ("من نتيجة
@@ -79,11 +89,21 @@ def catalog_context_block(products: List[dict]) -> str:
     if not products:
         return ""
     lines = [json.dumps(p, ensure_ascii=False) for p in products]
-    return (
-        "\n\nكتالوج المنتجات الكامل (حُمِّل مرة وحدة هذي الجلسة — استخدمه "
-        "حرفياً لأي سؤال منتج، بلا حاجة تستدعي search_products ثانية بهذي "
-        "المحادثة إلا لو ما لگيت فيه جواب):\n" + "\n".join(lines)
-    )
+    shown = len(products)
+    if total is not None and total > shown:
+        heading = (
+            f"\n\nكتالوج المنتجات — **جزئي**: معروض {shown} من أصل {total} منتج "
+            "(حُمِّل مرة وحدة هذي الجلسة). دوّر فيه أولاً؛ وإذا ما لگيت المنتج "
+            "المطلوب هنا **لا تگول ماكو** — استدعِ search_products بـ query باسم "
+            "المنتج حتى تبحث بالكتالوج الكامل:\n"
+        )
+    else:
+        heading = (
+            "\n\nكتالوج المنتجات الكامل (حُمِّل مرة وحدة هذي الجلسة — استخدمه "
+            "حرفياً لأي سؤال منتج، بلا حاجة تستدعي search_products ثانية بهذي "
+            "المحادثة إلا لو ما لگيت فيه جواب):\n"
+        )
+    return heading + "\n".join(lines)
 
 
 def orders_context_block(orders: List[dict]) -> str:

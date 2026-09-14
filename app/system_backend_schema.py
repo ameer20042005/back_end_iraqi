@@ -15,13 +15,16 @@
 `assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md` (وليست أسماء
 مخترعة) — محوَّلة لصيغة snake_case مسطّحة مناسبة لعقد REST بسيط.
 
-**سياسة التسامح (مقصودة):** الحقول كلها اختيارية عدا معرّف واحد لكل نموذج
-(`id` للمنتج، `order_id` للطلب). باك اند السستم الحقيقي لسا غير مربوط فعلياً
-(انظر TODO بـ app/products.py وapp/order_gateway.py)، فحقل ناقص بالاستجابة
-الفعلية **لا يفشّل الطلب بالكامل** — يتحوّل تلقائياً لـ None، والموديل مبرمج
-أصلاً (بالبرومبت) يقول "أتأكدلك" بدل ما يخترع قيمة لحقل ناقص. الهدف من هذا
-العقد ليس رفض أي انحراف عن الشكل المتوقع، بل توثيقه رسمياً + التقاط أي شكل
-غريب فعلاً (نوع بيانات خاطئ تماماً، لا مجرد حقل ناقص) بدل تمريره صامتاً.
+**سياسة التسامح (مشدَّدة — docs/fix-plan.md § 8 القرار 6):** الحقول
+**الجوهرية** إلزامية — ما بدونه يصير الجواب خاطئاً لا ناقصاً: `id`/`name`/
+`price` للمنتج (منتج بلا سعر لا يُعرض على زبون)، و`order_id`/`status` للطلب
+(طلب بلا حالة عديم الفائدة بميزة تتبع). عنصر ينقصه أحدها يُستبعَد مع تحذير
+باللوق (`_parse_orders`/`_parse_products`) بدل ما يمر صامتاً بحقل None.
+الباقي (`barcode`, `eta`, `current_stage`, `assigned_transporter`…) اختياري
+بحق: يتحوّل لـ None، والموديل مبرمج (بالبرومبت) يقول "غير متوفر" بدل ما
+يخترع قيمة. التسامح الكامل القديم كان حكمة وقت ما كان الخادم مجهولاً، وصار
+خطراً وقت ما صار معلوماً (jbot — انظر docs/contract-matching.md): يبتلع عدم
+تطابق الأسماء صامتاً. `extra="allow"` يبقى: حقول جديدة مستقبلاً لا تكسر شيئاً.
 
 **من يبني عليه:** فريق باك اند السستم — هذا هو العقد الرسمي المطلوب من
 `GET /products/search`، `GET /products/{id}`، `GET /orders/{order_id}`،
@@ -42,9 +45,9 @@ class SystemProduct(BaseModel):
     مدموجاً مع `catalog.stock_info` (الكمية المتوفرة عبر المخازن) — باك اند
     السستم هو من يجمعهما، هذا الباك اند لا يفهرسهما محلياً.
 
-    الحقول كلها اختيارية عدا `id`/`name` — انظر «سياسة التسامح» بأعلى الملف.
-    `model_config.extra = "allow"`: حقول إضافية يرجعها باك اند السستم مستقبلاً
-    تمر بلا رفض، فقط لا تُتحقق."""
+    الحقول كلها اختيارية عدا `id`/`name`/`price` — انظر «سياسة التسامح»
+    بأعلى الملف. `model_config.extra = "allow"`: حقول إضافية يرجعها باك اند
+    السستم مستقبلاً تمر بلا رفض، فقط لا تُتحقق."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -54,7 +57,7 @@ class SystemProduct(BaseModel):
     barcode: Optional[str] = None
     description: Optional[str] = None
     category: Optional[str] = None  # اسم الفئة (catalog.categories.pretty_name)
-    price: Optional[float] = None  # numeric(19,2) — سعر البيع
+    price: float  # numeric(19,2) — سعر البيع؛ إلزامي: منتج بلا سعر لا يُعرض
     currency: Optional[str] = "IQD"
     in_stock: Optional[bool] = None  # مشتق من مجموع كميات stock_info > 0
     stock_quantity: Optional[int] = None  # مجموع الكمية المتوفرة عبر المخازن
@@ -112,7 +115,7 @@ class SystemOrder(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     order_id: str  # receipt_number أو id بصيغة نصية معروضة (مثل ORD-1001)
-    status: Optional[str] = None  # sell_status أو مرادفه العربي
+    status: str  # sell_status أو مرادفه العربي (stepName بـ jbot)؛ إلزامي: طلب بلا حالة عديم الفائدة
     current_stage: Optional[str] = None  # sell_flow_stage.name (عبر current_step_id) — TODO أعلاه
     current_step: Optional[str] = None  # sell_flow_step.name — الخطوة الدقيقة داخل المرحلة
     step_entered_at: Optional[str] = None  # ISO 8601 — آخر انتقال بـ sell_flow_transition_log لنفس الطلب
@@ -135,3 +138,48 @@ class SystemOrderListResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     orders: List[SystemOrder] = []
+
+
+class SystemOrderCountResponse(BaseModel):
+    """جسم استجابة `GET /orders/count` — عدّ الطلبات بمعايير.
+
+    **ليش نقطة عدّ منفصلة مو len() على نتيجة /orders/search؟** لأن /search
+    يرجّع **صفحة وحدة**، فطولها مو العدد الكلي. سؤال «كم طلب عدنا هالشهر؟»
+    جوابه لازم يجي من عدّ حقيقي بقاعدة البيانات، لا من حجم صفحة — وهذا بالضبط
+    الخطأ اللي يخلي الموديل يعطي رقماً واثقاً وغلط.
+
+    كائن بحقل واحد مو رقم عارٍ: يبقى العقد كله كائنات JSON قابلة للتحقق
+    بـPydantic، ويسمح بإضافة تفاصيل لاحقاً (عدّ حسب الحالة مثلاً) بلا كسر."""
+
+    model_config = ConfigDict(extra="allow")
+
+    count: int = 0
+
+
+class SystemOrderEvent(BaseModel):
+    """حدث واحد بسجل مراحل الطلب — مرحلة، ومتى دخلها، وكم بقى بيها.
+
+    `duration_hours` هو مفتاح الجواب على «ليش متأخر؟»: رقم عشري بالساعات
+    (18.5) مو صيغة ISO مدة ("PT18H30M") — الموديل يقرأ الرقم ويقارنه مباشرة.
+
+    `duration_hours = None` معناها **لسا بهذي المرحلة** (ماكو مدة نهائية
+    بعد)، مو «مرّ بيها بصفر وقت»."""
+
+    model_config = ConfigDict(extra="allow")
+
+    stage: Optional[str] = None
+    entered_at: Optional[str] = None  # ISO 8601
+    duration_hours: Optional[float] = None
+
+
+class SystemOrderHistoryResponse(BaseModel):
+    """جسم استجابة `GET /orders/{order_id}/history`.
+
+    الأحداث مرتّبة زمنياً (الأقدم أول) حتى يوصف الموديل الرحلة بترتيبها
+    الطبيعي. يقابل جدول سير عمل الطلب الحقيقي (`sell_flow_transition_log`
+    بمنظومة JENNI_STORES، أو سجل مراحل الشحنة بباك اند Jenni)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    order_id: str
+    events: List[SystemOrderEvent] = []
