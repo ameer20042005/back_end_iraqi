@@ -15,7 +15,7 @@ final_answer) بدل بروتوكول [TOOL_CALL]{...}[/TOOL_CALL] النصي ا
 (app/order_query.py)، والبحث يصير بجهة باك اند السستم/المستودع، ويرجع
 للموديل صفحة صغيرة + العدد الكلي."""
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from app.lang import KURDISH_PROMPT_RULES
 
