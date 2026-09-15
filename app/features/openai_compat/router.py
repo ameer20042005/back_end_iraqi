@@ -8,6 +8,7 @@ the OpenAI wire response returned by vLLM.
 
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Literal, Optional
@@ -121,6 +122,45 @@ def _native_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     return converted
 
 
+# رموز قالب المحادثة التي يسرّبها الموديل داخل نص الرد نفسه، بالشكل:
+#
+#     <|channel>thought\n<channel|>النص الحقيقي للجواب
+#
+# هي بنية القالب الداخلية لا جزء من الجواب، لكنها تصل العميل كنص عادي فيعرضها
+# للمستخدم كما هي. لاحظ أن ما بين الوسمين ("thought") اسم القناة، فحذف الوسمين
+# وحدهما يترك الكلمة معلّقة في أول الجواب.
+#
+# ليش التنظيف هنا لا بجهة jbot؟ لأن هذه النقطة هي حدود الخدمة: كل عميل يستهلك
+# منها يتوقّع نصاً نظيفاً، وتكرار المعالجة بكل عميل يعني نسيانها بأحدهم.
+#
+# القاعدة: الجواب الفعلي يقع بعد **آخر** وسم إغلاق قناة. هذا يعالج حالة القناة
+# الواحدة وحالة القنوات المتتابعة (thought ثم final) بنفس السطر، بدل افتراض
+# ترتيب ثابت.
+_CHANNEL_CLOSE_RE = re.compile(r"<\|?channel\|>")
+
+# وسوم متفرّقة قد تبقى خارج بنية القناة: <|...|> أو <|...> أو <...|>.
+_STRAY_TAG_RE = re.compile(r"<\|[^<>]*\|?>|<[^<>]*\|>")
+
+
+def _clean_content(text: str) -> str:
+    """يزيل بنية قنوات القالب المتسرّبة ويشذّب ما تخلّفه من مسافات."""
+    cleaned = text
+    matches = list(_CHANNEL_CLOSE_RE.finditer(cleaned))
+    if matches:
+        after = cleaned[matches[-1].end():]
+        # لو لم يبق نص بعد آخر وسم فالبنية غير متوقّعة: نبقي الأصل وننظّف
+        # الوسوم فقط، فنصّ ناقص أسوأ من نص فيه رمز شارد.
+        if after.strip():
+            cleaned = after
+
+    cleaned = _STRAY_TAG_RE.sub("", cleaned)
+    cleaned = re.sub(r"[ \t]*\n[ \t]*\n+", "\n\n", cleaned).strip()
+
+    if cleaned != text.strip():
+        logger.info("نُظّفت رموز قالب من رد الموديل (%d حرفاً)", len(text.strip()) - len(cleaned))
+    return cleaned
+
+
 def _base_response(requested_model: str) -> dict:
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex}",
@@ -216,8 +256,9 @@ async def chat_completions(req: ChatCompletionRequest):
             return response
 
         content = message.get("content")
-        if isinstance(content, str) and content.strip():
-            response = _final_response(req.model, content.strip())
+        cleaned = _clean_content(content) if isinstance(content, str) else ""
+        if cleaned:
+            response = _final_response(req.model, cleaned)
             response["usage"] = _usage(data)
             return response
 
