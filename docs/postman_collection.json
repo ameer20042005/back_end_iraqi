@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Order/Sales/Voice API — order_intake, sales, voice_followup, postpone",
-    "description": "مجموعة Postman جاهزة للاستيراد المباشر لاختبار الميزات الثلاث الموثّقة في docs/api-order-sales-voice.md. استوردها في Postman (File > Import > اختر هذا الملف)، ثم شغّل الطلبات مباشرة — القيم (الرابط والمفاتيح) معبّأة مسبقاً كمتغيرات على مستوى الـ Collection.\n\n⚠️ تحذير أمني: هذا الملف يحتوي مفاتيح API حقيقية (نفس القيم الموجودة في api-order-sales-voice.md). لا تشاركه أو ترفعه لمستودع عام.",
+    "name": "Iraqi Backend API — OpenAI, Order, Sales, Voice",
+    "description": "مجموعة Postman جاهزة للاستيراد المباشر لاختبار واجهة OpenAI المتوافقة وميزات order_intake وsales وvoice_followup وpostpone. استوردها في Postman (File > Import > اختر هذا الملف)، ثم شغّل الطلبات مباشرة — القيم (الرابط والمفاتيح) معبّأة مسبقاً كمتغيرات على مستوى الـ Collection.\n\n⚠️ تحذير أمني: هذا الملف يحتوي مفاتيح API حقيقية للخدمات القديمة. لا تشاركه أو ترفعه لمستودع عام.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -383,6 +383,140 @@
               ]
             },
             "description": "شغّل Step 1 أولاً. اضغط حقل audio > Select Files واختر تسجيل رد الزبون.\n\n⚠️ هذا الطلب يتكرر: أرسله مرة بعد مرة بنفس الجلسة لين X-Call-Status يرجع \"ended\".\n\nهيدرات الرد: X-Call-Status (continue/ended) · X-Chosen-Option (today / plus_N / weekday_D) · X-Postpone-Saved · X-Reply-Text وX-Customer-Transcript (Percent-encoded).\n\nسكوت الزبون ليس خطأ — يُعامَل كرد غامض: تعيد صباح السؤال مرة، ثم تقفل بأدب."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5) OpenAI-compatible Chat Completions",
+      "description": "اختبارات عقد Spring AI/OpenAI للمسار الجديد. كل طلب يمثل جولة توليد واحدة، وتنفيذ الأدوات يبقى عند jbot.",
+      "item": [
+        {
+          "name": "Tool Call — searchShipments",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI موجود', () => {",
+                  "    pm.expect(body.object).to.eql('chat.completion');",
+                  "    pm.expect(body.usage).to.be.an('object');",
+                  "    pm.expect(choice).to.be.an('object');",
+                  "});",
+                  "pm.test('الرد يطلب أداة', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('tool_calls');",
+                  "    pm.expect(choice.message.content).to.eql(null);",
+                  "    pm.expect(choice.message.tool_calls).to.be.an('array').that.is.not.empty;",
+                  "});",
+                  "pm.test('arguments نص JSON صالح', () => {",
+                  "    const call = choice.message.tool_calls[0];",
+                  "    pm.expect(call.id).to.match(/^call_/);",
+                  "    pm.expect(call.function.name).to.eql('searchShipments');",
+                  "    pm.expect(call.function.arguments).to.be.a('string');",
+                  "    const args = JSON.parse(call.function.arguments);",
+                  "    pm.expect(args.receiptNumber).to.eql('12345');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"وين وصلت شحنتي 12345؟\"}\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"searchShipments\",\n        \"description\": \"Find shipment by receipt number, phone, or criteria\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"receiptNumber\": {\"type\": \"string\"}\n          }\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/chat/completions",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "chat", "completions"]
+            },
+            "description": "يتوقع finish_reason=tool_calls وarguments كنص JSON يحتوي receiptNumber=12345. يحتاج إعادة تشغيل start.sh حتى تعمل أعلام native function calling في vLLM."
+          }
+        },
+        {
+          "name": "Final Answer — after Tool Result",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('جواب نهائي بلا tool_calls', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('stop');",
+                  "    pm.expect(choice.message.content).to.be.a('string');",
+                  "    pm.expect(choice.message.content.length).to.be.above(0);",
+                  "    pm.expect(choice.message).not.to.have.property('tool_calls');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"وين وصلت شحنتي 12345؟\"},\n    {\n      \"role\": \"assistant\",\n      \"content\": null,\n      \"tool_calls\": [\n        {\n          \"id\": \"call_postman_1\",\n          \"type\": \"function\",\n          \"function\": {\n            \"name\": \"searchShipments\",\n            \"arguments\": \"{\\\"receiptNumber\\\":\\\"12345\\\"}\"\n          }\n        }\n      ]\n    },\n    {\n      \"role\": \"tool\",\n      \"tool_call_id\": \"call_postman_1\",\n      \"content\": \"{\\\"stepName\\\":\\\"قيد التوصيل\\\",\\\"stateName\\\":\\\"بغداد\\\"}\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"searchShipments\",\n        \"description\": \"Find shipment by receipt number, phone, or criteria\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"receiptNumber\": {\"type\": \"string\"}\n          }\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/chat/completions",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "chat", "completions"]
+            },
+            "description": "يحاكي الجولة الثانية التي يرسلها jbot بعد تنفيذ searchShipments. المتوقع finish_reason=stop ونص عربي مبني على نتيجة الأداة."
+          }
+        },
+        {
+          "name": "Final Answer — General Message",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('رسالة عامة ترجع جواباً نهائياً', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('stop');",
+                  "    pm.expect(choice.message.content).to.be.a('string');",
+                  "    pm.expect(choice.message).not.to.have.property('tool_calls');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"شلونك\"}\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"searchShipments\",\n        \"description\": \"Find shipment by receipt number, phone, or criteria\",\n        \"parameters\": {\"type\": \"object\", \"properties\": {}}\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/chat/completions",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "chat", "completions"]
+            },
+            "description": "رسالة عامة لا تحتاج بيانات. المتوقع finish_reason=stop بلا tool_calls."
           }
         }
       ]
