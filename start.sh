@@ -42,21 +42,6 @@
 set -e
 cd "$(dirname "$0")"
 
-# نحمّل .env (لو موجود) لنفس شل السكربت — بدون هذا، أي متغير بيئة يُكتب بملف
-# .env (HF_TOKEN، MODEL_NAME...) يبقى غير مرئي إطلاقاً لأمر vllm serve أدناه
-# ولا لعملية FastAPI (exec uvicorn بنهاية السكربت)، لأن bash لا يقرأ ملفات
-# .env تلقائياً كمتغيرات بيئة — يبقى مجرد ملف نصي عادي بدون set -a/source.
-# هذا يفسّر سابقاً: تحذير "unauthenticated requests to the HF Hub" رغم وجود
-# HF_TOKEN بالملف، وتعارض اسم الموديل بين app/config.py (يقرأ .env عبر
-# pydantic-settings من عملية بايثون منفصلة) وبين MODEL_NAME الافتراضي هنا.
-if [ -f .env ]; then
-    echo "==> Loading .env"
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
-fi
-
 # ── تجهيز نظام التشغيل من الصفر (Ubuntu 22.04 خام) ──────────────────────────
 # بدون صورة جاهزة فيها Python/pip أصلاً، لازم نثبّتهم قبل أي أمر pip/python3
 # بهذا السكربت. الإصدارات أدناه مثبَّتة (=) حسب أرشيف Ubuntu 22.04 (jammy)
@@ -124,14 +109,26 @@ fi
 
 # 8001 مستخدَم أحياناً من خدمة نظام على قوالب RunPod العامة (لاحظنا nginx
 # داخلي ماسكه بالفعل على بعض الـ Pods) — 18001 منفذ داخلي (بين الحاويتين
-# فقط، ما يحتاج Expose من لوحة RunPod) أقل عرضة للتصادم. غيّره بـ VLLM_PORT
-# لو لسا يتصادم بمنفذك.
-MODEL_NAME="${MODEL_NAME:-ameer4wisam/gemma-iraqi-10k-merged}"
-VLLM_PORT="${VLLM_PORT:-18001}"
-API_PORT="${API_PORT:-8000}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-10000}"
-GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.85}"
-MAX_NUM_SEQS="${MAX_NUM_SEQS:-90}"
+# فقط، ما يحتاج Expose من لوحة RunPod) أقل عرضة للتصادم. غيّره من
+# app/config.py لو لسا يتصادم بمنفذك.
+# الإعدادات ثابتة في app/config.py. نقرأها بعد تثبيت متطلبات بايثون كي يكون
+# الاسم والمنفذ وحدود vLLM متطابقة دائماً بين FastAPI وسكربت التشغيل.
+mapfile -t STATIC_CONFIG < <(python3 -c '
+from app.config import settings
+for value in (
+    settings.model_name, settings.vllm_port, settings.api_port,
+    settings.max_model_len, settings.gpu_memory_utilization,
+    settings.max_num_seqs, settings.hf_token or "",
+):
+    print(value)
+')
+MODEL_NAME="${STATIC_CONFIG[0]}"
+VLLM_PORT="${STATIC_CONFIG[1]}"
+API_PORT="${STATIC_CONFIG[2]}"
+MAX_MODEL_LEN="${STATIC_CONFIG[3]}"
+GPU_MEMORY_UTILIZATION="${STATIC_CONFIG[4]}"
+MAX_NUM_SEQS="${STATIC_CONFIG[5]}"
+export HF_TOKEN="${STATIC_CONFIG[6]}"
 VLLM_LOG="/tmp/vllm_boot.log"
 
 # حزمة pip nvidia-cuda-nvcc-cu12 (المُثبَّتة تبعاً لـvllm) لا توفّر nvcc

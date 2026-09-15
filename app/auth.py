@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""حماية كل خدمة بمفتاح API خاص بها من .env.
+"""حماية كل خدمة بمفتاح API خاص بها من الإعدادات الثابتة.
 
 كل خدمة (مبيعات، دعم، إنشاء طلبات) عندها مفتاحها المستقل
 (SALES_API_KEY / SUPPORT_API_KEY / ORDERS_API_KEY) — يُرسَل بهيدر X-API-Key
@@ -30,7 +30,7 @@ def _make_dependency(service_name: str, expected_key: str):
         if not expected_key:
             raise HTTPException(
                 status_code=500,
-                detail=f"مفتاح خدمة {service_name} غير مضبوط بإعدادات الخادم (.env)",
+                detail=f"مفتاح خدمة {service_name} غير مضبوط بإعدادات الخادم",
             )
         if x_api_key != expected_key:
             raise HTTPException(status_code=401, detail=f"مفتاح API غير صحيح لخدمة {service_name}")

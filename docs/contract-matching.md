@@ -7,7 +7,7 @@
 > `web/jenni/dto/SearchShipmentRequestDto.java`، `web/jenni/dto/PagedResponse.java`.
 
 jbot يحقّق عقد الطلبات فوق بيانات Jenni تحت البادئة `/internal`
-(`SYSTEM_BACKEND_BASE_URL=http://127.0.0.1:8081/internal` — انظر `.env.example`).
+(`system_backend_base_url="http://127.0.0.1:8081/internal"` — انظر `app/config.py`).
 
 ---
 

@@ -1,16 +1,13 @@
 # -*- coding: utf-8 -*-
-"""إعدادات مشتركة (المحرك/RAG/الأدوات) — كلها قابلة للضبط عبر متغيرات بيئة.
+"""إعدادات التطبيق الثابتة.
 
-تحذير أمني: لا تكتب أي قيمة سرّية (توكن/مفتاح) كافتراضي هنا مباشرة — هذا
-الملف متتبَّع بـ git. كل الأسرار تُمرَّر فقط عبر متغيرات بيئة (`.env` محلياً
-المستثنى بـ .gitignore، أو Environment Variables بإعدادات RunPod Pod).
+هذا هو مصدر الإعدادات الوحيد للتطبيق ولـ ``start.sh``. لا تُقرأ ملفات ``.env``
+ولا متغيرات بيئة النظام؛ غيّر القيم هنا مباشرة عند الحاجة.
 """
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from typing import Optional
-
-from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.lang import Lang
 
@@ -35,39 +32,32 @@ class TextToSpeechModel:
     reference_assets_on_hub: bool
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+@dataclass(frozen=True)
+class Settings:
     # الموديل — النسخة المدموجة (base + LoRA اللهجة العراقية مندمجين بالأوزان
     # فعلياً عبر merge_and_unload، انظر gemma_iraqi_merge_fixed.ipynb) تشمل
     # أبراج الرؤية/الصوت كاملة. يخدمه خادم vLLM منفصل (انظر start.sh) —
     # القيمة هنا تُستخدم باسم الموديل بطلبات /v1/chat/completions ويقرأها
     # start.sh لتمريرها لـ `vllm serve`.
-    # ⚠️ لازم يطابق MODEL_NAME بـ start.sh حرفياً — القيمتان مصدر واحد فقط
-    # عملياً عبر متغير بيئة MODEL_NAME (تقرآه start.sh مباشرة، وتقرآه هنا
-    # pydantic-settings تلقائياً)؛ الافتراضي هنا مجرد نسخة احتياطية لو ما
-    # كان المتغير مضبوطاً — راح يفشل بـ404 "model does not exist" من vLLM
-    # لو اختلف عن الاسم الفعلي اللي شُغِّل فيه خادم vLLM.
+    # start.sh يقرأ هذه القيمة مباشرة، لذلك لا يوجد مصدر ثانٍ قد يختلف عنها.
     model_name: str = "ameer4wisam/gemma-iraqi-10k-merged"
 
     # عنوان خادم vLLM OpenAI-متوافق — الباك اند عميل HTTP رفيع فقط (انظر
     # app/engine.py). محلياً بدون أي خادم يبقى ready=False وكل الميزات ترجع
     # لوضع fallback.
-    # ⚠️ لازم يطابق VLLM_PORT بـ start.sh حرفياً — لا ربط تلقائي بينهما، فأي
-    # تغيير بأحدهما يتطلب تحديث الآخر يدوياً.
+    # يطابق vllm_port أدناه؛ غيّرهما معاً عند نقل الخادم إلى منفذ آخر.
     vllm_base_url: str = "http://127.0.0.1:18001/v1"
 
     # توكن Hugging Face — مطلوب لأن Gemma موديل بوابة (gated) وربما مستودع
-    # الموديل خاص. لا قيمة افتراضية أبداً؛ يُقرأ فقط من متغير البيئة HF_TOKEN
-    # (يقرأه start.sh ويمرره لخادم vLLM).
-    hf_token: Optional[str] = None
+    # الموديل خاص. هذا استثناء الوحيد من مبدأ "كل الإعدادات هنا مباشرة": سرّ
+    # حقيقي بهذا الملف يوقفه GitHub push protection ويكشفه لأي أحد بالريبو،
+    # فيُقرأ فقط من متغير بيئة HF_TOKEN تضبطه بكل خادم عند النشر (RunPod
+    # Environment Variables) — لا قيمة افتراضية حقيقية هنا أبداً.
+    hf_token: Optional[str] = field(default_factory=lambda: os.environ.get("HF_TOKEN"))
 
     # إعدادات خادم vLLM (يقرأها start.sh ويمررها كأعلام لـ `vllm serve`):
-    # نسبة VRAM المحجوزة للموديل + KV cache — 0.90 حسب الوصفة الرسمية.
-    gpu_memory_utilization: float = 0.90
+    # نسبة VRAM المحجوزة للموديل + KV cache.
+    gpu_memory_utilization: float = 0.85
     # طول السياق الأقصى — أقصر = مساحة KV cache أكبر = طلبات متزامنة أكثر.
     # ⚠️ لازم يطابق MAX_MODEL_LEN بـ start.sh (هو اللي يمرره فعلياً لـ vllm
     # serve؛ القيمة هنا للرجوع إليها بالكود فقط).
@@ -90,6 +80,9 @@ class Settings(BaseSettings):
     # لهذا اخترنا توجيه مساحة الـ VRAM الإضافية (مقارنة بـ A40) للتزامن
     # (MAX_NUM_SEQS) لا لطول السياق.
     max_model_len: int = 10000
+    max_num_seqs: int = 90
+    vllm_port: int = 18001
+    api_port: int = 8000
 
     # طول الرد الأقصى — هذا **المقبض الوحيد الفعّال** لمرونة التوليد هنا.
     # تدرّج تاريخي: 64 (كانت تقصّ ردود المبيعات قسراً) → 150 → 256 الحالية.
@@ -132,16 +125,13 @@ class Settings(BaseSettings):
     # search_products أو get_order_status) يمر لحظياً عبر HTTP لهذا العنوان
     # ولا يُحفظ. رابط ومسارات باك اند السستم الفعلية غير معروفة بعد؛ عدّل
     # القيمة هنا عند توفرها.
-    system_backend_base_url: str = "http://127.0.0.1:9000"
+    system_backend_base_url: str = "http://127.0.0.1:8081/internal"
 
     # مفاتيح حماية منفصلة لكل خدمة — مفتاح مختلف لكل ميزة، يُرسَل بهيدر
     # X-API-Key (انظر app/auth.py). فصلها عن بعض يسمح بإلغاء صلاحية خدمة
     # وحدها (مثلاً sales) بلا ما يأثر على الباقي.
     #
-    # ⚠️ مكتوبة هنا كقيمة ثابتة بطلب صريح من صاحب المشروع (تفادياً لضبط .env
-    # يدوياً بكل بيئة تشغيل) — خلافاً للتحذير الأمني بأعلى الملف. هذا الملف
-    # متتبَّع بـ git، فأي شخص يصل للمستودع (بما فيه أي مستودع GitHub عام)
-    # يرى هذي القيم حرفياً. .env (إذا وُجد) يبقى يتجاوزها كالعادة.
+    # هذه القيم ثابتة ولا يمكن تجاوزها بمتغيرات البيئة.
     sales_api_key: Optional[str] = "sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2"
     support_api_key: Optional[str] = "sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f"
     orders_api_key: Optional[str] = "sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c"
@@ -150,26 +140,17 @@ class Settings(BaseSettings):
     # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
     # مفرَّغ عليه اللهجة العربية (نموذج transformers عادي، يعمل بعملية FastAPI
     # نفسها — الصوت لا يمر بخادم vLLM)
-    whisper_model_ar: str = Field(
-        "ayoubkirouane/whisper-small-ar",
-        validation_alias=AliasChoices("WHISPER_MODEL_AR", "WHISPER_MODEL"),
-    )
-    whisper_language_ar: str = Field("arabic", validation_alias="WHISPER_LANGUAGE_AR")
+    whisper_model_ar: str = "ayoubkirouane/whisper-small-ar"
+    whisper_language_ar: str = "arabic"
 
     # تحويل نص لصوت باللهجة العراقية (app/features/voice_followup/tts.py) —
     # يخدم مسار المتابعة الصوتية للطلبات (سؤال الزبون سبب الرفض/الإلغاء
     # صوتياً). موديل transformers منفصل عن Whisper، يعيش بعملية FastAPI نفسها.
-    tts_model_ar: str = Field(
-        "ameer4wisam/Habibi-TTS-IRQ",
-        validation_alias=AliasChoices("TTS_MODEL_AR", "TTS_MODEL"),
-    )
-    tts_ckpt_ar: str = Field("Specialized/IRQ/model_100000.safetensors", validation_alias="TTS_CKPT_AR")
-    tts_vocab_ar: str = Field("Specialized/IRQ/vocab.txt", validation_alias="TTS_VOCAB_AR")
-    tts_ref_audio_ar: str = Field("reference/IRQ.wav", validation_alias="TTS_REF_AUDIO_AR")
-    tts_ref_text_ar: str = Field(
-        "اا ما نقدر ناخذ وقت أكثر، ااا لأنه شروط كلش يحتاجلها وقت.",
-        validation_alias="TTS_REF_TEXT_AR",
-    )
+    tts_model_ar: str = "ameer4wisam/Habibi-TTS-IRQ"
+    tts_ckpt_ar: str = "Specialized/IRQ/model_100000.safetensors"
+    tts_vocab_ar: str = "Specialized/IRQ/vocab.txt"
+    tts_ref_audio_ar: str = "reference/IRQ.wav"
+    tts_ref_text_ar: str = "اا ما نقدر ناخذ وقت أكثر، ااا لأنه شروط كلش يحتاجلها وقت."
 
     # -----------------------------------------------------------------
     # الكردية السورانية (ckb)
@@ -189,15 +170,13 @@ class Settings(BaseSettings):
     # فلازم نقطة تفتيش مفرَّغة على السوراني. القيمة أدناه مفرَّغة من
     # openai/whisper-small (نفس حجم موديلنا العربي) بمعدل خطأ كلمات ~24%.
     #
-    whisper_model_ku: str = Field(
-        "roshna-omer/whisper-small-Kurdish-Sorani", validation_alias="WHISPER_MODEL_KU",
-    )
+    whisper_model_ku: str = "roshna-omer/whisper-small-Kurdish-Sorani"
 
     # الشرح: مهمة التوليد للموديل الكردي. **ما نمرر language="arabic"** كما
     # بالعربي: الموديل مفرَّغ على الكردي، وفرض رمز لغة ثانية عليه يخرّب
     # مخرجه. None تعني "خلّي إعدادات التوليد المحفوظة بالموديل نفسه تقرر"
     # — وهي الصيغة الصحيحة لموديل مفرَّغ على لغة خارج قائمة Whisper.
-    whisper_language_ku: Optional[str] = Field(None, validation_alias="WHISPER_LANGUAGE_KU")
+    whisper_language_ku: Optional[str] = None
 
     # الشرح: موديل TTS الكردي — F5-TTS مثل العربي بالضبط، من مبادرة
     # TTS4All. المستودع فيه ثلاثة أصوات (audiobook-female / audiobook-male
@@ -205,9 +184,9 @@ class Settings(BaseSettings):
     # أنثى (انظر SABAH_SYSTEM_PROMPT)، وتبديل جنس الصوت بين العربي والكردي
     # يخلي نفس الموظفة تبدو شخصين مختلفين.
     #
-    tts_model_ku: str = Field("aranemini/central-kurdish-tts", validation_alias="TTS_MODEL_KU")
-    tts_ckpt_ku: str = Field("model-audiobook-female.pt", validation_alias="TTS_CKPT_KU")
-    tts_vocab_ku: str = Field("vocab.txt", validation_alias="TTS_VOCAB_KU")
+    tts_model_ku: str = "aranemini/central-kurdish-tts"
+    tts_ckpt_ku: str = "model-audiobook-female.pt"
+    tts_vocab_ku: str = "vocab.txt"
 
     # الشرح: F5-TTS يحتاج صوتاً مرجعياً + نصّه الحرفي لكل توليد. المستودع
     # الكردي يرفق زوجاً جاهزاً لكل صوت، فننزّلهما منه بدل ما نسجّل مرجعاً
@@ -215,8 +194,8 @@ class Settings(BaseSettings):
     # النص ما نكتبه هنا: نقرأه من الملف المرافق وقت التحميل، لأن أي فرق
     # حرف واحد بينه وبين التسجيل يخرّب جودة الاستنساخ.
     #
-    tts_ref_audio_ku: str = Field("prompt-audiobook-female.wav", validation_alias="TTS_REF_AUDIO_KU")
-    tts_ref_text_ku: str = Field("prompt-audiobook-female.txt", validation_alias="TTS_REF_TEXT_KU")
+    tts_ref_audio_ku: str = "prompt-audiobook-female.wav"
+    tts_ref_text_ku: str = "prompt-audiobook-female.txt"
 
     # الشرح: تحميل كسول — الموديلات الكردية **ما تنحمّل عند الإقلاع**
     # (خلافاً للعربية، انظر warmup بـmain.py). السبب تشغيلي موثّق بالكود

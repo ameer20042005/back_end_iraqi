@@ -31,12 +31,14 @@ git clone https://github.com/ameer20042005/back_end_iraqi.git app
 cd /workspace/app
 ```
 
-### 4) حط توكن Hugging Face
+### 4) حط توكن Hugging Face بالإعدادات الثابتة
 
 بدّل `hf_xxx` بتوكنك (شلون تجيبه: [قبل البدء](#1-توكن-hugging-face-hf_token)):
 
-```bash
-echo 'HF_TOKEN=hf_xxx' > /workspace/app/.env
+افتح `app/config.py` وضع التوكن في الحقل `hf_token`:
+
+```python
+hf_token: Optional[str] = "hf_xxx"
 ```
 
 ### 5) شغّل السيرفر (يضل شغال بعد غلق الطرفية)
@@ -103,7 +105,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test
 
 ## قبل البدء — تجهيزات إلزامية
 
-### 1. توكن Hugging Face (`HF_TOKEN`)
+### 1. توكن Hugging Face (`hf_token` في `app/config.py`)
 
 Gemma موديل بوابة (gated) ومستودع محوّل اللهجة العراقية خاص، فلازم توكن صحيح قبل أي تشغيل:
 
@@ -148,23 +150,14 @@ cd /workspace/app
 
 > ملاحظة: بقية هذا الدليل يفترض المسار `/workspace/app`. لو استنسخت باسم ثاني، بدّله بكل الأوامر أدناه.
 
-### الخطوة 3 — إعداد متغيرات البيئة
+### الخطوة 3 — إعداد القيم الثابتة
 
 ```bash
 cd /workspace/app
-cp .env.example .env
-nano .env   # أو أي محرر متاح
+nano app/config.py
 ```
 
-أهم متغير لازم تضبطه:
-
-```
-HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-باقي المتغيرات (`MODEL_NAME`, `VLLM_PORT`, `MAX_MODEL_LEN`, `GPU_MEMORY_UTILIZATION`...) لها قيم افتراضية معقولة — عدّلها فقط إذا لازم (تفصيل كامل بجدول [README.md](README.md#الإعداد-متغيرات-بيئة--انسخ-envexample-إلى-env)).
-
-> **بديل**: بدل تعديل `.env`، تكدر تضيف نفس المتغيرات مباشرة من إعدادات الـ Pod (**Edit Pod** → **Environment Variables**) — تُقرأ تلقائياً بنفس الطريقة.
+ضع توكن Hugging Face في `hf_token` إن كان الموديل يتطلبه. وكل القيم الأخرى (`model_name`، `vllm_port`، `max_model_len`، `gpu_memory_utilization`...) ثابتة في `Settings` داخل الملف نفسه؛ عدّلها هناك فقط عند الحاجة.
 
 ### الخطوة 4 — التشغيل (بـ tmux حتى يضل شغال بعد غلق الطرفية)
 
@@ -270,7 +263,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test   (على RunPod)
 
 - **حقل رابط السيرفر** أعلى الشريط الجانبي — معبّأ تلقائياً برابط الصفحة الحالية، وتكدر تبدّله لأي رابط ثاني (مفيد لو فتحت الصفحة محلياً بس تريد تختبر Pod شغال على RunPod).
 - **مؤشر حالة الاتصال** — يفحص `/health` و`/gpu` ويوضح إذا الموديل شغال فعلاً (`vLLM`) أو بوضع fallback بدون GPU.
-- **خانات مفاتيح API** (مبيعات/دعم/إنشاء طلبات/متابعة صوتية) تحت مؤشر الحالة — معبّأة مسبقاً بنفس القيم الثابتة بـ`app/config.py`، وتُحفظ بمتصفحك (`localStorage`) فتقدر تعدّلها لو بدّلت المفاتيح بـ`.env`. كل نقطة بالقائمة ترسل تلقائياً هيدر `X-API-Key` بالمفتاح المطابق لخدمتها.
+- **خانات مفاتيح API** (مبيعات/دعم/إنشاء طلبات/متابعة صوتية) تحت مؤشر الحالة — معبّأة مسبقاً بنفس القيم الثابتة بـ`app/config.py`، وتُحفظ بمتصفحك (`localStorage`) فتقدر تعدّلها بعد تغيير المفاتيح بالملف. كل نقطة بالقائمة ترسل تلقائياً هيدر `X-API-Key` بالمفتاح المطابق لخدمتها.
 - **كل نقطة براوترها الخاص** بالقائمة الجانبية:
   - `GET /health`, `/gpu`, `/` — زر إرسال واحد يعرض الـ JSON مع تلوين وترتيب تلقائي.
   - `POST /sales/chat` — واجهة محادثة كاملة (فقاعات رسائل)، تحافظ على `session_id` تلقائياً بين الرسائل، وتعرض تفاصيل الطلب (`order`) كبطاقة منسّقة لما يتثبّت.
@@ -293,9 +286,9 @@ https://<POD_ID>-8000.proxy.runpod.net/test   (على RunPod)
 | السيرفر يموت أول ما تغلق الطرفية | ما اشتغل داخل tmux فعلياً (شائع: `Ctrl+B` `D` انضغطت غلط فظهرت كنص `^B^B`) | استخدم `tmux new-session -d` بالخطوة 4 — تبدأ منفصلة أصلاً بلا أي اختصار |
 | `git pull` يفشل بـ `no such ref was fetched` | الـ Pod على فرع محذوف من الريموت | `git fetch origin && git checkout main && git reset --hard origin/main` |
 | `bash start.sh` يطلع Nginx/SSH/Jupyter و«Pod is ready to use» | شغّلت سكربت إقلاع RunPod مو سكربت المشروع (كنت بمسار غلط) | `cd /workspace/app` أولاً، بعدين `bash start.sh` |
-| خطأ 401/403 عند التشغيل | `HF_TOKEN` مفقود أو غير صحيح، أو لم تقبل ترخيص Gemma | راجع قسم "قبل البدء" أعلاه |
+| خطأ 401/403 عند التشغيل | `hf_token` مفقود أو غير صحيح، أو لم تقبل ترخيص Gemma | راجع قسم "قبل البدء" أعلاه |
 | `/gpu` يرجع `vllm_ready: false` باستمرار | خادم vLLM لسا يحمّل الموديل (~24GB أول مرة)، أو لسا بمرحلة تثبيت vLLM/torch nightly على Ubuntu الخام (أول إقلاع فقط)، أو فشل إقلاعه | راقب لوج الـ Pod (`tail -f /tmp/api.log`)؛ تأكد أن نسخة vLLM المثبَّتة تدعم Gemma 4 (الإصدارات المستقرة الحالية لا تدعمه — لازم nightly) |
-| نفاد ذاكرة GPU (CUDA OOM) | GPU المختار صغير جداً، أو `GPU_MEMORY_UTILIZATION`/`MAX_MODEL_LEN` مرتفعة جداً | اختر GPU أكبر (40GB+)، أو قلّل `MAX_MODEL_LEN`/`GPU_MEMORY_UTILIZATION` في `.env` |
+| نفاد ذاكرة GPU (CUDA OOM) | GPU المختار صغير جداً، أو `gpu_memory_utilization`/`max_model_len` مرتفعة جداً | اختر GPU أكبر (40GB+)، أو قلّل القيم في `app/config.py` |
 | الصفحة `/test` ما تتصل بالسيرفر (CORS) | نادراً — الـ CORS مفتوح للجميع افتراضياً بـ `app/main.py` | تأكد إن رابط السيرفر بحقل "رابط السيرفر" صحيح ويتضمن `https://` |
 | أول طلب بطيء جداً | طبيعي — تحميل الموديل والمحوّل أول مرة | انتظر اكتمال التحميل (راقب اللوج)؛ الطلبات اللاحقة أسرع بكثير |
 
@@ -332,8 +325,8 @@ export HF_HUB_ENABLE_HF_TRANSFER=0
 python3 -c "
 from transformers import AutoTokenizer
 from huggingface_hub import upload_file
-import os
-tok = os.environ['HF_TOKEN']
+from app.config import settings
+tok = settings.hf_token
 t = AutoTokenizer.from_pretrained('google/gemma-4-12B-it', token=tok)
 assert t.vocab_size == 262144, t.vocab_size
 t.save_pretrained('/tmp/tk')

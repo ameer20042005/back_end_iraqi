@@ -33,7 +33,7 @@ uvicorn app.main:app --reload --port 8000
 1. أنشئ Pod من قالب بصورة **`ubuntu:22.04`** (الصورة أعلاه) — Container Disk **60GB+** موصى به (torch/vLLM المثبَّتين بأول إقلاع + الموديل المُنزَّل).
 2. في إعدادات القالب أضف `8000` إلى **Expose HTTP Ports**.
 3. انسخ المشروع للـ Pod (عبر Jupyter/SSH أو git clone) إلى `/workspace/back_end_iraqi`.
-4. انسخ `.env.example` إلى `.env` واملأ `HF_TOKEN` (إلزامي) وبقية المفاتيح الاختيارية — أو أضفها كـ Environment Variables بإعدادات الـ Pod مباشرة.
+4. عدّل القيم الثابتة في `app/config.py`، خصوصاً `hf_token` إذا كان تنزيل الموديل يحتاجه.
 5. شغّل:
    ```bash
    cd /workspace/back_end_iraqi && bash start.sh
@@ -82,7 +82,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 | الملف | الدور |
 |---|---|
-| `app/config.py` | إعدادات مشتركة عبر متغيرات بيئة (موديل، RAG، أدوات) — **بدون أي سر مكتوب بالكود** |
+| `app/config.py` | مصدر الإعدادات الثابتة الوحيد (الموديل، RAG، الأدوات، المنافذ والمفاتيح) |
 | `app/engine.py` | عميل vLLM: يتصل بخادم vLLM OpenAI-متوافق منفصل (منفذ 8001) عبر `/v1/chat/completions`، مع دعم `stop`/`result_holder`/`guided_json`/صور — vLLM يدير continuous batching وPagedAttention داخلياً |
 | `app/tool_loop.py` | حلقة استدعاء أدوات عامة بمخطط JSON صارم (`action: tool_call \| final_answer`) — مستخدمة من `sales` (`search_products`) و`support` (`get_order_status`) |
 | `app/tools/products.py` | أداة `search_products` — تجيب الكتالوج **كاملاً مرة وحدة لكل جلسة** (لا بحث لكل منتج)، تخزّنه بكاش الجلسة، وتُرجعه من الكاش بالاستدعاءات اللاحقة بلا HTTP جديد |
@@ -146,25 +146,11 @@ guided decoding يضمن JSON صالحاً فعلياً وقت التوليد ن
 
 **استعلامات الموظفين التشغيلية** (`app/features/support/router.py`): بوت الدعم **داخلي للموظفين**، فكل بيانات الطلبات متاحة إلهم. الاستعلام بالحالة («شنو الطلبات قيد التوصيل؟») والجرد العام وأرقام الهواتف — كلها تُجاب حتمياً من `orders.json` مباشرة، لا بالموديل: الموديل مرصود إنه يخترع معرّفات ويسند لها حالات غلط. الاستعلام بالحالة يجي **بعد** فحص المعرّفات عمداً، حتى «حالة ORD-1001» ترجع ذاك الطلب بالذات. التغطية بـ `tests/test_support_queries.py`.
 
-## الإعداد (متغيرات بيئة — انسخ [.env.example](.env.example) إلى `.env`)
+## الإعداد الثابت
 
-| المتغير | الافتراضي | الوصف |
-|---|---|---|
-| `MODEL_NAME` | `ameer4wisam/gemma-iraqi-finetune-v2` | الموديل المدموج (base + LoRA اللهجة العراقية مندمجين بالأوزان فعلياً، يشمل أبراج الرؤية/الصوت — ينزّله خادم vLLM تلقائياً من HF Hub) |
-| `HF_TOKEN` | (فارغ) | **مطلوب** — Gemma موديل بوابة (gated) والمستودع المدموج قد يكون خاصاً، بدون توكن صحيح يفشل التنزيل بخطأ 401/403 |
-| `VLLM_BASE_URL` | `http://127.0.0.1:18001/v1` | عنوان خادم vLLM من جهة الباك اند (`app/engine.py`) |
-| `VLLM_PORT` | `18001` | منفذ خادم vLLM (يقرأه `start.sh`) — لازم يطابق رقم المنفذ بـ `VLLM_BASE_URL` |
-| `GPU_MEMORY_UTILIZATION` | `0.90` | نسبة VRAM لموديل vLLM + KV cache (حسب الوصفة الرسمية) |
-| `MAX_MODEL_LEN` | `10000` | أقصى طول سياق — أقصر = KV cache يتسع لطلبات متزامنة أكثر |
-| `RAG_TOP_K` | `5` | عدد وثائق RAG المسترجَعة لكل سؤال |
-| `WHISPER_MODEL_AR` (`WHISPER_MODEL` متوافق) | `ayoubkirouane/whisper-small-ar` | موديل تحويل الصوت لنص العربي |
-| `WHISPER_MODEL_KU` | `roshna-omer/whisper-small-Kurdish-Sorani` | موديل تحويل الصوت لنص السوراني |
-| `TTS_MODEL_AR` (`TTS_MODEL` متوافق) | `ameer4wisam/Habibi-TTS-IRQ` | موديل النطق العراقي |
-| `TTS_MODEL_KU` | `aranemini/central-kurdish-tts` | موديل النطق السوراني |
-| `SYSTEM_BACKEND_BASE_URL` | `http://127.0.0.1:9000` | رابط باك اند السستم (بيانات المنتجات/الطلبات الحقيقية) — انظر § باك اند السستم أعلاه |
-| `SALES_API_KEY` / `SUPPORT_API_KEY` / `ORDERS_API_KEY` | ثابتة بـ `app/config.py` (انظر تحذير أدناه) | مفاتيح X-API-Key لكل خدمة — انظر [API.md § المصادقة](docs/API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة) |
+كل الإعدادات موجودة حصراً في `app/config.py` ولا يمكن تغييرها من `.env` أو من متغيرات بيئة النظام. عدّل حقول `Settings` هناك، بما فيها `model_name` و`vllm_base_url` و`vllm_port` و`gpu_memory_utilization` و`max_model_len` والمفاتيح. إذا احتاج Hugging Face صلاحية للوصول إلى الموديل، اكتبها في `hf_token` بنفس الملف.
 
-**تحذير أمني**: القاعدة العامة لا تكتب أي قيمة سرّية مباشرة بأي ملف `.py` — فقط عبر `.env` (مستثنى من git) أو Environment Variables بإعدادات RunPod، و`app/config.py` يقرأها تلقائياً. **الاستثناء الوحيد المتعمَّد**: مفاتيح `sales_api_key`/`support_api_key`/`orders_api_key` مكتوبة كقيمة ثابتة مباشرة بـ`app/config.py` (بطلب صريح — تفادياً لضبط `.env` بكل بيئة تشغيل)، وهذا يعني أنها **مرئية لأي شخص يصل لهذا المستودع**. لو تحتاج مفاتيح فعلاً سرّية (مثلاً نشر علني على GitHub)، عرّف نفس الأسماء (`SALES_API_KEY`, `SUPPORT_API_KEY`, `ORDERS_API_KEY`) بـ`.env` — تتجاوز الثابتة بالكود تلقائياً.
+**تنبيه أمني**: القيم في هذا الملف مرئية لكل من يصل إلى المستودع؛ لا تنشره علناً إن وضعت فيه مفاتيح أو توكنات حقيقية.
 
 ## تنزيل الموديل والمحوّل تلقائياً
 
@@ -177,12 +163,12 @@ guided decoding يضمن JSON صالحاً فعلياً وقت التوليد ن
   التحويل المناسب تلقائياً أول استخدام (أول طلب أبطأ بسبب التنزيل، بعدها من
   الكاش)، ويُحمَّل على الـ GPU بنصف الدقة إن توفّر مع تقطيع تلقائي كل 30 ثانية.
 
-**خطوة لازمة قبل أول تشغيل — إعداد `HF_TOKEN`:**
+**خطوة لازمة قبل أول تشغيل — إعداد `hf_token`:**
 
 1. اقبل ترخيص Gemma على حسابك في Hugging Face (صفحة الموديل → Agree and access repository).
 2. تأكد أن نفس الحساب (أو حساب له صلاحية وصول) يقدر يفتح مستودع `ameer4wisam/gemma-iraqi-finetune` إذا كان خاصاً.
 3. ولّد Access Token من https://huggingface.co/settings/tokens (صلاحية Read تكفي).
-4. أضفه بـ `.env` محلياً أو كمتغير بيئة `HF_TOKEN` بإعدادات الـ Pod/Template على RunPod.
+4. ضعه في `hf_token` داخل `app/config.py`.
 
 بدون هذا التوكن، أول تشغيل يفشل بخطأ 401/403 عند محاولة تحميل الموديل أو المحوّل.
 
