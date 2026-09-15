@@ -44,13 +44,14 @@ uvicorn app.main:app --reload --port 8000
 
 > توثيق كامل لكل نقطة (أمثلة طلبات/استجابات، شكل بث SSE، أخطاء) في [API.md](docs/API.md).
 
-كل خدمة محمية بمفتاح API خاص بها (هيدر `X-API-Key`، مستقل تماماً بين الخدمات) — تفاصيل المفاتيح والأمثلة في [API.md § المصادقة](docs/API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة).
+الخدمات القديمة محمية بمفتاح API خاص بها (هيدر `X-API-Key`، مستقل تماماً بين الخدمات) — تفاصيل المفاتيح والأمثلة في [API.md § المصادقة](docs/API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة). نقطة OpenAI الداخلية الجديدة لا تنفّذ الأدوات ولا تستقبل توكن المستخدم؛ jbot يملك المصادقة وعزل الشركات وتنفيذ الأدوات.
 
 | النقطة | الوصف | يحتاج مفتاح |
 |---|---|---|
 | `GET /health` | فحص الصحة | لا |
 | `GET /gpu` | معلومات GPU/CUDA وحالة محرك الموديل | لا |
 | `GET /metrics` | إحصاءات عميل vLLM (طلبات، أخطاء، أزمنة استجابة) | لا |
+| `POST /v1/chat/completions` | واجهة OpenAI/Spring AI بلا حالة — native function calling، والتنفيذ الفعلي للأدوات عند jbot | لا |
 | `POST /sales/chat` | وكيل مبيعات — رد كامل، يرجع `order` مملوءاً تلقائياً عند تثبيت الطلب | `sales_api_key` |
 | `POST /sales/chat/stream` | وكيل مبيعات — بث SSE حقيقي توكن-بتوكن، حدث `done` النهائي يحمل `order` | `sales_api_key` |
 | `POST /support/chat` | دعم عملاء — تتبع طلب برقم الطلب/الهاتف حتمياً، أو سؤال عام عبر أداة `get_order_status` | `support_api_key` |
@@ -83,7 +84,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 | الملف | الدور |
 |---|---|
 | `app/config.py` | مصدر الإعدادات الثابتة الوحيد (الموديل، RAG، الأدوات، المنافذ والمفاتيح) |
-| `app/engine.py` | عميل vLLM: يتصل بخادم vLLM OpenAI-متوافق منفصل (منفذ 8001) عبر `/v1/chat/completions`، مع دعم `stop`/`result_holder`/`guided_json`/صور — vLLM يدير continuous batching وPagedAttention داخلياً |
+| `app/engine.py` | عميل vLLM: يتصل بخادم vLLM OpenAI-متوافق منفصل (منفذ 18001) عبر `/v1/chat/completions`، مع دعم native tools و`guided_json`/صور — vLLM يدير continuous batching وPagedAttention داخلياً |
 | `app/tool_loop.py` | حلقة استدعاء أدوات عامة بمخطط JSON صارم (`action: tool_call \| final_answer`) — مستخدمة من `sales` (`search_products`) و`support` (`get_order_status`) |
 | `app/tools/products.py` | أداة `search_products` — تجيب الكتالوج **كاملاً مرة وحدة لكل جلسة** (لا بحث لكل منتج)، تخزّنه بكاش الجلسة، وتُرجعه من الكاش بالاستدعاءات اللاحقة بلا HTTP جديد |
 | `app/context_blocks.py` | صياغة نتائج RAG (لهجة/مواقع) لاستخراج الطلب (`plane.md`)، **و**بناء مقطع الكتالوج/دفتر الطلبات الكامل المحقون بردود المبيعات/الدعم المباشرة (`catalog_context_block`/`orders_context_block`) + سقف الحقن المشترك (`cap_for_model`) |
@@ -117,7 +118,8 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 دعم معمارية `Gemma4ForConditionalGeneration` وصل لـ vLLM عبر [PR #44429](https://github.com/vllm-project/vllm/pull/44429) — متوفر حالياً فقط بنسخة nightly (يثبّتها `start.sh` تلقائياً، انظر [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md))، ولم يصدر بعد بإصدار مستقر. (هذا حلّ الباغ القديم [#44788](https://github.com/vllm-project/vllm/issues/44788) الذي فرض علينا سابقاً محرك transformers + micro-batching يدوي — حُذف ذلك المسار بالكامل.)
 
 - **قالب المحادثة بجهة الخادم**: `/v1/chat/completions` يستقبل `messages` مباشرة وvLLM يطبّق chat template الموديل الفعلي — `render_prompt()` صارت تمريراً مباشراً.
-- **Structured outputs**: كل رد (سواء استخراج طلب أو حلقة أدوات) عبر `guided_json` → `response_format: json_schema` — vLLM يقيّد التوليد بالمخطط فعلياً (guided decoding)، مو مجرد تلميح بالبرومبت.
+- **Native tool calling**: المسار العام `/v1/chat/completions` يمرر `tools` و`tool_choice` مباشرة إلى vLLM؛ الخادم يعمل بـ`--enable-auto-tool-choice --tool-call-parser gemma4` ويرجع `tool_calls` الأصلي إلى jbot.
+- **Structured outputs للمسارات القديمة**: استخراج الطلب وحلقات أدوات `/sales` و`/support` تبقى عبر `guided_json` → `response_format: json_schema` بلا تغيير.
 - **صور**: تُرسل كـ `image_url` (data URI base64) بنفس الطلب — نفس الموديل، ماكو نسخة ثانية.
 - **حتمي دائماً**: `temperature=0.0` بكل الطلبات (وصفة النوتبوك المعتمدة — أي sampling أنتج انهيار مخرجات بالتجربة).
 - **RAG محدود لاستخراج الطلب فقط**: `app/rag/` (لهجة + مواقع) يُستدعى فقط عند بناء الطلب النهائي (`plane.md`) لتصحيح المحافظة/المنطقة — لا يُحقن بردود المبيعات/الدعم المباشرة، والموديل يطلب بيانات منتج بنفسه عبر أداة `search_products`.
@@ -127,7 +129,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 ### آلية "الوكيل يقرر" و"استدعاء الأدوات"
 
-بدل الاعتماد على tool-calling الأصلي لأي محرك (غير مؤكّد الدعم لموديل حديث جداً مثل Gemma 4)، كل رد من الموديل بميزتَي `sales`/`support` مقيَّد بمخطط JSON صارم واحد (guided_json، انظر `app/tool_loop.py`):
+المساران القديمان `sales` و`support` يبقيان مقيّدين بمخطط JSON صارم واحد (`guided_json`، انظر `app/tool_loop.py`) حفاظاً على سلوكهما أثناء الانتقال. أما `/v1/chat/completions` فيستخدم native function calling ويترك الحلقة وتنفيذ الأدوات عند jbot:
 
 ```json
 {

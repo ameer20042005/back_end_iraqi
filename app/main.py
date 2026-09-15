@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.engine import llm_engine
 from app.features.order_intake.router import router as order_intake_router
+from app.features.openai_compat.router import router as openai_compat_router
 from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
 from app.features.support.router import router as support_router
@@ -133,6 +134,7 @@ app.add_middleware(
 
 app.include_router(sales_router)
 app.include_router(support_router)
+app.include_router(openai_compat_router)
 app.include_router(order_intake_router)
 app.include_router(voice_followup_router)
 

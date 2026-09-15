@@ -229,6 +229,8 @@ _start_vllm() {
         --max-num-seqs "${MAX_NUM_SEQS}" \
         --async-scheduling \
         --enable-prefix-caching \
+        --enable-auto-tool-choice \
+        --tool-call-parser gemma4 \
         --limit-mm-per-prompt '{"image": 1, "audio": 0}' \
         > "${VLLM_LOG}" 2>&1 &
     VLLM_LAST_PID=$!

@@ -131,8 +131,9 @@ class LLMEngine:
         self, messages: List[Message], tools: Optional[List[dict]] = None
     ) -> List[Message]:
         """كان يحوّل الرسائل لنص عبر chat template محلي — الآن vLLM يطبّق
-        القالب بجهة الخادم، فنمرر الرسائل كما هي. `tools` غير مستخدمة (بروتوكول
-        الأدوات عندنا نصّي عبر app/tool_loop.py، مو native function-calling)."""
+        القالب بجهة الخادم، فنمرر الرسائل كما هي. `tools` غير مستخدمة بهذه
+        الدالة؛ المسارات القديمة تستعمل app/tool_loop.py، والمسار المتوافق مع
+        OpenAI يمرر الأدوات الأصلية عبر create_chat_completion()."""
         return messages
 
     def render_multimodal_prompt(self, messages: List[Message]) -> List[Message]:
@@ -182,6 +183,8 @@ class LLMEngine:
         stop: Optional[List[str]],
         guided_json: Optional[dict],
         stream: bool = False,
+        tools: Optional[List[dict]] = None,
+        tool_choice: Optional[object] = None,
     ) -> dict:
         body: dict = {
             "model": settings.model_name,
@@ -200,6 +203,13 @@ class LLMEngine:
                 "type": "json_schema",
                 "json_schema": {"name": "extraction", "schema": guided_json},
             }
+        if tools:
+            # Native OpenAI tool calling. This is intentionally separate from
+            # guided_json, which remains the protocol used by the legacy
+            # in-process tool loops. vLLM parses Gemma 4 tool tokens when the
+            # server starts with --tool-call-parser gemma4.
+            body["tools"] = tools
+            body["tool_choice"] = tool_choice if tool_choice is not None else "auto"
         return body
 
     async def _chat_completion(
@@ -208,8 +218,13 @@ class LLMEngine:
         max_tokens: int,
         stop: Optional[List[str]],
         guided_json: Optional[dict],
+        tools: Optional[List[dict]] = None,
+        tool_choice: Optional[object] = None,
     ) -> dict:
-        body = self._build_body(messages, max_tokens, stop, guided_json)
+        body = self._build_body(
+            messages, max_tokens, stop, guided_json,
+            tools=tools, tool_choice=tool_choice,
+        )
 
         if not self._ready:
             raise RuntimeError("لا يوجد خادم vLLM جاهز حالياً")
@@ -229,6 +244,29 @@ class LLMEngine:
             if len(self.metrics["request_latencies_ms"]) > 500:
                 self.metrics["request_latencies_ms"] = self.metrics["request_latencies_ms"][-500:]
         return resp.json()
+
+    async def create_chat_completion(
+        self,
+        messages: List[Message],
+        tools: Optional[List[dict]] = None,
+        tool_choice: Optional[object] = "auto",
+        max_tokens: Optional[int] = None,
+    ) -> dict:
+        """Return one native OpenAI chat completion from vLLM.
+
+        Unlike ``generate_full``, this method does not request guided JSON and
+        does not flatten the upstream response to text. Native ``tool_calls``
+        must remain intact for the OpenAI-compatible public adapter.
+        """
+        openai_messages = self._to_openai_messages(messages, multi_modal_data=None)
+        return await self._chat_completion(
+            openai_messages,
+            max_tokens=max_tokens or settings.max_new_tokens,
+            stop=None,
+            guided_json=None,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
 
     async def stream_chat_completion(
         self,
