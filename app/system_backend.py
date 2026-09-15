@@ -9,7 +9,7 @@
 - `request()`: يغلّف كل نداء بمعالجة موحّدة للأخطاء (اتصال، 5xx، **و4xx**).
 - `auth_headers()`: ترويسات المصادقة (مفتاح الخدمة + توكن المستخدم الأصلي).
 
-انظر docs/fix-plan.md § المرحلة 7 (الأعطال A5 · A6 · B6)."""
+"""
 
 import logging
 from contextvars import ContextVar
@@ -21,13 +21,12 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# توكن المستخدم الأصلي (JWT) الذي وصل مع طلب /support/chat من jbot، محفوظ
-# بسياق الطلب الحالي ليُمرَّر كما هو لباك اند السستم.
+# توكن المستخدم الأصلي (JWT) محفوظ بسياق الطلب الحالي ليُمرَّر كما هو
+# لباك اند السستم عند الحاجة.
 #
-# ليش ContextVar مو معامل دالة؟ لأن api_key يمر عبر ~10 دوال بين الراوتر
-# وorder_gateway (_deterministic_status_answer، _list_all_cached، بناء الاستعلام،
-# ...). إضافة معامل ثانٍ لكل واحدة تعديل واسع بلا فائدة. ContextVar يُضبط مرة
-# وحدة بأول الراوتر ويُقرأ بـ auth_headers() تحت — وكل طلب asyncio عنده نسخته
+# ليش ContextVar مو معامل دالة؟ لأن إضافة معامل توكن إلى كل طبقات الاستدعاء
+# تعديل واسع بلا فائدة. ContextVar يُضبط مرة ويُقرأ بـ auth_headers() تحت —
+# وكل طلب asyncio عنده نسخته
 # المعزولة من السياق، فما يتسرّب توكن مستخدم لطلب مستخدم ثانٍ. نفس فكرة
 # UserContext (ThreadLocal) بجهة jbot.
 caller_auth_token: ContextVar[Optional[str]] = ContextVar("caller_auth_token", default=None)

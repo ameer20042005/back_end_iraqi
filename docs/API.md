@@ -9,37 +9,37 @@
 
 ## المصادقة — مفتاح API خاص لكل خدمة
 
-كل خدمة (المبيعات، الدعم، إنشاء الطلبات، المتابعة الصوتية) محمية بمفتاحها الخاص المستقل تماماً عن غيرها. المفتاح يُرسَل بهيدر HTTP:
+كل خدمة محمية (المبيعات، إنشاء الطلبات، المتابعة الصوتية) تستخدم مفتاحها الخاص المستقل تماماً عن غيرها. المفتاح يُرسَل بهيدر HTTP:
 
 ```
 X-API-Key: <المفتاح>
 ```
 
-| الخدمة | النقاط المحمية | المتغير (app/config.py) | القيمة الثابتة الحالية |
+| الخدمة | النقاط المحمية | مصدر المفتاح | القيمة الثابتة الحالية |
 |---|---|---|---|
+| واجهة OpenAI | `POST /v1/chat/completions` | `OPENAI_COMPAT_API_KEY` في `app/features/openai_compat/auth.py` | `sk-openai-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f` |
 | المبيعات | `POST /sales/chat`, `POST /sales/chat/stream` | `sales_api_key` | `sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2` |
-| الدعم | `POST /support/chat` | `support_api_key` | `sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f` |
 | إنشاء الطلبات | `POST /orders/create` | `orders_api_key` | `sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c` |
 | المتابعة الصوتية | `POST /voice_followup/ask`, `POST /voice_followup/respond` | `voice_followup_api_key` | `sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b` |
 
 - **النقاط المفتوحة بلا مفتاح**: `GET /health`, `GET /gpu`, `GET /`, `GET /docs`.
-- **مفتاح خدمة لا يشتغل بخدمة ثانية** — مفتاح المبيعات مرفوض على `/support/chat` وبالعكس، كل خدمة تتحقق من مفتاحها هي حصراً (انظر `app/auth.py`).
+- **مفتاح خدمة لا يشتغل بخدمة ثانية** — كل خدمة تتحقق من مفتاحها هي حصراً (انظر `app/auth.py`).
 - **القيم مكتوبة ثابتة بالكود** (`app/config.py`) لتشتغل فوراً بلا أي إعداد خارجي. لتغييرها، عدّل حقول المفاتيح في الملف نفسه ثم أعد تشغيل الخادم.
 
 **أمثلة استدعاء:**
 
 ```bash
+# OpenAI-compatible
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk-openai-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f" \
+  -d '{"model":"jbot","messages":[{"role":"user","content":"هلا"}]}'
+
 # مبيعات
 curl -X POST http://localhost:8000/sales/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
   -d '{"message": "شنو عندكم لابتوبات؟"}'
-
-# دعم
-curl -X POST http://localhost:8000/support/chat \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f" \
-  -d '{"message": "وين طلبي ORD-1001؟"}'
 
 # إنشاء طلب (multipart)
 curl -X POST http://localhost:8000/orders/create \
@@ -66,15 +66,15 @@ curl -X POST http://localhost:8000/voice_followup/ask \
 
 `GET /docs` — Swagger UI يبني نفسه تلقائياً من الكود؛ لتجربة نقطة محمية منه اضغط زر **Authorize** وأدخل قيمة الهيدر `X-API-Key` المطابقة للخدمة. هذا الملف توثيق مرجعي إضافي (سياق الاستخدام، أمثلة، شكل الـ SSE).
 
-**لوحة الاختبار الجاهزة** (`GET /test`، أو افتح `static/index.html` مباشرة): فيها ثلاث خانات إدخال بالشريط الجانبي (مفتاح المبيعات/الدعم/إنشاء الطلبات) معبّأة مسبقاً بنفس القيم الثابتة أعلاه — كل نقطة بالقائمة ترسل تلقائياً هيدر `X-API-Key` بالمفتاح المطابق لخدمتها. القيم تُحفظ بمتصفحك (`localStorage`) فتقدر تغيّرها بعد تعديل مفاتيح `app/config.py`.
+**لوحة الاختبار الجاهزة** (`GET /test`، أو افتح `static/index.html` مباشرة): فيها خانات مفاتيح الخدمات المحمية معبّأة مسبقاً بنفس القيم الثابتة أعلاه — كل نقطة بالقائمة ترسل تلقائياً هيدر `X-API-Key` بالمفتاح المطابق لخدمتها. القيم تُحفظ بمتصفحك (`localStorage`) فتقدر تغيّرها بعد تعديل مفاتيح `app/config.py`.
 
 ---
 
 ## آلية عمل الموديل داخلياً — مخطط JSON صارم لكل رد (tool_call / final_answer)
 
-**هذا داخلي بحت وما يظهر بجسم استجابة `/sales/chat` أو `/support/chat`** — العميل المستهلك للـ API يشوف فقط `answer` النهائي كنص عادي. القسم هذا يشرح كيف يقرر النموذج نفسه، بجهة الخادم، متى يحتاج بيانات (منتج، حالة طلب) قبل ما يصيغ الجواب — لفهم دقيق لسلوك النظام ولو احتجت تبني/تصحّح أدوات جديدة (`app/tool_loop.py`).
+**هذا داخلي بحت وما يظهر بجسم استجابة `/sales/chat`** — العميل المستهلك للـ API يشوف فقط `answer` النهائي كنص عادي. القسم هذا يشرح كيف يقرر النموذج نفسه، بجهة الخادم، متى يحتاج بيانات المنتج قبل ما يصيغ الجواب (`app/tool_loop.py`).
 
-بدل الاعتماد على tool-calling الأصلي لأي محرك، كل استدعاء توليد بميزتَي `sales`/`support` مقيَّد بـ **guided decoding** (`response_format.json_schema` بجهة vLLM — انظر `app/engine.py`) بهذا المخطط الصارم:
+مسار `sales` مقيَّد بـ **guided decoding** (`response_format.json_schema` بجهة vLLM — انظر `app/engine.py`) بهذا المخطط الصارم:
 
 ```json
 {
@@ -105,7 +105,7 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 ### كيف تُستهلك النتيجة (`app/tool_loop.py::run_with_tools`)
 
 1. الموديل يولّد رداً واحداً مطابقاً للمخطط أعلاه.
-2. **إذا `action == "tool_call"`**: الباك اند يقرأ `tool_call.tool` (اسم الأداة) و`tool_call.args` (معاملاتها)، ينفّذ الأداة المطابقة فعلياً (استعلام حقيقي — مثل `search_products` أو `get_order_status`)، ويضيف نتيجتها كرسالة جديدة بالمحادثة، ثم يعيد التوليد بجولة ثانية (حتى `max_rounds`، افتراضياً 3).
+2. **إذا `action == "tool_call"`**: الباك اند يقرأ `tool_call.tool` (اسم الأداة) و`tool_call.args` (معاملاتها)، ينفّذ الأداة المطابقة مثل `search_products`، ويضيف نتيجتها للمحادثة، ثم يعيد التوليد بجولة ثانية.
 3. **إذا `action == "final_answer"`**: `final_answer` هو النص الذي يصل للعميل فعلياً بحقل `answer` بجسم الاستجابة — تنتهي الحلقة.
 
 **مثال `tool_call` فعلي** (النموذج يطلب الكتالوج أول مرة بالمحادثة — انظر "تحميل الكتالوج مرة وحدة بالجلسة" أدناه):
@@ -129,13 +129,12 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 | الميزة | الأداة (`tool`) | التنفيذ الفعلي |
 |---|---|---|
 | المبيعات | `search_products` | `app/tools/products.py::search_products_tool` — استعلام حي على باك اند السستم، **مرة وحدة لكل جلسة** (انظر أدناه) |
-| الدعم | `get_order_status` | `app/features/support/router.py::_get_order_status_tool` — استعلام حي (`args.order_id` أو `args.phone` أو `args.status` أو `args.all`) |
 
 النموذج **ما يفترض وجود أدوات أخرى غير المسجَّلة**؛ لو رجّع `tool_call.tool` باسم غير معروف، الباك اند يرجّع `{"error": "أداة غير معروفة: ..."}` كنتيجة، والموديل يكمل الحلقة (بدل ما ينهار).
 
-### تحميل الكتالوج/دفتر الطلبات مرة وحدة بالجلسة (بدل بحث لكل عنصر)
+### تحميل الكتالوج مرة وحدة بالجلسة (بدل بحث لكل عنصر)
 
-`search_products`/`get_order_status(all=true)` **لا يضيّقان النتيجة بـquery بحث** — أول استدعاء بكل جلسة يجيب الكتالوج الكامل (أو دفتر الطلبات الكامل بالدعم) من باك اند السستم ويخزّنه بذاكرة الجلسة (`app/sessions.py::cache_catalog`/`cache_orders`)، ثم يُحقن **تلقائياً** كرسالة `system` إضافية بكل رسالة لاحقة بنفس الجلسة (`app/context_blocks.py::catalog_context_block`/`orders_context_block`) — الموديل يدوّر بالبيانات الكاملة المحقونة (بضمنه اقتراح بدائل مشابهة، والبحث باسم الزبون بالدعم) بدل استدعاء أداة جديد لكل عنصر يُسأل عنه. `args.category`/`args.in_stock_only` يبقيان يضيّقان رد **نفس الدور** فقط (فلترة محلية على الكتالوج المحمَّل، بلا طلب HTTP إضافي). الحجم المحقون محدود بـ`settings.max_injected_records` (افتراضياً 80 عنصر) لحماية ميزانية `max_model_len` — تحذير باللوق لو الكتالوج/الدفتر الحقيقي أكبر.
+أول استدعاء لـ`search_products` بكل جلسة يجيب الكتالوج من باك اند السستم ويخزّنه بذاكرة الجلسة (`app/sessions.py::cache_catalog`)، ثم يُحقن **تلقائياً** كرسالة `system` إضافية بكل رسالة لاحقة (`app/context_blocks.py::catalog_context_block`). الحجم المحقون محدود بـ`settings.max_injected_records` لحماية ميزانية `max_model_len`.
 
 ### حقل إضافي بالمبيعات: `order_ready`
 
@@ -153,17 +152,17 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 
 ---
 
-## عقد باك اند السستم — الشكل الرسمي الثابت لاستجابات المنتجات والطلبات
+## عقد باك اند السستم — الشكل الرسمي لاستجابات المنتجات
 
-**هذا القسم موجّه لفريق باك اند السستم** (وليس للعميل المستهلك لـ `/sales/chat` أو `/support/chat`): يوثّق الشكل الرسمي المطلوب من نقاط باك اند السستم الخمس (`GET /products/search`، `GET /products/{id}`، `GET /orders/{order_id}`، `GET /orders/search`، `GET /orders`) — نفس العقد يُستخدم من **الميزات الثلاث بلا استثناء**: المبيعات (`search_products`)، الدعم (`get_order_status`)، والمتابعة الصوتية (تستهلك حقول الطلب نفسها عبر `VoiceFollowupOrderRequest`، انظر `app/features/voice_followup/schema.py`).
+**هذا القسم موجّه لفريق باك اند السستم**: يوثّق الشكل الرسمي لاستجابات المنتجات التي تستهلكها المبيعات.
 
 ### لماذا هذا العقد أُضيف
 
-قبله، `app/products.py`/`app/order_gateway.py` كانا يمرران `resp.json()` كما هو بلا أي تحقق برمجي — أي شكل يرجعه باك اند السستم فعلياً يمر للموديل حرفياً. الموديل **يقرأ** أي JSON كنص عربي عادي، لكن هذا لا يعني أنه **يتحقق** من اكتماله أو صحته؛ الانضباط الوحيد كان تعليمات البرومبت ("الأسعار والأرقام حصراً من نتيجة search_products كما هي حرفياً" — `app/features/sales/prompts.py`)، بلا أي شبكة أمان برمجية لو تغيّر شكل الحقول فعلياً. الآن كل استجابة تمر عبر Pydantic (`app/system_backend_schema.py`) قبل ما تصل لأي أداة أو مسار حتمي.
+قبله، كان `app/products.py` يمرر `resp.json()` بلا تحقق برمجي. الآن تمر استجابات الكتالوج عبر Pydantic (`app/system_backend_schema.py`) قبل وصولها إلى أداة البحث.
 
 ### مصدر أسماء الحقول
 
-مبنية على أعمدة `catalog.products` / `catalog.stock_info` و`catalog.sells` / `catalog.sell_items` **الحقيقية** كما موثّقة بـ [assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md](<assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md>) — وليست أسماء مخترعة. مسطّحة لصيغة REST بسيطة بدل انعكاس الـ joins الداخلية حرفياً.
+مبنية على أعمدة `catalog.products` و`catalog.stock_info` الحقيقية كما موثّقة بـ [assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md](<assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md>).
 
 ### `SystemProduct` — عنصر واحد بـ `results` (`GET /products/search`) أو جسم `GET /products/{id}`
 
@@ -182,46 +181,15 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 | `photos` | string[] | لا (افتراضي `[]`) | `products.photos` (JSON) | روابط صور المنتج |
 | `deleted_at` | string \| null | لا | `products.deleted_at` | ISO 8601 — منتج محذوف منطقياً إن وُجدت قيمة |
 
-### `SystemOrder` — عنصر بـ `orders` (`GET /orders/search`, `GET /orders`) أو جسم `GET /orders/{order_id}`
-
-| الحقل | النوع | إلزامي | يقابل عمود قاعدة البيانات | الوصف |
-|---|---|---|---|---|
-| `order_id` | string | **نعم** | `sells.receipt_number` أو `sells.id` | مثلاً `ORD-1001` — نفس الصيغة التي يستخرجها `app/features/support/router.py::extract_order_id` من رسالة الموظف |
-| `status` | string \| null | لا | `sells.sell_status` (أو مرادفه العربي) | نص عربي حر — تُطابَق ضده مرادفات `_STATUS_SYNONYMS` وقت التشغيل، لا قائمة ثابتة بالعقد |
-| `current_stage` | string \| null | لا **(TODO — غير مربوط بعد)** | `sell_flow_stage.name` (عبر `sells.current_step_id → sell_flow_step.id → sell_flow_stage.id`) | مرحلة سير عمل الطلب (`ORDER_FULFILLMENT`، `OUT_FOR_DELIVERY`، `RETURN`، `FINISHED`...) — يلزم لسؤال «بأي مرحلة الطلب؟» |
-| `current_step` | string \| null | لا **(TODO)** | `sell_flow_step.name` | الخطوة الدقيقة داخل المرحلة (مثلاً `requires_manifest_info`) |
-| `step_entered_at` | string \| null | لا **(TODO)** | آخر سطر بـ `sell_flow_transition_log` لنفس الطلب | ISO 8601 — منذ متى الطلب بهذي الخطوة، أساس حساب «التأخير» |
-| `customer_name` | string \| null | لا | `sells.customer_name` | |
-| `phone` | string \| null | لا | `sells.customer_phone_number` | صيغة عراقية `07XXXXXXXXX` |
-| `customer_city` | string \| null | لا | اسم المحافظة (`commondata.cities.name_arabic`) | |
-| `customer_district` | string \| null | لا | `delivery_info->>'districtId'` محلولاً لاسم | |
-| `address` | string \| null | لا | `delivery_info` (jsonb) | نص العنوان الكامل |
-| `items` | `SystemOrderItem[]` | لا (افتراضي `[]`) | `sell_items` | انظر الجدول التالي |
-| `total` | number \| null | لا | `sells.total_price` | |
-| `currency` | string \| null | لا (افتراضي `"IQD"`) | — | |
-| `assigned_transporter` | string \| null | لا **(TODO — غير مربوط بعد)** | `transporters.name` (عبر `sells.assigned_transporter_id`) | مندوب/شركة التوصيل الموكَّلة — يلزم لسؤال «مين المندوب المسؤول؟» و«كم طلب عنده؟» |
-| `eta` | string \| null | لا | `sells.estimated_delivery_date` | نص جاهز للعرض المباشر |
-| `created_at` | string \| null | لا | `sells.created_at` | ISO 8601 |
-
-### `SystemOrderItem` — عنصر واحد بمصفوفة `items`
-
-| الحقل | النوع | إلزامي | يقابل عمود قاعدة البيانات |
-|---|---|---|---|
-| `product_id` | string \| null | لا | `sell_items.product_id` |
-| `product_name` | string | **نعم** | اسم المنتج بسطر الطلب |
-| `quantity` | integer | لا (افتراضي `1`) | `sell_items.qty` |
-| `unit_price` | number \| null | لا | `sell_items.unit_price` |
-| `line_total` | number \| null | لا | `sell_items.net_amount` أو مكافئه |
-
 ### سياسة التسامح (مقصودة)
 
-- **كل الحقول اختيارية عدا معرّف واحد لكل نموذج** (`id`/`name` للمنتج، `order_id`/`product_name` للطلب وسطوره). حقل ناقص بالاستجابة الفعلية **لا يفشّل الطلب بالكامل** — يتحوّل تلقائياً لـ `null`، والموديل مبرمج أصلاً (بالبرومبت) يقول "أتأكدلك من السعر" بدل ما يخترع قيمة لحقل ناقص، بدل ما نرفض الاستجابة كلها.
-- **عنصر واحد فاشل التحقق (نوع بيانات خاطئ تماماً، لا حقل ناقص فقط) يُستبعَد بصمت من القائمة** — تحذير باللوق (`logger.warning`)، بلا رمي استثناء يكسر باقي النتائج السليمة بنفس الاستدعاء. التطبيق: `app/products.py::_parse_products`، `app/order_gateway.py::_parse_orders`.
+- الحقول الجوهرية `id` و`name` و`price` إلزامية؛ بقية الحقول اختيارية.
+- عنصر يفشل التحقق يُستبعَد مع تحذير باللوق من دون كسر بقية نتائج الكتالوج.
 - **حقول إضافية غير موثّقة هنا تمر بلا رفض** (`model_config = ConfigDict(extra="allow")`) — إضافة عمود جديد بباك اند السستم لا تكسر شيئاً، فقط لا تُتحقق ولا تصل تلقائياً للموديل إلا لو أُضيفت صراحة للعقد.
 
 ### أين التعريف الرسمي بالكود
 
-`app/system_backend_schema.py` — `SystemProduct`, `SystemProductSearchResponse`, `SystemOrder`, `SystemOrderItem`, `SystemOrderListResponse` (Pydantic). هذا الملف هو **مصدر الحقيقة الوحيد**؛ الجداول أعلاه انعكاس مقروء بشرياً له. أي تعديل بشكل الاستجابة الفعلي من باك اند السستم يبدأ بتعديل هذا الملف، ثم `app/products.py`/`app/order_gateway.py` (نقاط الاستهلاك)، بلا حاجة لتغيير أي router.
+`app/system_backend_schema.py` — `SystemProduct` و`SystemProductSearchResponse` (Pydantic).
 
 ---
 
@@ -393,76 +361,6 @@ while (true) {
 
 ---
 
-## دعم العملاء
-
-### `POST /support/chat`
-تتبع حالة طلب (برقم الطلب أو رقم الهاتف)، أو أي سؤال عام (يستخدم بحث ويب تلقائياً).
-
-**جسم الطلب:**
-```json
-{"message": "وين طلبي ORD-1001؟", "session_id": null}
-```
-
-| الحقل | النوع | إلزامي | الوصف |
-|---|---|---|---|
-| `message` | string | نعم | رسالة العميل |
-| `session_id` | string \| null | لا | نفس فكرة `/sales/chat` |
-
-**استجابة 200:**
-```json
-{
-  "session_id": "edcfa5ad-18c3-4995-a96f-fb8ff9b3bf26",
-  "answer": "طلبك ORD-1001 حالته: قيد التوصيل، متوقع يوصلك خلال يومين.",
-  "engine": "deterministic",
-  "tool_calls": []
-}
-```
-
-| الحقل | النوع | الوصف |
-|---|---|---|
-| `session_id` | string | نفسه لو أرسلته، أو معرّف جديد تولّد تلقائياً |
-| `answer` | string | رد الوكيل للعميل |
-| `engine` | string | `"deterministic"` (رقم طلب/هاتف/حالة أُجيب مباشرة من `orders.json` بلا موديل — الحالة الأدق والأشيع)، `"vllm"` (سؤال عام أُجيب بالموديل+أداة `get_order_status`)، أو `"fallback"` (محلياً بدون GPU ولا تطابق حتمي) |
-| `tool_calls` | array | سجل استدعاء أداة `get_order_status` — يمتلئ فقط لما `engine == "vllm"` (المسار الحتمي لا يمر بحلقة الأدوات أصلاً فيبقى فارغاً حتى لو أجاب بنفس المعلومة) |
-
-بيانات الطلبات نفسها (Mock حالياً — `app/order_gateway.py`) بصيغة:
-```json
-{
-  "order_id": "ORD-1001",
-  "phone": "07701234567",
-  "status": "قيد التوصيل",
-  "items": [{"product_name": "لابتوب لينوفو IdeaPad 15", "quantity": 1}],
-  "eta": "خلال يومين"
-}
-```
-
-### `POST /support/chat/stream`
-نفس مدخل `/support/chat` بالضبط، بصيغة SSE. **رقم طلب/هاتف/حالة صريحة بالرسالة** يُجاب حتمياً (`orders.json` مباشرة، بلا موديل) ويصل كدلتا واحدة فورية (بلا زمن استدلال). **أي سؤال عام آخر** يمر بجولة قرار مصغّرة (أداة `get_order_status` عند الحاجة) ثم بث حقيقي توكن-بتوكن لجولة النص الحرة — نفس بنية `/sales/chat/stream` تماماً.
-
-**تدفق الأحداث (سؤال عام):**
-```
-data: {"delta": "طلبك"}
-
-data: {"delta": " قيد التوصيل"}
-
-data: {"delta": "، متوقع يوصلك خلال يومين."}
-
-data: {"done": true, "session_id": "...", "tool_calls": [...]}
-
-```
-
-**تدفق الأحداث (رقم/حالة صريحة — مسار حتمي):**
-```
-data: {"delta": "طلبك ORD-1001 حالته: قيد التوصيل، متوقع يوصلك خلال يومين."}
-
-data: {"done": true, "session_id": "...", "tool_calls": []}
-
-```
-
-- الحدث الأخير دايماً `{"done": true, "session_id": ..., "tool_calls": [...]}` — بدون حقل `order` (هذا مختص بـ `/sales/chat*` فقط، الدعم لا يثبّت طلبات).
-
----
-
 ## إنشاء طلب من نص/صوت/صورة
 
 ### `POST /orders/create`
@@ -533,7 +431,7 @@ curl -X POST http://localhost:8000/orders/create -F "image=@order.jpg"
 | `501` | مدخل `image`/`audio` بسيرفر ماعنده `transformers`/`torch`/`Pillow` مثبَّتة (يصير محلياً بدون GPU؛ ما لازم يصير على RunPod بعد تثبيت `requirements-gpu.txt`) | نص يوضح السبب |
 | `503` | تحويل الصوت لنص غير متوفر بالسيرفر | "تحويل الصوت لنص غير متوفر محلياً..." |
 
-**ملاحظة**: مدخل `image` يستخدم نفس محرك vLLM ونفس أوزان الموديل المستخدَمة بـ `/sales/chat`/`/support/chat` — ماكو موديل ثانٍ يتحمّل ولا استهلاك ذاكرة إضافي.
+**ملاحظة**: مدخل `image` يستخدم نفس محرك vLLM ونفس أوزان الموديل المستخدَمة بـ `/sales/chat` — ماكو موديل ثانٍ يتحمّل ولا استهلاك ذاكرة إضافي.
 
 ---
 

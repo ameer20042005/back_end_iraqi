@@ -4,7 +4,7 @@ import asyncio
 import json
 
 from app.features.openai_compat import router as compat
-from app.features.support.prompts import SUPPORT_SYSTEM_PROMPT
+from app.features.openai_compat.prompts import OPENAI_COMPAT_SYSTEM_PROMPT
 from app.tool_loop import EXHAUSTED_FALLBACK
 
 
@@ -80,7 +80,7 @@ def test_tool_call_has_openai_shape_and_string_arguments(monkeypatch):
     assert engine.calls[0][1]["tools"][0]["function"]["name"] == "searchShipments"
     assert engine.calls[0][1]["tool_choice"] == "auto"
     assert engine.rendered[0]["role"] == "system"
-    assert engine.rendered[0]["content"].startswith(SUPPORT_SYSTEM_PROMPT)
+    assert engine.rendered[0]["content"].startswith(OPENAI_COMPAT_SYSTEM_PROMPT)
     assert response["usage"] == {"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16}
 
 

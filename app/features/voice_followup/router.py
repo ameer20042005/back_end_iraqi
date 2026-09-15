@@ -246,8 +246,7 @@ def postpone_days(choice: str, today: Optional[date] = None) -> int:
 
 def resolve_postpone_date(choice: str, today: Optional[date] = None) -> str:
     """يحسب تاريخ ISO الفعلي لخيار تأجيل مؤكَّد. `today` قابلة للتمرير
-    للاختبار (تاريخ ثابت بدل تاريخ التشغيل الفعلي) — نفس نمط
-    support/router.py::_resolve_relative_range."""
+    للاختبار (تاريخ ثابت بدل تاريخ التشغيل الفعلي)."""
     today = today or date.today()
     return (today + timedelta(days=postpone_days(choice, today))).isoformat()
 

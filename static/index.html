@@ -615,7 +615,7 @@
   .jn { color: #e0b45f; }
   .jb { color: #e08fa0; }
 
-  /* استدعاء أداة (search_products / get_order_status) — عرض بسيط بين
+  /* استدعاء أداة search_products — عرض بسيط بين
      فقاعات المحادثة، مو بطاقة معقّدة: اسم الأداة + المعاملات + عدد
      النتائج، مع تفصيل النتيجة الكاملة قابل للطي. */
   .tool-call {
@@ -761,10 +761,6 @@
                value="sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" spellcheck="false" />
       </div>
       <div class="base-url-row">
-        <input id="supportApiKey" type="text" placeholder="مفتاح الدعم"
-               value="sk-support-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f" spellcheck="false" />
-      </div>
-      <div class="base-url-row">
         <input id="ordersApiKey" type="text" placeholder="مفتاح إنشاء الطلبات"
                value="sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" spellcheck="false" />
       </div>
@@ -828,7 +824,6 @@
   /* ---------------- API keys persistence (مفتاح مستقل لكل خدمة) ---------------- */
   var apiKeyInputs = {
     sales: document.getElementById("salesApiKey"),
-    support: document.getElementById("supportApiKey"),
     orders: document.getElementById("ordersApiKey"),
     voiceFollowup: document.getElementById("voiceFollowupApiKey")
   };
@@ -859,7 +854,7 @@
      (file:// أو بأي استضافة ثابتة) وتجرّب كل الميزات بلا تشغيل uvicorn ولا
      خادم vLLM. البيانات الوهمية (كتالوج المنتجات وسجل الطلبات) مبنية حرفياً
      على عقد باك اند السستم الموثَّق بـ app/system_backend_schema.py وAPI.md
-     § "عقد باك اند السستم" (SystemProduct/SystemOrder) — نفس أسماء الحقول
+     § "عقد باك اند السستم" (SystemProduct) — نفس أسماء الحقول
      تماماً، فالصفحة تتصرف بنفس الشكل سواء كانت البيانات حقيقية أو تجريبية. */
   var demoModeCheck = document.getElementById("demoModeCheck");
   var demoToggle = document.getElementById("demoToggle");
@@ -902,28 +897,6 @@
       photos: [], deleted_at: null }
   ];
 
-  // سجل طلبات وهمي — كل عنصر يطابق حقول SystemOrder حرفياً (order_id, status,
-  // customer_name, phone, customer_city, customer_district, address, items,
-  // total, currency, eta, created_at).
-  var DEMO_ORDERS = [
-    { order_id: "ORD-1001", status: "قيد التوصيل", customer_name: "أحمد كاظم", phone: "07701234567",
-      customer_city: "بغداد", customer_district: "الكرادة", address: "بغداد - الكرادة - قرب مطعم النخيل",
-      items: [{ product_id: "P-1001", product_name: "لابتوب لينوفو IdeaPad 15", quantity: 1, unit_price: 750000, line_total: 750000 }],
-      total: 750000, currency: "IQD", eta: "خلال يومين", created_at: "2026-08-02T10:15:00Z" },
-    { order_id: "ORD-1002", status: "تم التسليم", customer_name: "زينب علي", phone: "07801122334",
-      customer_city: "البصرة", customer_district: "العشار", address: "البصرة - العشار - شارع الكورنيش",
-      items: [{ product_id: "P-3001", product_name: "ماوس لوجيتك لاسلكي", quantity: 2, unit_price: 15000, line_total: 30000 }],
-      total: 30000, currency: "IQD", eta: null, created_at: "2026-07-28T09:00:00Z" },
-    { order_id: "ORD-1003", status: "قيد التجهيز", customer_name: "مصطفى جبار", phone: "07709988776",
-      customer_city: "اربيل", customer_district: "عنكاوا", address: "اربيل - عنكاوا",
-      items: [{ product_id: "P-2001", product_name: "مكيف سبلت LG انفرتر 1.5 طن", quantity: 1, unit_price: 620000, line_total: 620000 }],
-      total: 620000, currency: "IQD", eta: "خلال ٣ أيام", created_at: "2026-08-03T14:30:00Z" },
-    { order_id: "ORD-1004", status: "ملغي", customer_name: "نور حيدر", phone: "07901112233",
-      customer_city: "بغداد", customer_district: "المنصور", address: "بغداد - المنصور",
-      items: [{ product_id: "P-4001", product_name: "غسالة اتوماتيك سامسونك 8 كغم", quantity: 1, unit_price: 540000, line_total: 540000 }],
-      total: 540000, currency: "IQD", eta: null, created_at: "2026-07-20T11:00:00Z" }
-  ];
-
   function demoSearchProducts(query, topK, category, inStockOnly) {
     var q = (query || "").trim();
     var results = DEMO_PRODUCTS.filter(function (p) {
@@ -938,35 +911,10 @@
     return results.slice(0, topK || 5);
   }
 
-  function demoAnswerFor(message, kind) {
+  function demoAnswerFor(message) {
     // رد وكيل مبسّط لكن واقعي — يبحث بكتالوج الديمو فعلياً (نفس منطق أداة
     // search_products) ويبني جملة عراقية من النتيجة، بدل نص ثابت واحد.
     var hits = demoSearchProducts(message, 3, null, false);
-    if (kind === "support") {
-      var orderMatch = /ORD[\s\-_]*(\d+)/i.exec(message);
-      if (orderMatch) {
-        var order = DEMO_ORDERS.find(function (o) { return o.order_id === "ORD-" + orderMatch[1]; });
-        if (order) {
-          // نفس منطق _format_order_reply (app/features/support/router.py):
-          // نذكر المنتجات لا رقم الطلب الداخلي بالرد.
-          var demoSubject = (order.items || []).map(function (it) { return it.product_name; }).join("، ") || "طلبك";
-          return "هلا بيك، " + demoSubject + " حالته: " + order.status +
-            (order.eta ? "، والوصول المتوقع " + order.eta : "") + ". [بيانات تجريبية]";
-        }
-        return "والله ماكو طلب بهذا الرقم بالبيانات التجريبية — جرّب ORD-1001 لين ORD-1004.";
-      }
-      var phoneMatch = /07\d{9}/.exec(message.replace(/[\s\-]/g, ""));
-      if (phoneMatch) {
-        var byPhone = DEMO_ORDERS.filter(function (o) { return o.phone === phoneMatch[0]; });
-        if (byPhone.length) {
-          return "هلا بيك، هذي طلباتك: " + byPhone.map(function (o) {
-            var subject = (o.items || []).map(function (it) { return it.product_name; }).join("، ") || o.order_id;
-            return subject + " (" + o.status + ")";
-          }).join(" | ") + ". [بيانات تجريبية]";
-        }
-      }
-      return "عطيني رقم الطلب (مثل ORD-1001) أو رقم الهاتف حتى اكدر اكَولك وين وصل. [بيانات تجريبية]";
-    }
     if (!hits.length) {
       return "عذراً حبيبي، ماكو منتج مطابق بالكتالوج التجريبي هسه — جرّب تسأل عن لابتوب أو مكيف أو غسالة. [بيانات تجريبية]";
     }
@@ -1007,42 +955,27 @@
     }
     if (path === "/") return jsonResponse({ status: "ok", service: "back_end_iraqi", docs: "/docs" });
 
-    // منطق مشترك بين /sales/chat و/support/chat (الكامل والمبثوث): يبني
-    // toolCalls + answer من نفس كتالوج/سجل الديمو، مرة واحدة بدل تكرارها
-    // بكل مسار من الأربعة.
-    function demoChatTurn(path, body) {
-      var isSupport = path.indexOf("/support/") === 0;
+    function demoChatTurn(body) {
       var message = body.message || "";
       var hits = demoSearchProducts(message, 5, null, false);
       var toolCalls = [];
-      if (!isSupport && hits.length) {
+      if (hits.length) {
         toolCalls.push({
           tool: "search_products",
           args: { query: message, top_k: 5 },
           result: hits.length ? { results: hits } : { results: [], message: "ماكو منتج مطابق بالكتالوج." }
         });
       }
-      if (isSupport) {
-        var orderMatch = /ORD[\s\-_]*(\d+)/i.exec(message);
-        if (orderMatch) {
-          var found = DEMO_ORDERS.find(function (o) { return o.order_id === "ORD-" + orderMatch[1]; });
-          toolCalls.push({
-            tool: "get_order_status",
-            args: { order_id: "ORD-" + orderMatch[1] },
-            result: found || { error: "ماكو طلب بهذا الرقم" }
-          });
-        }
-      }
       return {
         session_id: body.session_id || demoSessionId(),
-        answer: demoAnswerFor(message, isSupport ? "support" : "sales"),
+        answer: demoAnswerFor(message),
         toolCalls: toolCalls
       };
     }
 
-    if (path === "/sales/chat" || path === "/support/chat") {
+    if (path === "/sales/chat") {
       var body = JSON.parse(options.body || "{}");
-      var turn = demoChatTurn(path, body);
+      var turn = demoChatTurn(body);
       return jsonResponse({
         session_id: turn.session_id,
         answer: turn.answer,
@@ -1052,13 +985,13 @@
       });
     }
 
-    if (path === "/sales/chat/stream" || path === "/support/chat/stream") {
+    if (path === "/sales/chat/stream") {
       // نبني رد SSE نصي حقيقي (نفس تنسيق "data: {...}\n\n" الذي يرسله
       // الخادم الحقيقي) داخل ReadableStream — حتى renderChatStreamForm
       // (اللي تستهلك res.body.getReader() مباشرة) تشتغل بلا أي تعديل، سواء
       // كان الرد حقيقياً أو تجريبياً.
       var streamBody = JSON.parse(options.body || "{}");
-      var streamTurn = demoChatTurn(path, streamBody);
+      var streamTurn = demoChatTurn(streamBody);
       var words = streamTurn.answer.split(/(\s+)/); // يحافظ على الفراغات كأجزاء
       var encoder = new TextEncoder();
 
@@ -1114,7 +1047,7 @@
   }
 
   // بديل موحّد لـ fetch: يوجّه لـ mockFetch وقت الوضع التجريبي، وإلا fetch
-  // الحقيقي كالمعتاد. كل نقاط JSON العادية (health/gpu/root/sales/support/
+  // الحقيقي كالمعتاد. كل نقاط JSON العادية (health/gpu/root/sales/
   // orders create) تمر من هنا بلا أي تغيير بمنطقها. مسارات voice_followup
   // (صوت حقيقي داخل/خارج) لها معالجة تجريبية منفصلة داخل renderVoiceFollowupForm
   // وrenderVoicePostponeForm — والأخيرة متعددة الأدوار (تكرّر /respond).
@@ -1245,26 +1178,6 @@
       render: renderChatStreamForm
     },
     {
-      group: "دعم العملاء",
-      id: "supportChat",
-      method: "POST",
-      path: "/support/chat",
-      title: "POST /support/chat",
-      desc: "تتبع حالة طلب برقم الطلب (مثل ORD-1001) أو رقم الهاتف، أو أي سؤال عام. يحتاج مفتاح API الدعم (X-API-Key).",
-      apiKeyService: "support",
-      render: renderSupportForm
-    },
-    {
-      group: "دعم العملاء",
-      id: "supportChatStream",
-      method: "POST",
-      path: "/support/chat/stream",
-      title: "POST /support/chat/stream",
-      desc: "نفس مدخل /support/chat، لكن بث Server-Sent Events — طلبات التتبع الحتمية (رقم طلب/هاتف/حالة) تصل كدلتا واحدة فورية، وأسئلة الدعم العامة (موديل+أداة get_order_status) تُبث توكن-بتوكن. يحتاج مفتاح API الدعم.",
-      apiKeyService: "support",
-      render: renderChatStreamForm
-    },
-    {
       group: "إنشاء طلب",
       id: "ordersCreate",
       method: "POST",
@@ -1306,7 +1219,7 @@
     }
   ];
 
-  var groupOrder = ["الحالة", "وكيل المبيعات", "دعم العملاء", "إنشاء طلب", "المتابعة الصوتية", "مكالمة التأجيل", "اختبار الحمل"];
+  var groupOrder = ["الحالة", "وكيل المبيعات", "إنشاء طلب", "المتابعة الصوتية", "مكالمة التأجيل", "اختبار الحمل"];
   var navGroups = document.getElementById("navGroups");
   var mainView = document.getElementById("mainView");
 
@@ -1736,7 +1649,7 @@
     msgField.className = "field";
     msgField.innerHTML = '<label>رسالة العميل</label>';
     var msgInput = document.createElement("textarea");
-    msgInput.value = ep.id === "supportChatStream" ? "وين طلبي ORD-1001؟" : "عندكم غسالات اتوماتيك؟";
+    msgInput.value = "عندكم غسالات اتوماتيك؟";
     msgField.appendChild(msgInput);
     grid.appendChild(msgField);
     panel.appendChild(grid);
@@ -1841,95 +1754,6 @@
       } catch (e) {
         meta.innerHTML = '<span class="status-code s5">خطأ</span>';
         streamText.textContent = "تعذّر الوصول للسيرفر: " + e.message;
-      }
-      btn.setBusy(false);
-      msgInput.value = "";
-    };
-  }
-
-  /* ---------------- Support chat ---------------- */
-  function renderSupportForm(container, ep) {
-    var sessionId = null;
-    var panel = makePanel("الطلب");
-    var grid = document.createElement("div");
-    grid.className = "field-grid single";
-    var msgField = document.createElement("div");
-    msgField.className = "field";
-    msgField.innerHTML = '<label>رسالة العميل</label>';
-    var msgInput = document.createElement("textarea");
-    msgInput.value = "وين طلبي ORD-1001؟";
-    msgField.appendChild(msgInput);
-    grid.appendChild(msgField);
-    panel.appendChild(grid);
-
-    var btn = makeButton("أرسل الرسالة");
-    var sessionPill = document.createElement("span");
-    sessionPill.className = "session-pill";
-    sessionPill.innerHTML = 'الجلسة: <span class="val"></span>';
-    var resetBtn = document.createElement("button");
-    resetBtn.className = "ghost";
-    resetBtn.textContent = "محادثة جديدة";
-    resetBtn.style.marginRight = "auto";
-    resetBtn.onclick = function () {
-      sessionId = null;
-      sessionPill.classList.remove("show");
-      chatLog.innerHTML = "";
-    };
-    var actionsRow = document.createElement("div");
-    actionsRow.className = "actions-row";
-    actionsRow.appendChild(btn);
-    actionsRow.appendChild(sessionPill);
-    actionsRow.appendChild(resetBtn);
-    panel.appendChild(actionsRow);
-    container.appendChild(panel);
-
-    var resultPanel = makePanel("المحادثة");
-    var meta = document.createElement("div");
-    meta.className = "response-meta";
-    var chatLog = document.createElement("div");
-    chatLog.className = "chat-log";
-    resultPanel.appendChild(meta);
-    resultPanel.appendChild(chatLog);
-    container.appendChild(resultPanel);
-
-    btn.onclick = async function () {
-      var message = msgInput.value.trim();
-      if (!message) return;
-      btn.setBusy(true);
-      var userBubble = document.createElement("div");
-      userBubble.className = "bubble user";
-      userBubble.innerHTML = '<div class="who">العميل</div>' + escapeHtml(message);
-      chatLog.appendChild(userBubble);
-
-      var payload = { message: message, session_id: sessionId };
-      var t0 = performance.now();
-      try {
-        var res = await apiFetch(baseUrl() + ep.path, {
-          method: "POST",
-          headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader(ep.apiKeyService)),
-          body: JSON.stringify(payload)
-        });
-        var ms = Math.round(performance.now() - t0);
-        var json = await res.json();
-        meta.innerHTML =
-          '<span class="status-code ' + statusClass(res.status) + '">' + res.status + "</span>" +
-          '<span class="latency">' + ms + " ms</span>" +
-          (json.engine ? '<span class="engine-pill ' + json.engine + '">' + (json.engine === "vllm" ? "vllm" : json.engine) + "</span>" : "");
-        if (json.session_id) {
-          sessionId = json.session_id;
-          sessionPill.querySelector(".val").textContent = sessionId;
-          sessionPill.classList.add("show");
-        }
-        renderToolCalls(chatLog, json.tool_calls);
-
-        var assistantBubble = document.createElement("div");
-        assistantBubble.className = "bubble assistant";
-        assistantBubble.innerHTML = '<div class="who">الدعم</div>' + escapeHtml(json.answer || "");
-        chatLog.appendChild(assistantBubble);
-        chatLog.scrollTop = chatLog.scrollHeight;
-        updateCurl(resultPanel, curlBlock("POST", ep.path, payload));
-      } catch (e) {
-        meta.innerHTML = '<span class="status-code s5">خطأ</span>';
       }
       btn.setBusy(false);
       msgInput.value = "";
@@ -2587,13 +2411,13 @@
 
   /* ---------------- Tool call renderer (شفافية استدعاء الأدوات) ---------------- */
   // toolCalls: [{tool, args, result}] — كما يرجعها app/tool_loop.py ضمن
-  // SalesChatResponse.tool_calls / SupportChatResponse.tool_calls. تُعرض
+  // SalesChatResponse.tool_calls. تُعرض
   // كبطاقة صغيرة بين فقاعة العميل وفقاعة الوكيل: اسم الأداة + المعاملات
   // مباشرة، والنتيجة الكاملة مطويّة افتراضياً.
   //
   // ملخّص سطر واحد لكل عنصر نتيجة مبني على عقد باك اند السستم الموثَّق
-  // (SystemProduct/SystemOrder — انظر app/system_backend_schema.py وAPI.md
-  // § "عقد باك اند السستم") حتى تنقرأ صحة الحقول (سعر/توفر/حالة) بنظرة
+  // (SystemProduct — انظر app/system_backend_schema.py وAPI.md
+  // § "عقد باك اند السستم") حتى تنقرأ صحة الحقول (سعر/توفر) بنظرة
   // بلا فتح الـ JSON الكامل.
   function summarizeToolResult(call) {
     var result = call.result;
@@ -2609,19 +2433,6 @@
       });
       var more = result.results.length > 3 ? "\n… و" + (result.results.length - 3) + " أكثر" : "";
       return { count: result.results.length + " نتيجة", lines: lines.join("\n") + more };
-    }
-    if (Array.isArray(result.orders)) {
-      // get_order_status (all/status/phone) → SystemOrder[]
-      if (!result.orders.length) return " · 0 طلب";
-      var oLines = result.orders.slice(0, 3).map(function (o) {
-        return "- " + o.order_id + " — " + (o.status || "؟") + (o.phone ? " (" + o.phone + ")" : "");
-      });
-      var oMore = result.orders.length > 3 ? "\n… و" + (result.orders.length - 3) + " أكثر" : "";
-      return { count: result.orders.length + " طلب", lines: oLines.join("\n") + oMore };
-    }
-    if (result.order_id) {
-      // get_order_status (order_id) → SystemOrder واحد
-      return { count: "طلب واحد", lines: "- " + result.order_id + " — " + (result.status || "؟") };
     }
     return "";
   }

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """راوتر النية المحافظ (app/intent_router.py) — next.md §2 "التوصية النهائية".
 
-الخلفية: وكيلا المبيعات والدعم كانا يستدعيان أداة (search_products/
-get_order_status) حتى لرسائل تحية/شكر/هوية بحتة. الفحص هنا محافظ بالاتجاهين
+الخلفية: وكيل المبيعات كان يستدعي أداة search_products حتى لرسائل
+تحية/شكر/هوية بحتة. الفحص هنا محافظ بالاتجاهين
 (انظر تعليق الملف): يصنّف "دردشة بحتة" فقط لو ماكو رقم ولا كلمة إشارة بيانات
 معها — رسالة مختلطة تبقى تستدعي الأداة كالمعتاد.
 
@@ -50,20 +50,12 @@ def test_greeting_with_price_word_is_not_chitchat():
     assert is_pure_chitchat("هلا شكد سعر اللابتوب؟") is False
 
 
-def test_thanks_with_order_tracking_is_not_chitchat():
-    assert is_pure_chitchat("شكراً، بس وين وصل طلبي؟") is False
-
-
 # ---------------------------------------------------------------------------
 # رسالة فيها رقم (هاتف/طلب) — False حتى لو صادف كلمة تحية
 # ---------------------------------------------------------------------------
 
 def test_message_with_phone_number_is_not_chitchat():
     assert is_pure_chitchat("هلا، رقمي 07711234567") is False
-
-
-def test_message_with_order_id_is_not_chitchat():
-    assert is_pure_chitchat("مرحبا ORD-1042 وين وصل؟") is False
 
 
 # ---------------------------------------------------------------------------

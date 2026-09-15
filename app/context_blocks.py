@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """صياغة نتائج RAG (لهجة/منتجات) كمقاطع نصية تُضاف لأي system prompt.
 
-مشتركة بين الميزات (sales، support، order_intake) بدل تكرارها بكل ميزة على حدة.
+مشتركة بين ميزتي sales وorder_intake بدل تكرارها بكل ميزة على حدة.
 """
 
 import json
@@ -56,8 +56,8 @@ def cap_for_model(items: List[dict], max_items: int, label: str) -> Tuple[List[d
     مساس؛ هذا القصّ لحظي وقت البناء فقط، حماية لميزانية التوكِن
     (settings.max_injected_records، انظر app/config.py).
 
-    ترجع (القائمة المقصوصة، العدد الأصلي) لا القائمة وحدها — جذر العطل B1
-    بـ docs/fix-plan.md § 6: المتصل يحتاج يعرف "هل انقصّ؟" حتى يكتبها للموديل
+    ترجع (القائمة المقصوصة، العدد الأصلي) لا القائمة وحدها: المتصل يحتاج
+    يعرف "هل انقصّ؟" حتى يكتبها للموديل
     صراحةً، وإلا ظن الموديل أن الناقص غير موجود وقال «ماكو». tuple لا قائمة
     عمداً: يجبر كل مستدعٍ يتعامل مع الحقيقة بدل تجاهلها صامتاً. القاعدة
     العامة: **كل حدّ لازم يصل المستهلِك صراحةً بالنص — نموذجاً كان أم إنساناً.**
@@ -104,23 +104,6 @@ def catalog_context_block(products: List[dict], total: Optional[int] = None) -> 
             "المحادثة إلا لو ما لگيت فيه جواب):\n"
         )
     return heading + "\n".join(lines)
-
-
-def orders_context_block(orders: List[dict]) -> str:
-    """دفتر الطلبات **الكامل** (محمَّل مرة وحدة لهذي الجلسة، انظر
-    app/sessions.py::cache_orders وapp/features/support/router.py::
-    _list_all_cached) — يُحقن بكل رسالة دعم لاحقة (مسار "الموديل+الأداة"
-    فقط؛ التتبع الحتمي برقم طلب/هاتف صريح لا يمر من هنا) حتى يدوّر الموديل
-    بالدفتر كاملاً (بضمنه البحث باسم الزبون) بدل استدعاء get_order_status
-    جديد لكل سؤال."""
-    if not orders:
-        return ""
-    lines = [json.dumps(o, ensure_ascii=False) for o in orders]
-    return (
-        "\n\nدفتر الطلبات الكامل (حُمِّل مرة وحدة هذي الجلسة — استخدمه "
-        "حرفياً للبحث بالاسم أو الهاتف أو الحالة، بلا حاجة تستدعي "
-        "get_order_status ثانية إلا لو ما لگيت فيه جواب):\n" + "\n".join(lines)
-    )
 
 
 def products_context_block(rag_products: List[dict]) -> str:

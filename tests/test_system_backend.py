@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""طبقة الاتصال بباك اند السستم (app/system_backend.py — docs/fix-plan.md
-§ المرحلة 7): التقاط 4xx كـSystemBackendUnavailable (العطل A5)، تمرير 404
+"""طبقة الاتصال بباك اند السستم (app/system_backend.py):
+التقاط 4xx كـSystemBackendUnavailable، وتمرير 404
 كنتيجة مشروعة، والعميل المشترك (العطل B6) مع ترويسات لكل طلب.
 
 بلا شبكة: httpx.MockTransport يرد بما نريده.
@@ -14,7 +14,6 @@ import httpx
 import pytest
 
 from app import system_backend
-from app.order_gateway import HttpOrderStatusProvider
 from app.system_backend import SystemBackendUnavailable, auth_headers, caller_auth_token
 
 
@@ -60,33 +59,6 @@ def test_connection_error_becomes_system_backend_unavailable():
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://backend.test")
     with pytest.raises(SystemBackendUnavailable):
         _request(client)
-
-
-def test_provider_sends_auth_per_request_on_shared_client(monkeypatch):
-    """توكن المستخدم يختلف بين طلب وآخر؛ لازم يُرسل بترويسات **الطلب** لا
-    على العميل المشترك — وإلا صار كل المستخدمين على شركة واحدة."""
-    seen = []
-
-    def handler(request):
-        seen.append((str(request.url), request.headers.get("Authorization"), request.headers.get("X-API-Key")))
-        return httpx.Response(200, content=b'{"orders": []}', request=request)
-
-    shared = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(system_backend, "_client", shared)
-    provider = HttpOrderStatusProvider(base_url="http://backend.test/internal")
-
-    async def go():
-        caller_auth_token.set("jwt-A")
-        await provider.list_all("svc-key")
-        caller_auth_token.set("jwt-B")
-        await provider.list_all("svc-key")
-        await shared.aclose()
-
-    asyncio.run(go())
-    assert seen == [
-        ("http://backend.test/internal/orders", "Bearer jwt-A", "svc-key"),
-        ("http://backend.test/internal/orders", "Bearer jwt-B", "svc-key"),
-    ]
 
 
 def test_auth_headers_without_token_has_only_api_key():

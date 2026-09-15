@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """حماية كل خدمة بمفتاح API خاص بها من الإعدادات الثابتة.
 
-كل خدمة (مبيعات، دعم، إنشاء طلبات) عندها مفتاحها المستقل
-(SALES_API_KEY / SUPPORT_API_KEY / ORDERS_API_KEY) — يُرسَل بهيدر X-API-Key
+كل خدمة (مبيعات، إنشاء طلبات، متابعة صوتية) عندها مفتاحها المستقل
+ويُرسَل بهيدر X-API-Key
 مع كل طلب لتلك الخدمة تحديداً. هذا يسمح بإلغاء صلاحية خدمة وحدها أو توزيع
 مفتاح مختلف لكل عميل يستهلك خدمة معينة، بلا ما يأثر على البقية.
 
@@ -23,7 +23,7 @@ _HEADER_NAME = "X-API-Key"
 def _make_dependency(service_name: str, expected_key: str):
     """يبني دالة FastAPI dependency تتحقق من هيدر X-API-Key مقابل مفتاح خدمة
     محدد. كل خدمة تستدعي نسختها الخاصة (require_sales_api_key,
-    require_support_api_key, require_orders_api_key) — لا دالة عامة واحدة،
+    require_orders_api_key, require_voice_followup_api_key) — لا دالة عامة واحدة،
     حتى يبقى مفتاح كل خدمة معزولاً تماماً عن البقية."""
 
     async def dependency(x_api_key: str = Header(..., alias=_HEADER_NAME)) -> str:
@@ -40,6 +40,5 @@ def _make_dependency(service_name: str, expected_key: str):
 
 
 require_sales_api_key = _make_dependency("المبيعات", settings.sales_api_key)
-require_support_api_key = _make_dependency("الدعم", settings.support_api_key)
 require_orders_api_key = _make_dependency("إنشاء الطلبات", settings.orders_api_key)
 require_voice_followup_api_key = _make_dependency("المتابعة الصوتية", settings.voice_followup_api_key)

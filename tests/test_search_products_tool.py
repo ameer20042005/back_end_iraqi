@@ -4,7 +4,7 @@
 product_repository.list_all ويخزّنه بكاش الجلسة؛ أي استدعاء لاحق بنفس
 الجلسة يلگى الكاش مباشرة بلا أي نداء HTTP جديد.
 
-وبعد docs/fix-plan.md § المرحلة 8: `query` صارت تطابق فعلاً على الكتالوج
+و`query` تطابق فعلاً على الكتالوج
 الكامل (العطل B2)، والرد يحمل found/count/showing/hint (العطل B1).
 
 التشغيل:  python -m pytest tests/test_search_products_tool.py -v
@@ -12,6 +12,7 @@ product_repository.list_all ويخزّنه بكاش الجلسة؛ أي استد
 
 import asyncio
 import uuid
+from dataclasses import replace
 
 import pytest
 
@@ -122,7 +123,7 @@ def test_in_stock_only_filter():
 
 def test_capped_result_announces_total_with_hint(monkeypatch):
     """القصّ بسقف الحقن يُعلَن للموديل: count الكلي + showing + hint (B1)."""
-    monkeypatch.setattr(settings, "max_injected_records", 1)
+    monkeypatch.setattr(products_tool, "settings", replace(settings, max_injected_records=1))
     result = _call({}, _session_id())
     assert result["count"] == 2
     assert result["showing"] == 1

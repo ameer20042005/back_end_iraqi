@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""كاش الكتالوج الكامل على مستوى الجلسة (app/sessions.py::cache_catalog/
-cached_catalog) — نفس نمط cache_orders/cached_orders الموجود أصلاً، لكن
-للمنتجات بدل الطلبات (انظر next.md: "تحميل الكتالوج مرة وحدة بالجلسة").
+"""كاش الكتالوج الكامل على مستوى الجلسة
+(app/sessions.py::cache_catalog/cached_catalog).
 
 التشغيل:  python -m pytest tests/test_sessions_catalog.py -v
 """
@@ -18,8 +17,8 @@ def _session_id():
 
 
 def test_cached_catalog_none_before_first_cache():
-    """قبل أي cache_catalog: None، لا [] — يميّز "لسا ما انحمّل" عن "انحمّل
-    وطلع فاضي فعلاً" (نفس مبدأ cached_orders)."""
+    """قبل أي cache_catalog: None، لا [] — يميّز "لسا ما انحمّل" عن
+    "انحمّل وطلع فاضي فعلاً"."""
     assert sessions.cached_catalog(_session_id()) is None
 
 

@@ -13,11 +13,12 @@ import time
 import uuid
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.engine import llm_engine
-from app.features.support.prompts import SUPPORT_SYSTEM_PROMPT
+from app.features.openai_compat.auth import require_openai_compat_api_key
+from app.features.openai_compat.prompts import OPENAI_COMPAT_SYSTEM_PROMPT
 from app.tool_loop import EXHAUSTED_FALLBACK
 
 logger = logging.getLogger(__name__)
@@ -95,22 +96,12 @@ def _content_as_text(content: Any) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-_NATIVE_TOOL_INSTRUCTION = (
-    "بهذا المسار فقط، تعريفات الأدوات التي يمررها الخادم هي المرجع الحرفي "
-    "لأسماء الأدوات وحقول معاملاتها. عند الحاجة إلى أداة استعمل استدعاء "
-    "الأدوات الأصلي الموفّر لك، ولا تكتب استدعاء الأداة كنص أو JSON داخل "
-    "message.content. العميل هو الذي ينفّذ الأداة ويرسل نتيجتها بالدور التالي."
-)
-
-
 def _native_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     """Prepend the owner prompt and preserve native OpenAI tool messages."""
     converted: List[Dict[str, Any]] = [
         {
             "role": "system",
-            # Keep every behavioral constraint verbatim; the appended sentence
-            # only selects the native wire format for this endpoint.
-            "content": SUPPORT_SYSTEM_PROMPT + "\n\n" + _NATIVE_TOOL_INSTRUCTION,
+            "content": OPENAI_COMPAT_SYSTEM_PROMPT,
         },
     ]
     for message in messages:
@@ -229,7 +220,10 @@ def _normalized_tool_calls(raw_calls: Any, allowed_names: set[str]) -> Optional[
 
 
 @router.post("/chat/completions")
-async def chat_completions(req: ChatCompletionRequest):
+async def chat_completions(
+    req: ChatCompletionRequest,
+    _api_key: str = Depends(require_openai_compat_api_key),
+):
     """Run one native tool-aware generation and return an OpenAI response."""
     tools = [tool.model_dump(exclude_none=True) for tool in (req.tools or [])]
     messages = _native_messages(req.messages)

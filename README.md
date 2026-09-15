@@ -4,12 +4,12 @@
 `start.sh` يبني كل شي لازم من الصفر بأول إقلاع (Python/pip، vLLM nightly
 بدعم Gemma 4 مع torch المتوافق، ffmpeg/libsndfile1).
 
-ثلاث ميزات، كل وحدة براوترها ونصوصها الخاصة تحت `app/features/`:
+الميزات الرئيسية، كل وحدة براوترها ونصوصها الخاصة تحت `app/features/`:
 
 | الميزة | الفولدر | الوصف |
 |---|---|---|
 | وكيل مبيعات | `app/features/sales/` | يقنع العميل بالشراء، يقترح منتجاً إضافياً، ويثبّت الطلب تلقائياً كـ JSON عند الجهوزية |
-| دعم عملاء | `app/features/support/` | تتبع حالة الطلب برقم الطلب أو الهاتف (+ بحث ويب عام) |
+| واجهة OpenAI | `app/features/openai_compat/` | واجهة Chat Completions متوافقة مع OpenAI وتدعم native function calling |
 | إنشاء طلب متعدد الوسائط | `app/features/order_intake/` | نص أو صوت أو صورة → JSON طلب مباشرة |
 
 الموديل، RAG، الجلسات، كتالوج المنتجات، وصيغة الطلب مشتركة بجذر `app/` (تفصيل الملفات أدناه).
@@ -24,7 +24,7 @@ uvicorn app.main:app --reload --port 8000
 ثم افتح: http://localhost:8000/docs
 
 > ملاحظة: محلياً ماكو خادم vLLM (يحتاج GPU/Linux — `start.sh` يجهّزه تلقائياً على RunPod).
-> `/gpu` سترجع `vllm_ready: false`، وكل نقاط `/sales/*` و`/support/*` ترجع "[وضع محلي بدون GPU]" بدل توليد حقيقي — يكفي لاختبار الـ API نفسها.
+> `/gpu` سترجع `vllm_ready: false`، ونقاط `/sales/*` ترجع "[وضع محلي بدون GPU]" بدل توليد حقيقي — يكفي لاختبار الـ API نفسها.
 
 ## الرفع على RunPod — Pod مباشر بصورة Ubuntu 22.04 خام
 
@@ -44,25 +44,23 @@ uvicorn app.main:app --reload --port 8000
 
 > توثيق كامل لكل نقطة (أمثلة طلبات/استجابات، شكل بث SSE، أخطاء) في [API.md](docs/API.md).
 
-الخدمات القديمة محمية بمفتاح API خاص بها (هيدر `X-API-Key`، مستقل تماماً بين الخدمات) — تفاصيل المفاتيح والأمثلة في [API.md § المصادقة](docs/API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة). نقطة OpenAI الداخلية الجديدة لا تنفّذ الأدوات ولا تستقبل توكن المستخدم؛ jbot يملك المصادقة وعزل الشركات وتنفيذ الأدوات.
+الخدمات محمية بمفتاح API خاص بها عبر هيدر `X-API-Key`. واجهة OpenAI لا تنفّذ الأدوات ولا تستقبل توكن المستخدم؛ jbot يملك عزل الشركات وتنفيذ الأدوات.
 
 | النقطة | الوصف | يحتاج مفتاح |
 |---|---|---|
 | `GET /health` | فحص الصحة | لا |
 | `GET /gpu` | معلومات GPU/CUDA وحالة محرك الموديل | لا |
 | `GET /metrics` | إحصاءات عميل vLLM (طلبات، أخطاء، أزمنة استجابة) | لا |
-| `POST /v1/chat/completions` | واجهة OpenAI/Spring AI بلا حالة — native function calling، والتنفيذ الفعلي للأدوات عند jbot | لا |
+| `POST /v1/chat/completions` | واجهة OpenAI/Spring AI بلا حالة — native function calling، والتنفيذ الفعلي للأدوات عند jbot | `OPENAI_COMPAT_API_KEY` داخل الميزة |
 | `POST /sales/chat` | وكيل مبيعات — رد كامل، يرجع `order` مملوءاً تلقائياً عند تثبيت الطلب | `sales_api_key` |
 | `POST /sales/chat/stream` | وكيل مبيعات — بث SSE حقيقي توكن-بتوكن، حدث `done` النهائي يحمل `order` | `sales_api_key` |
-| `POST /support/chat` | دعم عملاء — تتبع طلب برقم الطلب/الهاتف حتمياً، أو سؤال عام عبر أداة `get_order_status` | `support_api_key` |
-| `POST /support/chat/stream` | نفس `/support/chat` ببث SSE حقيقي توكن-بتوكن (المسار الحتمي يبقى فورياً) | `support_api_key` |
 | `POST /orders/create` | إنشاء طلب من `text`/`audio`/`image` (multipart، مدخل واحد بس) — يرجع JSON طلب مباشرة بدون محادثة | `orders_api_key` |
 | `POST /voice_followup/ask` | متابعة صوتية — يستقبل تفاصيل طلب (من باك اند السستم) ويرجع سؤالاً صوتياً WAV | `voice_followup_api_key` |
 | `POST /voice_followup/respond` | يستقبل رد الزبون الصوتي، يحلّل السبب ويرسله لباك اند السستم، يرجع صوت شكر WAV | `voice_followup_api_key` |
 | `GET /docs` | واجهة Swagger التفاعلية | لا |
 | `GET /test` | لوحة اختبار API تفاعلية (HTML/CSS/JS ثابتة، بدون تبعيات) — خانات مفاتيح API معبّأة مسبقاً بالشريط الجانبي — انظر [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md#لوحة-اختبار-api-test-console) |
 
-جسم الطلب لـ `/sales/chat`, `/sales/chat/stream`, `/support/chat`, `/support/chat/stream`:
+جسم الطلب لـ `/sales/chat` و`/sales/chat/stream`:
 
 ```json
 {"message": "شنو معنى شلونك؟", "session_id": "اختياري لاستمرار نفس المحادثة"}
@@ -85,17 +83,17 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 |---|---|
 | `app/config.py` | مصدر الإعدادات الثابتة الوحيد (الموديل، RAG، الأدوات، المنافذ والمفاتيح) |
 | `app/engine.py` | عميل vLLM: يتصل بخادم vLLM OpenAI-متوافق منفصل (منفذ 18001) عبر `/v1/chat/completions`، مع دعم native tools و`guided_json`/صور — vLLM يدير continuous batching وPagedAttention داخلياً |
-| `app/tool_loop.py` | حلقة استدعاء أدوات عامة بمخطط JSON صارم (`action: tool_call \| final_answer`) — مستخدمة من `sales` (`search_products`) و`support` (`get_order_status`) |
+| `app/tool_loop.py` | حلقة استدعاء أدوات عامة بمخطط JSON صارم (`action: tool_call \| final_answer`) — مستخدمة من `sales` (`search_products`) |
 | `app/tools/products.py` | أداة `search_products` — تجيب الكتالوج **كاملاً مرة وحدة لكل جلسة** (لا بحث لكل منتج)، تخزّنه بكاش الجلسة، وتُرجعه من الكاش بالاستدعاءات اللاحقة بلا HTTP جديد |
-| `app/context_blocks.py` | صياغة نتائج RAG (لهجة/مواقع) لاستخراج الطلب (`plane.md`)، **و**بناء مقطع الكتالوج/دفتر الطلبات الكامل المحقون بردود المبيعات/الدعم المباشرة (`catalog_context_block`/`orders_context_block`) + سقف الحقن المشترك (`cap_for_model`) |
+| `app/context_blocks.py` | صياغة نتائج RAG (لهجة/مواقع) لاستخراج الطلب (`plane.md`)، وبناء مقطع الكتالوج المحقون بردود المبيعات (`catalog_context_block`) + سقف الحقن (`cap_for_model`) |
 | `app/intent_router.py` | راوتر نية محافظ (regex محلي، بلا موديل) — رسالة تحية/شكر/هوية بحتة تتجاوز حلقة الأدوات كاملاً بدل ما يستدعي الموديل أداة غير لازمة |
 | `app/vision_utils.py` | فك ترميز/تصغير الصور المشترك بين `/orders/create` (نص من صورة) و`/sales/chat*` (تحليل صورة منتج) |
-| `app/sessions.py` | ذاكرة محادثة بالذاكرة (in-memory)، مفاتيحها مسبوقة باسم الميزة (`sales:...`, `support:...`) |
+| `app/sessions.py` | ذاكرة محادثة بالذاكرة (in-memory)، مفاتيح المبيعات فيها مسبوقة بـ`sales:...` |
 | `app/rag/` | بحث BM25 محلي للهجة العراقية والمواقع الجغرافية — يُستدعى فقط عند استخراج الطلب النهائي، لا بكل رد |
 | `app/products.py` | كتالوج المنتجات: `ProductRepository` (واجهة) + `HttpProductRepository` (استعلام حي على باك اند السستم، بلا أي بيانات محلية). يُستعلَم عنه عبر أداة `search_products` |
 | `app/order_schema.py` | `OrderExtraction` (خام من الموديل) / `OrderConfirmation` (المجموع مصدره `quoted_price` الذي يستخرجه الموديل من نتيجة `search_products` بنفس المحادثة) / `parse_order_extraction()` |
-| `app/order_gateway.py` | بوابة نظام إدارة الطلبات: **إخراج** (`HttpOrderStatusProvider` — أداة `get_order_status` بالدعم) و**إدخال** (`HttpOrderSubmitter` — تثبيت طلب جديد، تستخدمه `sales`/`order_intake`)، كلاهما استعلام HTTP حي بلا تخزين محلي |
-| `app/auth.py` | حماية كل خدمة بمفتاح API مستقل (`require_sales_api_key`/`require_support_api_key`/`require_orders_api_key`) — هيدر `X-API-Key` |
+| `app/order_gateway.py` | بوابة نظام إدارة الطلبات: إدخال الطلبات الجديدة عبر `HttpOrderSubmitter` واستعلامات النظام المشتركة، بلا تخزين محلي |
+| `app/auth.py` | حماية كل خدمة بمفتاح API مستقل (`require_sales_api_key`/`require_orders_api_key`/`require_voice_followup_api_key`) — هيدر `X-API-Key` |
 | `app/system_backend.py` | معالجة موحّدة لأخطاء الاتصال بباك اند السستم (`SystemBackendUnavailable`) — رسالة عربية واضحة بدل 500 عارية |
 
 ## باك اند السستم — استعلام حي، بلا أي بيانات محلية
@@ -103,12 +101,10 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 لا يوجد أي كتالوج منتجات أو سجل طلبات مخزّن بهذا المستودع (`app/data/` غير موجود عمداً) — كل بيانات المنتجات والطلبات تُستعلَم **لحظياً** من نظام خارجي ("باك اند السستم")، تُعالَج، ولا تُحفظ محلياً بأي شكل:
 
 - **كتالوج المنتجات** (`app/products.py`) — `HttpProductRepository.list_all()` يجيب الكتالوج كاملاً عبر `GET /products/search` (بلا فلتر `q`) — لا فهرسة/بحث محلي هنا، باك اند السستم هو مصدر الحقيقة الوحيد. تستدعيها أداة `search_products` (`app/tools/products.py`) اللي يطلبها النموذج **مرة وحدة لكل جلسة محادثة** (انظر § آلية "الوكيل يقرر")؛ الكتالوج بعدها يُحقن تلقائياً بكل رسالة لاحقة (`app/context_blocks.py::catalog_context_block`) بدل استدعاء أداة جديد لكل منتج.
-- **نظام إدارة الطلبات** (`app/order_gateway.py`):
-  - **إخراج** — `HttpOrderStatusProvider.get_by_order_id()`/`.search_by_phone()`/`.search_by_status()`/`.list_all()`: كل استدعاء طلب HTTP حقيقي لباك اند السستم. تستخدمه ميزة `support` (مباشرة بالمسار الحتمي، وعبر أداة `get_order_status` بمسار الموديل).
-  - **إدخال** — `HttpOrderSubmitter.submit()`: يرسل الطلب المؤكَّد لباك اند السستم عبر `POST /orders`. تستدعيه `sales/service.py` تلقائياً بعد كل طلب مؤكَّد.
+- **نظام إدارة الطلبات** (`app/order_gateway.py`): `HttpOrderSubmitter.submit()` يرسل الطلب المؤكَّد لباك اند السستم عبر `POST /orders`. تستدعيه `sales/service.py` تلقائياً بعد كل طلب مؤكَّد.
 - **رابط باك اند السستم**: `SYSTEM_BACKEND_BASE_URL` بـ`app/config.py` (افتراضياً `http://127.0.0.1:9000`) — رابط ومسارات باك اند السستم الفعلية غير معروفة بعد؛ عدّل القيمة والمسارات بـ`app/products.py`/`app/order_gateway.py` عند توفرها، بدون تغيير أي راوتر.
 - **فشل الاتصال بباك اند السستم** (`SystemBackendUnavailable`، انظر `app/system_backend.py`) يُلتقط ويُرجَع كرسالة عربية واضحة للعميل، لا كخطأ 500 عارٍ.
-- **الحماية**: كل نقطة تستهلك هذي البيانات محمية بمفتاح API مستقل (`sales_api_key`/`support_api_key`/`orders_api_key`) — انظر [API.md § المصادقة](docs/API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة).
+- **الحماية**: كل نقطة محمية تستخدم مفتاح API مستقل (`sales_api_key`/`orders_api_key`/`voice_followup_api_key`) — انظر [API.md § المصادقة](docs/API.md#المصادقة--مفتاح-api-خاص-لكل-خدمة).
 - **قراءة الطلب من صورة** (`app/features/order_intake/vision.py`): الصورة تُمرَّر **مباشرة** مع برومت `plane.md` وguided JSON فيخرج الطلب **باستدعاء واحد** — سابقاً كانت خطوتين (وصف نصي حر ثم استخراج منه)، وكانت تُضيّع أرقام الهواتف والأسعار وتفكّك العروض المركّبة، بضِعف زمن الاستجابة. الصور تُصغَّر لأقصى بُعد 896px قبل الإرسال (أهم مكسب سرعة — توكنات الرؤية تتناسب مع المساحة). يستخدم **نفس محرك الموديل** المستخدَم بباقي الميزات (Gemma 4 يدعم صور أصلاً عبر `multi_modal_data` — انظر `app/engine.py`) — **ماكو نسخة ثانية من الموديل ولا استهلاك VRAM إضافي**. محلياً بدون GPU ترجع `501` واضحة.
 
 ## محرك الاستدلال — خادم vLLM منفصل
@@ -119,17 +115,17 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 - **قالب المحادثة بجهة الخادم**: `/v1/chat/completions` يستقبل `messages` مباشرة وvLLM يطبّق chat template الموديل الفعلي — `render_prompt()` صارت تمريراً مباشراً.
 - **Native tool calling**: المسار العام `/v1/chat/completions` يمرر `tools` و`tool_choice` مباشرة إلى vLLM؛ الخادم يعمل بـ`--enable-auto-tool-choice --tool-call-parser gemma4` ويرجع `tool_calls` الأصلي إلى jbot.
-- **Structured outputs للمسارات القديمة**: استخراج الطلب وحلقات أدوات `/sales` و`/support` تبقى عبر `guided_json` → `response_format: json_schema` بلا تغيير.
+- **Structured outputs**: استخراج الطلب وحلقة أدوات `/sales` تستخدم `guided_json` → `response_format: json_schema`.
 - **صور**: تُرسل كـ `image_url` (data URI base64) بنفس الطلب — نفس الموديل، ماكو نسخة ثانية.
 - **حتمي دائماً**: `temperature=0.0` بكل الطلبات (وصفة النوتبوك المعتمدة — أي sampling أنتج انهيار مخرجات بالتجربة).
-- **RAG محدود لاستخراج الطلب فقط**: `app/rag/` (لهجة + مواقع) يُستدعى فقط عند بناء الطلب النهائي (`plane.md`) لتصحيح المحافظة/المنطقة — لا يُحقن بردود المبيعات/الدعم المباشرة، والموديل يطلب بيانات منتج بنفسه عبر أداة `search_products`.
+- **RAG محدود لاستخراج الطلب فقط**: `app/rag/` (لهجة + مواقع) يُستدعى فقط عند بناء الطلب النهائي (`plane.md`) لتصحيح المحافظة/المنطقة — لا يُحقن بردود المبيعات المباشرة، والموديل يطلب بيانات منتج بنفسه عبر أداة `search_products`.
 - **فاحص جاهزية**: `app/engine.py` يفحص خادم vLLM دورياً — الميزات تشتغل فوراً بوضع fallback وتتحول تلقائياً لوضع الموديل أول ما يكمل vLLM تحميل الأوزان (ويرجعن لـ fallback لو سقط الخادم).
 
 محلياً بدون خادم vLLM (`llm_engine.ready == False`) ترجع كل الميزات تلقائياً لوضع fallback (بدون توليد نموذج) حتى يشتغل الكود فعلياً على RunPod عبر [start.sh](start.sh) (يشغّل الخادمين سوية).
 
 ### آلية "الوكيل يقرر" و"استدعاء الأدوات"
 
-المساران القديمان `sales` و`support` يبقيان مقيّدين بمخطط JSON صارم واحد (`guided_json`، انظر `app/tool_loop.py`) حفاظاً على سلوكهما أثناء الانتقال. أما `/v1/chat/completions` فيستخدم native function calling ويترك الحلقة وتنفيذ الأدوات عند jbot:
+مسار `sales` مقيّد بمخطط JSON صارم (`guided_json`، انظر `app/tool_loop.py`). أما `/v1/chat/completions` فيستخدم native function calling ويترك الحلقة وتنفيذ الأدوات عند jbot:
 
 ```json
 {
@@ -141,12 +137,10 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 - الموديل يقرر بنفسه: يحتاج بيانات؟ يرجع `action="tool_call"` باسم الأداة ومعاملاتها. الباك اند ينفّذها (استعلام حقيقي من البيانات) ويعيد النتيجة برسالة جديدة، والموديل يحلّلها بجولة توليد ثانية حتى يرجع `action="final_answer"`.
 - **المبيعات** (`app/features/sales/router.py`): أداة `search_products` — تُستدعى **مرة وحدة لكل جلسة** فتجيب الكتالوج كاملاً (بدل بحث ضيّق لكل منتج)، يُحقن بعدها تلقائياً بكل رسالة لاحقة (`app/context_blocks.py`) فيدوّر الموديل بالكتالوج الكامل بنفسه — بضمنه اقتراح بديل مشابه وتحليل صورة منتج يرفقها العميل (`image_base64` بجسم `/sales/chat*`، انظر `app/vision_utils.py`). حقل إضافي `order_ready: bool` بالمخطط (بدل علامة `[ORDER_READY]` النصية القديمة) — الموديل يعلن اكتمال الطلب صراحةً بحقل مقيَّد guided decoding، وتغلبه بوابة `_missing_order_fields` الحتمية إذا كانت بيانات التواصل ناقصة.
-- **الدعم** (`app/features/support/router.py`): أداة `get_order_status` — نفس مبدأ "حمّل مرة وحدة" لدفتر الطلبات الكامل بمسار الأسئلة العامة (بعد التتبع الحتمي برقم طلب/هاتف)، يسمح بالبحث باسم الزبون مباشرة بلا دالة مخصَّصة له.
 - **راوتر نية محافظ** (`app/intent_router.py`، كلا الميزتين): رسالة تحية/شكر/هوية بحتة (بلا رقم ولا كلمة منتج/طلب) تتجاوز حلقة الأدوات كاملاً وتُجاب بتوليد حر مباشر (`app/tool_loop.py::answer_without_tools`) — فحص محلي رخيص قبل الموديل، أضمن من الاعتماد على انضباطه بالتمييز.
 
 guided decoding يضمن JSON صالحاً فعلياً وقت التوليد نفسه — بدل تحليل نص حر (`[TOOL_CALL]{...}[/TOOL_CALL]`) عرضة للانحراف عن الصيغة. التغطية بـ `tests/test_tool_loop.py`، `tests/test_intent_router.py`، `tests/test_search_products_tool.py`، `tests/test_sales_catalog_guards.py`.
 
-**استعلامات الموظفين التشغيلية** (`app/features/support/router.py`): بوت الدعم **داخلي للموظفين**، فكل بيانات الطلبات متاحة إلهم. الاستعلام بالحالة («شنو الطلبات قيد التوصيل؟») والجرد العام وأرقام الهواتف — كلها تُجاب حتمياً من `orders.json` مباشرة، لا بالموديل: الموديل مرصود إنه يخترع معرّفات ويسند لها حالات غلط. الاستعلام بالحالة يجي **بعد** فحص المعرّفات عمداً، حتى «حالة ORD-1001» ترجع ذاك الطلب بالذات. التغطية بـ `tests/test_support_queries.py`.
 
 ## الإعداد الثابت
 
