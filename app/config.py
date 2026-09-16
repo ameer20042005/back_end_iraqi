@@ -132,6 +132,7 @@ class Settings:
     #
     # هذه القيم ثابتة ولا يمكن تجاوزها بمتغيرات البيئة.
     sales_api_key: Optional[str] = "sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2"
+    openai_compat_api_key: Optional[str] = "sk-openai-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f"
     orders_api_key: Optional[str] = "sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c"
     voice_followup_api_key: Optional[str] = "sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b"
 

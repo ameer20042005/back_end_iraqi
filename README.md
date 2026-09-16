@@ -51,7 +51,7 @@ uvicorn app.main:app --reload --port 8000
 | `GET /health` | فحص الصحة | لا |
 | `GET /gpu` | معلومات GPU/CUDA وحالة محرك الموديل | لا |
 | `GET /metrics` | إحصاءات عميل vLLM (طلبات، أخطاء، أزمنة استجابة) | لا |
-| `POST /v1/chat/completions` | واجهة OpenAI/Spring AI بلا حالة — native function calling، والتنفيذ الفعلي للأدوات عند jbot | `OPENAI_COMPAT_API_KEY` داخل الميزة |
+| `POST /v1/chat/completions` | واجهة OpenAI/Spring AI بلا حالة — native function calling، والتنفيذ الفعلي للأدوات عند jbot | `openai_compat_api_key` |
 | `POST /sales/chat` | وكيل مبيعات — رد كامل، يرجع `order` مملوءاً تلقائياً عند تثبيت الطلب | `sales_api_key` |
 | `POST /sales/chat/stream` | وكيل مبيعات — بث SSE حقيقي توكن-بتوكن، حدث `done` النهائي يحمل `order` | `sales_api_key` |
 | `POST /orders/create` | إنشاء طلب من `text`/`audio`/`image` (multipart، مدخل واحد بس) — يرجع JSON طلب مباشرة بدون محادثة | `orders_api_key` |
