@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import Field
 
 from app.engine import llm_engine
+from app.fallback import EXHAUSTED_FALLBACK
 from app.features.openai_compat.router import (
     ChatCompletionRequest,
     _base_response,
@@ -20,7 +21,6 @@ from app.features.openai_compat.router import (
 )
 from app.features.sales.auth import require_sales_api_key
 from app.features.sales.prompts import build_sales_prompt
-from app.tool_loop import EXHAUSTED_FALLBACK
 
 logger = logging.getLogger(__name__)
 

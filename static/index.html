@@ -852,10 +852,7 @@
   /* ---------------- وضع تجريبي (Demo Mode) — بلا سيرفر حقيقي ----------------
      يفعّل بيانات وهمية محلية بدل الاتصال الفعلي، حتى تفتح الصفحة مباشرة
      (file:// أو بأي استضافة ثابتة) وتجرّب كل الميزات بلا تشغيل uvicorn ولا
-     خادم vLLM. البيانات الوهمية (كتالوج المنتجات وسجل الطلبات) مبنية حرفياً
-     على عقد باك اند السستم الموثَّق بـ app/system_backend_schema.py وAPI.md
-     § "عقد باك اند السستم" (SystemProduct) — نفس أسماء الحقول
-     تماماً، فالصفحة تتصرف بنفس الشكل سواء كانت البيانات حقيقية أو تجريبية. */
+     خادم vLLM. بيانات المنتجات والطلبات الوهمية تخدم تجربة الواجهة فقط. */
   var demoModeCheck = document.getElementById("demoModeCheck");
   var demoToggle = document.getElementById("demoToggle");
   try {
@@ -867,7 +864,7 @@
     pingServer();
   });
 
-  // كتالوج منتجات وهمي — كل عنصر يطابق حقول SystemProduct حرفياً (id, name,
+  // كتالوج منتجات وهمي — حقوله تشمل (id, name,
   // sku, barcode, description, category, price, currency, in_stock,
   // stock_quantity, photos, deleted_at).
   var DEMO_PRODUCTS = [
@@ -2461,14 +2458,11 @@
   }
 
   /* ---------------- Tool call renderer (شفافية استدعاء الأدوات) ---------------- */
-  // toolCalls: [{tool, args, result}] — كما يرجعها app/tool_loop.py ضمن
-  // SalesChatResponse.tool_calls. تُعرض
+  // toolCalls: [{tool, args, result}] في وضع التجربة. تُعرض
   // كبطاقة صغيرة بين فقاعة العميل وفقاعة الوكيل: اسم الأداة + المعاملات
   // مباشرة، والنتيجة الكاملة مطويّة افتراضياً.
   //
-  // ملخّص سطر واحد لكل عنصر نتيجة مبني على عقد باك اند السستم الموثَّق
-  // (SystemProduct — انظر app/system_backend_schema.py وAPI.md
-  // § "عقد باك اند السستم") حتى تنقرأ صحة الحقول (سعر/توفر) بنظرة
+  // ملخّص سطر واحد لكل عنصر نتيجة حتى تنقرأ الحقول (سعر/توفر) بنظرة
   // بلا فتح الـ JSON الكامل.
   function summarizeToolResult(call) {
     var result = call.result;

@@ -7,7 +7,7 @@
 
 order_submitter الحقيقي (HttpOrderSubmitter) يرسل طلباً HTTP فعلياً لباك اند
 السستم — نستبدله هنا بمزوّد وهمي بالذاكرة (monkeypatch) حتى نفحص *هل* حاول
-الإرسال بلا الحاجة لخادم حقيقي، بنفس مبدأ _FakeEngine بـtest_tool_loop.py.
+الإرسال بلا الحاجة لخادم حقيقي.
 
 يغطي مسار /orders/create (نص، صوت، صورة) الذي يمر بـ resolve_order.
 

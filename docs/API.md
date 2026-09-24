@@ -100,47 +100,6 @@ curl -X POST http://localhost:8000/voice_followup/ask \
 ]
 ```
 
-## عقد باك اند السستم — الشكل الرسمي لاستجابات المنتجات
-
-**هذا القسم موجّه لفريق باك اند السستم**: يوثّق الشكل الرسمي لاستجابات المنتجات التي تستهلكها المبيعات.
-
-### لماذا هذا العقد أُضيف
-
-قبله، كان `app/products.py` يمرر `resp.json()` بلا تحقق برمجي. الآن تمر استجابات الكتالوج عبر Pydantic (`app/system_backend_schema.py`) قبل وصولها إلى أداة البحث.
-
-### مصدر أسماء الحقول
-
-مبنية على أعمدة `catalog.products` و`catalog.stock_info` الحقيقية كما موثّقة بـ [assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md](<assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md>).
-
-### `SystemProduct` — عنصر واحد بـ `results` (`GET /products/search`) أو جسم `GET /products/{id}`
-
-| الحقل | النوع | إلزامي | يقابل عمود قاعدة البيانات | الوصف |
-|---|---|---|---|---|
-| `id` | string | **نعم** | `products.id` | معرّف المنتج |
-| `name` | string | **نعم** | `products.name` | اسم المنتج — يُذكر حرفياً بالرد |
-| `sku` | string \| null | لا | `products.sku` | رمز المخزون |
-| `barcode` | string \| null | لا | `products.barcode` | الباركود |
-| `description` | string \| null | لا | `products.description` | وصف — الموديل يستخرج منه المواصفات المذكورة بالرد فقط |
-| `category` | string \| null | لا | `categories.pretty_name` (عبر `product_categories`) | اسم الفئة — نفس ما يُمرَّر بفلتر `args.category` بأداة `search_products` |
-| `price` | number \| null | لا | سعر البيع (`products`) | numeric(19,2) — **المصدر الوحيد المسموح للأسعار بالرد** |
-| `currency` | string \| null | لا (افتراضي `"IQD"`) | — | رمز العملة |
-| `in_stock` | boolean \| null | لا | مشتق من مجموع `stock_info.qty` عبر المخازن | `true` إن وُجدت كمية > 0 بأي مخزن |
-| `stock_quantity` | integer \| null | لا | مجموع `stock_info.qty` | الكمية الكلية المتوفرة |
-| `photos` | string[] | لا (افتراضي `[]`) | `products.photos` (JSON) | روابط صور المنتج |
-| `deleted_at` | string \| null | لا | `products.deleted_at` | ISO 8601 — منتج محذوف منطقياً إن وُجدت قيمة |
-
-### سياسة التسامح (مقصودة)
-
-- الحقول الجوهرية `id` و`name` و`price` إلزامية؛ بقية الحقول اختيارية.
-- عنصر يفشل التحقق يُستبعَد مع تحذير باللوق من دون كسر بقية نتائج الكتالوج.
-- **حقول إضافية غير موثّقة هنا تمر بلا رفض** (`model_config = ConfigDict(extra="allow")`) — إضافة عمود جديد بباك اند السستم لا تكسر شيئاً، فقط لا تُتحقق ولا تصل تلقائياً للموديل إلا لو أُضيفت صراحة للعقد.
-
-### أين التعريف الرسمي بالكود
-
-`app/system_backend_schema.py` — `SystemProduct` و`SystemProductSearchResponse` (Pydantic).
-
----
-
 ## فحص الحالة
 
 ### `GET /health`

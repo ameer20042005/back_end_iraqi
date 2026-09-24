@@ -5,7 +5,7 @@
 **البنية** (حسب وصفة vLLM الرسمية لـ Gemma 4):
     ┌─────────────────────┐  HTTP   ┌──────────────────────────────┐
     │ FastAPI (منفذ 8000) │ ──────► │ vLLM serve (منفذ 18001)      │
-    │ RAG + دروع + جلسات  │         │ gemma-iraqi-finetune-v2      │
+    │ راوترات + RAG الطلب │         │ الموديل المحدد في config.py   │
     └─────────────────────┘         └──────────────────────────────┘
 
 دعم Gemma4ForConditionalGeneration وصل لـ vLLM عبر PR #44429 (نسخة nightly
@@ -132,8 +132,7 @@ class LLMEngine:
     ) -> List[Message]:
         """كان يحوّل الرسائل لنص عبر chat template محلي — الآن vLLM يطبّق
         القالب بجهة الخادم، فنمرر الرسائل كما هي. `tools` غير مستخدمة بهذه
-        الدالة؛ المسارات القديمة تستعمل app/tool_loop.py، والمسار المتوافق مع
-        OpenAI يمرر الأدوات الأصلية عبر create_chat_completion()."""
+        الدالة؛ المسار المتوافق مع OpenAI يمرر الأدوات عبر create_chat_completion()."""
         return messages
 
     def render_multimodal_prompt(self, messages: List[Message]) -> List[Message]:
@@ -267,64 +266,6 @@ class LLMEngine:
             tools=tools,
             tool_choice=tool_choice,
         )
-
-    async def stream_chat_completion(
-        self,
-        messages: List[Message],
-        max_tokens: int,
-        stop: Optional[List[str]] = None,
-        multi_modal_data: Optional[dict] = None,
-    ) -> AsyncGenerator[str, None]:
-        """توليد حر (بلا guided_json) مبثوث توكن-بتوكن فعلياً عبر SSE من vLLM
-        (`stream: true`) — يُستخدم فقط للنص النهائي الحر بعد ما تنتهي جولات
-        قرار الأدوات (انظر app/tool_loop.py::stream_final_answer). لا ينفع
-        مع guided_json: JSON مقيَّد ما يصير صالحاً للتحليل إلا مكتملاً، فبثّه
-        جزئياً بلا فائدة للعميل.
-
-        `multi_modal_data`: نفس معامل generate_stream/generate_full — صورة
-        مرفقة بمحادثة مبيعات (app/features/sales/router.py) لازم تبقى
-        مرئية للموديل حتى بجولة الرد النهائي المنفصلة هذي، وإلا "ينسى"
-        الصورة بمجرد ما تنتهي جولة القرار.
-
-        كل قطعة SSE بصيغة OpenAI: `data: {...}\\n\\n`، تنتهي بـ `data: [DONE]`.
-        نقص أي دلتا نص فيها ونتجاهل الباقي (role وما شابه)."""
-        openai_messages = self._to_openai_messages(messages, multi_modal_data)
-        body = self._build_body(openai_messages, max_tokens, stop, guided_json=None, stream=True)
-
-        if not self._ready:
-            raise RuntimeError("لا يوجد خادم vLLM جاهز حالياً")
-        self._inflight += 1
-        t0 = time.monotonic()
-        got_any = False
-        try:
-            async with self._client.stream("POST", "/chat/completions", json=body) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    payload = line[len("data: "):]
-                    if payload == "[DONE]":
-                        break
-                    chunk = json.loads(payload)
-                    choices = chunk.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = (choices[0].get("delta") or {}).get("content")
-                    if delta:
-                        got_any = True
-                        yield delta
-        except Exception:
-            self.metrics["errors"] += 1
-            raise
-        finally:
-            self._inflight -= 1
-            elapsed_ms = (time.monotonic() - t0) * 1000
-            self.metrics["requests_served"] += 1
-            self.metrics["request_latencies_ms"].append(elapsed_ms)
-            if len(self.metrics["request_latencies_ms"]) > 500:
-                self.metrics["request_latencies_ms"] = self.metrics["request_latencies_ms"][-500:]
-        if not got_any:
-            logger.error("⚠️ Empty stream from vLLM (stream_chat_completion) — check the tokenizer/weights")
 
     async def generate_stream(
         self,

@@ -6,7 +6,6 @@ import json
 import pytest
 from fastapi import HTTPException
 
-from app import sessions
 from app.config import settings
 from app.features.sales.auth import require_sales_api_key
 from app.features.sales import router as sales
@@ -47,16 +46,7 @@ def _search_tool():
     }
 
 
-def test_sales_runs_one_generation_and_does_not_use_server_sessions(monkeypatch):
-    def forbidden(*args, **kwargs):
-        raise AssertionError("sales must not own conversation state")
-
-    for name in (
-        "get", "append", "cached_catalog", "known_products", "known_location",
-        "remember_location", "remember_products",
-    ):
-        monkeypatch.setattr(sessions, name, forbidden)
-
+def test_sales_runs_one_generation_with_client_messages(monkeypatch):
     engine = _FakeEngine({"choices": [{"message": {"content": "هلا بيك"}}]})
     monkeypatch.setattr(sales, "llm_engine", engine)
     response = asyncio.run(sales.sales_chat(_request([

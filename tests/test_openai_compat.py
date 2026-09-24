@@ -5,7 +5,7 @@ import json
 
 from app.features.openai_compat import router as compat
 from app.features.openai_compat.prompts import OPENAI_COMPAT_SYSTEM_PROMPT
-from app.tool_loop import EXHAUSTED_FALLBACK
+from app.fallback import EXHAUSTED_FALLBACK
 
 
 class _FakeEngine:

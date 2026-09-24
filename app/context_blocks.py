@@ -1,33 +1,22 @@
-# -*- coding: utf-8 -*-
-"""صياغة نتائج RAG (لهجة/منتجات) كمقاطع نصية تُضاف لأي system prompt.
+"""Reference blocks used by order intake prompts."""
 
-مشتركة بين ميزتي sales وorder_intake بدل تكرارها بكل ميزة على حدة.
-"""
-
-import json
-import logging
-from typing import List, Optional, Tuple
-
-logger = logging.getLogger(__name__)
+from typing import List
 
 
 def words_context_block(rag_words: List[dict]) -> str:
     if not rag_words:
         return ""
     lines = []
-    for r in rag_words:
-        if r.get("word"):
-            lines.append(f"- {r['word']}: {r['meaning']}")
+    for result in rag_words:
+        if result.get("word"):
+            lines.append(f"- {result['word']}: {result['meaning']}")
         else:
-            lines.append(f"- {r['text']}")
+            lines.append(f"- {result['text']}")
     return "\n\nمعلومات مرجعية عن اللهجة العراقية (استخدمها إذا كانت مفيدة):\n" + "\n".join(lines)
 
 
 def locations_context_block(rag_locations: List[dict], state_names: List[str]) -> str:
-    """مرجع المواقع من قاعدة بيانات شركة التوصيل (app/rag/locations.py) —
-    يُحقن ببرومت استخراج الطلب: قيم city المسموحة هي أسماء states.xlsx
-    الرسمية حصراً، وdistrict يُكتب بالاسم الرسمي من districts.xlsx عند
-    وروده بالمطابقات."""
+    """Format the official state and district names for order extraction."""
     block = (
         "\n\nقيم city المسموحة حصراً — الأسماء الرسمية للمحافظات بنظام شركة التوصيل"
         " (اكتب الاسم حرفياً كما هو هنا):\n"
@@ -35,12 +24,12 @@ def locations_context_block(rag_locations: List[dict], state_names: List[str]) -
     )
     if rag_locations:
         lines = []
-        for r in rag_locations:
-            if r["district"]:
-                states = "/".join(r["candidates"])
-                lines.append(f"- المنطقة «{r['district']}» تتبع محافظة: {states}")
+        for result in rag_locations:
+            if result["district"]:
+                states = "/".join(result["candidates"])
+                lines.append(f"- المنطقة «{result['district']}» تتبع محافظة: {states}")
             else:
-                lines.append(f"- «{r['state_name']}» محافظة")
+                lines.append(f"- «{result['state_name']}» محافظة")
         block += (
             "\n\nمرجع جغرافي مؤكد من قاعدة بيانات شركة التوصيل — أسماء وردت بالنص:\n"
             + "\n".join(lines)
@@ -48,70 +37,3 @@ def locations_context_block(rag_locations: List[dict], state_names: List[str]) -
             " أعلاه حرفياً، وcity بمحافظتها المذكورة أعلاه."
         )
     return block
-
-
-def cap_for_model(items: List[dict], max_items: int, label: str) -> Tuple[List[dict], int]:
-    """يقصّ `items` لأول `max_items` فقط عند التسليم الفعلي للموديل (حقن
-    بالبرومبت، أو رد أداة) — الكاش الكامل وراءه (app/sessions.py) يبقى بلا
-    مساس؛ هذا القصّ لحظي وقت البناء فقط، حماية لميزانية التوكِن
-    (settings.max_injected_records، انظر app/config.py).
-
-    ترجع (القائمة المقصوصة، العدد الأصلي) لا القائمة وحدها: المتصل يحتاج
-    يعرف "هل انقصّ؟" حتى يكتبها للموديل
-    صراحةً، وإلا ظن الموديل أن الناقص غير موجود وقال «ماكو». tuple لا قائمة
-    عمداً: يجبر كل مستدعٍ يتعامل مع الحقيقة بدل تجاهلها صامتاً. القاعدة
-    العامة: **كل حدّ لازم يصل المستهلِك صراحةً بالنص — نموذجاً كان أم إنساناً.**
-    القصّ يبقى، الكتمان هو العطل."""
-    total = len(items)
-    if total <= max_items:
-        return items, total
-    logger.warning(
-        "%s: %s عنصر يفوق سقف الحقن max_injected_records=%s — تم القصّ لأول %s.",
-        label, total, max_items, max_items,
-    )
-    return items[:max_items], total
-
-
-def catalog_context_block(products: List[dict], total: Optional[int] = None) -> str:
-    """كتالوج المنتجات (محمَّل مرة وحدة لهذي الجلسة عبر search_products_tool،
-    انظر app/sessions.py::cache_catalog) — يُحقن بكل رسالة مبيعات لاحقة بنفس
-    الجلسة (app/features/sales/prompts.py::build_sales_prompt) حتى يدوّر
-    الموديل بالكتالوج بدل استدعاء أداة جديد لكل منتج يُسأل عنه.
-
-    `total`: العدد الأصلي قبل القصّ (من cap_for_model). لو أكبر من المعروض،
-    البرومبت يقول للموديل صراحةً إن الكتالوج **جزئي** ويوجّهه لأداة
-    search_products بـ query للباقي — بدل الادعاء القديم "الكتالوج الكامل" الذي
-    كان يخلي الموديل ينفي وجود منتج موجود فعلاً (العطل B1).
-
-    JSON سطر لكل منتج — نفس شكل `[نتيجة الأداة search_products]` تماماً
-    (انظر app/tool_loop.py) حتى تبقى قواعد SALES_SYSTEM_PROMPT ("من نتيجة
-    search_products الحرفية فقط") صالحة بلا تفريق بين مصدرَي الكتالوج."""
-    if not products:
-        return ""
-    lines = [json.dumps(p, ensure_ascii=False) for p in products]
-    shown = len(products)
-    if total is not None and total > shown:
-        heading = (
-            f"\n\nكتالوج المنتجات — **جزئي**: معروض {shown} من أصل {total} منتج "
-            "(حُمِّل مرة وحدة هذي الجلسة). دوّر فيه أولاً؛ وإذا ما لگيت المنتج "
-            "المطلوب هنا **لا تگول ماكو** — استدعِ search_products بـ query باسم "
-            "المنتج حتى تبحث بالكتالوج الكامل:\n"
-        )
-    else:
-        heading = (
-            "\n\nكتالوج المنتجات الكامل (حُمِّل مرة وحدة هذي الجلسة — استخدمه "
-            "حرفياً لأي سؤال منتج، بلا حاجة تستدعي search_products ثانية بهذي "
-            "المحادثة إلا لو ما لگيت فيه جواب):\n"
-        )
-    return heading + "\n".join(lines)
-
-
-def products_context_block(rag_products: List[dict]) -> str:
-    if not rag_products:
-        return "\n\nمنتجات متوفرة: لا يوجد أي منتج مطابق حالياً."
-    lines = [
-        f"- {p['name']} | السعر: {p['price']} {p.get('currency', '')} | "
-        f"المخزون: {p.get('stock', 'غير محدد')} | {p.get('description', '')}"
-        for p in rag_products
-    ]
-    return "\n\nمنتجات متوفرة (استخدم هذه الأسماء والأسعار فقط):\n" + "\n".join(lines)

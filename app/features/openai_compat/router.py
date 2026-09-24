@@ -17,9 +17,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.engine import llm_engine
+from app.fallback import EXHAUSTED_FALLBACK
 from app.features.openai_compat.auth import require_openai_compat_api_key
 from app.features.openai_compat.prompts import OPENAI_COMPAT_SYSTEM_PROMPT
-from app.tool_loop import EXHAUSTED_FALLBACK
 
 logger = logging.getLogger(__name__)
 

@@ -1,18 +1,7 @@
-"""FastAPI backend — يعمل محلياً وعلى RunPod مع خادم vLLM منفصل + RAG.
-
-كل ميزة براوترها الخاص تحت app/features/*/router.py — هذا الملف فقط ينشئ
-التطبيق، يشغّل دورة حياة المحرك (lifespan)، ويجمع كل الراوترات."""
+"""FastAPI application, engine lifecycle, and feature router registration."""
 
 import asyncio
 from contextlib import asynccontextmanager
-
-# الشرح: الإصلاح أدناه يحتاج شيئين غير موجودين حالياً بهذا الملف:
-#   - time.monotonic() لقياس مهلة الانتظار (ساعة لا تتأثر بتغيّر وقت النظام،
-#     بعكس time.time()، فما تنكسر المهلة لو عدّل الـ Pod ساعته أثناء الإقلاع).
-#   - logger لتسجيل سبب تجاوز المهلة، حتى يظهر بمخرجات uvicorn بدل صمت تام.
-# import logging
-# import time
-
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -31,78 +20,29 @@ from app.system_backend import close_client as close_system_backend_client
 
 try:
     import torch
-
     TORCH_AVAILABLE = True
 except ImportError:
-    # محلياً بدون torch — على RunPod تكون المكتبة موجودة في الصورة
     TORCH_AVAILABLE = False
 
 
-# الشرح: logger على مستوى الوحدة — يُستخدم داخل _warmup_local_models أدناه.
-# logger = logging.getLogger(__name__)
-
-
-# ═════════ إصلاح تسلسل الإقلاع: تأجيل موديلات الصوت حتى جاهزية vLLM ═════════
-# الشرح (ليش هذا الإصلاح موجود أصلاً):
-# Whisper و F5-TTS يعيشان داخل عملية FastAPI نفسها وعلى **نفس كرت الـGPU**
-# الذي يحجز عليه vLLM أوزانه (~24.4GB) + الـKV cache. بالكود الحالي (أسفل،
-# داخل lifespan) تُطلَق مَهمّتا التحميل فور إقلاع FastAPI — أي بالضبط بينما
-# vLLM لسه يحمّل الأوزان ويقيس الذاكرة الحرة (profiling) ليقرر حجم الـKV
-# cache. فيخطف موديلا الصوت VRAM من تحته أثناء القياس، وينهار المحرك لاحقاً
-# بـCUDA OOM. خفض GPU_MEMORY_UTILIZATION (start.sh) عالج *نسبة* الحجز لكنه
-# لا يعالج *ترتيبه* — وهذا ما تعالجه الدالة أدناه.
-#
-# الشرح (كيف تعالجه): تنتظر حتى يقلب فاحص الجاهزية llm_engine.ready إلى True
-# (أي بعد ما خلّص vLLM حجزه فعلاً وصار /v1/models يرد 200)، وعندها فقط
-# تحمّل الموديلين — و**بالتتابع** لا بالتوازي، لأن تحميلهما معاً يصنع قمة
-# ذاكرة مزدوجة لحظية بلا داعٍ.
-#
-# الشرح (ليش مهلة قصوى deadline): محلياً بلا خادم vLLM يبقى ready == False
-# للأبد، وبدون سقف زمني ما يتحمّل أي موديل صوت إطلاقاً فينكسر الاختبار
-# المحلي. بعد انقضاء المهلة نحمّل على أي حال — محلياً ماكو vLLM يزاحمنا.
-# async def _warmup_local_models(timeout_seconds: float = 900.0) -> None:
-#     deadline = time.monotonic() + timeout_seconds
-#     while not llm_engine.ready and time.monotonic() < deadline:
-#         await asyncio.sleep(5.0)
-#     if not llm_engine.ready:
-#         logger.warning(
-#             "انقضت مهلة انتظار vLLM (%.0f ثانية) — نحمّل موديلات الصوت رغم ذلك",
-#             timeout_seconds,
-#         )
-#     await run_in_threadpool(warmup_transcriber)
-#     await run_in_threadpool(warmup_tts)
+async def _warmup_audio_models() -> None:
+    """Load audio models after vLLM has reserved GPU memory."""
+    while not llm_engine.ready:
+        await asyncio.sleep(5)
+    await run_in_threadpool(warmup_transcriber)
+    await run_in_threadpool(warmup_tts)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # يفتح عميل HTTP لخادم vLLM ويشغّل فاحص جاهزية بالخلفية (انظر
-    # app/engine.py) — الموديل نفسه يحمّله خادم vLLM المنفصل (start.sh).
-    # محلياً بدون خادم vLLM يبقى llm_engine.ready == False وكل الميزات
-    # ترجع لوضع fallback (بدون توليد نموذج).
     await llm_engine.start()
-    # موديل الصوت (Whisper) يعيش بعملية FastAPI نفسها، وتحميله كان يصير عند
-    # **أول رسالة صوتية** — فيدفع أول زبون عشرات الثواني تحميلاً تظهر كأنها
-    # بطء بالتحويل. نحمّله بالخلفية من الآن: بخيط منفصل حتى لا يجمّد الـ event
-    # loop، وكمَهمّة حتى لا يتأخر إقلاع الخادم (باقي المسارات تشتغل فوراً).
-    # ⚠️ السطران التاليان هما مصدر تصادم الذاكرة الموصوف فوق: يبدآن التحميل
-    # فوراً بالتوازي مع تحميل vLLM لأوزانه. عند تفعيل الإصلاح، علّقهما
-    # (وعلّق كذلك tts_warmup_task.cancel() بالأسفل) وفعّل السطر البديل.
-    warmup_task = asyncio.create_task(run_in_threadpool(warmup_transcriber))
-    # نفس مبرر تحميل Whisper أعلاه، لموديل تحويل النص لصوت (F5-TTS) الذي
-    # يخدم مسار المتابعة الصوتية (app/features/voice_followup).
-    tts_warmup_task = asyncio.create_task(run_in_threadpool(warmup_tts))
-    # الشرح: البديل — مَهمّة واحدة تنتظر جاهزية vLLM ثم تحمّل الموديلين
-    # بالتتابع. نفس اسم المتغير warmup_task عن قصد، حتى يبقى سطر
-    # warmup_task.cancel() بالأسفل صالحاً بلا أي تعديل عليه.
-    # warmup_task = asyncio.create_task(_warmup_local_models())
-    yield
-    # يوقف فاحص الجاهزية ويغلق عميل HTTP.
-    warmup_task.cancel()
-    tts_warmup_task.cancel()
-    await llm_engine.shutdown()
-    # العميل المشترك لباك اند السستم (app/system_backend.py::get_client) —
-    # يُغلق هنا حتى تُحرَّر اتصالات keep-alive عند إيقاف الخادم.
-    await close_system_backend_client()
+    warmup_task = asyncio.create_task(_warmup_audio_models())
+    try:
+        yield
+    finally:
+        warmup_task.cancel()
+        await llm_engine.shutdown()
+        await close_system_backend_client()
 
 
 app = FastAPI(
