@@ -9,7 +9,7 @@
 
 ## المصادقة — مفتاح API خاص لكل خدمة
 
-كل خدمة محمية (المبيعات، إنشاء الطلبات، المتابعة الصوتية) تستخدم مفتاحها الخاص المستقل تماماً عن غيرها. المفتاح يُرسَل بهيدر HTTP:
+كل خدمة محمية (المبيعات، إنشاء الطلبات، المتابعة الصوتية، تصحيح المناطق) تستخدم مفتاحها الخاص المستقل تماماً عن غيرها. المفتاح يُرسَل بهيدر HTTP:
 
 ```
 X-API-Key: <المفتاح>
@@ -21,10 +21,12 @@ X-API-Key: <المفتاح>
 | المبيعات | `POST /sales/chat`, `POST /sales/chat/stream` | `sales_api_key` | `sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2` |
 | إنشاء الطلبات | `POST /orders/create` | `orders_api_key` | `sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c` |
 | المتابعة الصوتية | `POST /voice_followup/ask`, `POST /voice_followup/respond` | `voice_followup_api_key` | `sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b` |
+| تصحيح المناطق | `POST /v1/district-correction` | `district_api_key` | `sk-district-7ea5de0fb1b68f0283df460dea42b2df` |
 
-- **النقاط المفتوحة بلا مفتاح**: `GET /health`, `GET /gpu`, `GET /`, `GET /docs`.
+- **تصحيح المناطق**: `POST /v1/district-correction` يستخدم مفتاحاً مستقلاً `district_api_key`؛ [العقد الكامل وPostman](district-correction-api.md).
+- **النقاط المفتوحة بلا مفتاح**: `GET /health`, `GET /gpu`, `GET /`, `GET /docs`, `GET /v1/district-correction/ready`.
 - **مفتاح خدمة لا يشتغل بخدمة ثانية** — كل خدمة تتحقق من مفتاحها هي حصراً (انظر `app/auth.py`).
-- **القيم مكتوبة ثابتة بالكود** (`app/config.py`) لتشتغل فوراً بلا أي إعداد خارجي. لتغييرها، عدّل حقول المفاتيح في الملف نفسه ثم أعد تشغيل الخادم.
+- كل مفاتيح الخدمات، بما فيها `district_api_key`، معرفة في `app/config.py`.
 
 **أمثلة استدعاء:**
 

@@ -5,3 +5,5 @@ __pycache__/
 *.pt
 *.safetensors
 .env
+app/features/district_correction/data/*.sqlite3
+app/features/district_correction/data/*.tmp

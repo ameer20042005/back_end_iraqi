@@ -1,5 +1,7 @@
 # دليل اختبار الـ API على Postman
 
+لتجربة ميزة تصحيح مناطق شركات التوصيل المضافة إلى الباك اند نفسه، استورد [مجموعة Postman الخاصة بها](district-correction-postman.json) واتبع [عقد المراسلة](district-correction-api.md). تستخدم المنفذ `8000` ومفتاحاً مستقلاً هو `district_api_key` في `app/config.py`.
+
 > ⚠️ **تنبيه أمني**: هذا الملف وملف [`postman_collection.json`](postman_collection.json) يحتويان مفاتيح API حقيقية
 > (نفس مفاتيح [`api-order-sales-voice.md`](api-order-sales-voice.md)). لا تشاركهما أو ترفعهما لمستودع عام.
 

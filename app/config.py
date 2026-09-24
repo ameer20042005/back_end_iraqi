@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """إعدادات التطبيق الثابتة.
 
-هذا هو مصدر الإعدادات الوحيد للتطبيق ولـ ``start.sh``. لا تُقرأ ملفات ``.env``
-ولا متغيرات بيئة النظام؛ غيّر القيم هنا مباشرة عند الحاجة.
+هذا هو مصدر إعدادات التطبيق و``start.sh``. تُقرأ الأسرار ومتغيرات ميزة
+تصحيح المناطق من البيئة؛ بقية القيم تُضبط هنا مباشرة.
 """
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from app.lang import Lang
@@ -113,6 +114,21 @@ class Settings:
     openai_compat_api_key: Optional[str] = "sk-openai-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f"
     orders_api_key: Optional[str] = "sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c"
     voice_followup_api_key: Optional[str] = "sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b"
+    district_api_key: Optional[str] = "sk-district-7ea5de0fb1b68f0283df460dea42b2df"
+
+    # خدمة تصحيح مناطق شركات التوصيل: نفس FastAPI مع مفتاحها المستقل أعلاه.
+    # مسارات الكتالوج وإعدادات LLM الاختيارية تُقرأ من البيئة.
+    district_source_dir: Path = field(default_factory=lambda: Path(os.getenv(
+        "DISTRICT_SOURCE_DIR", str(Path(__file__).resolve().parent.parent / "assets" / "address"))))
+    district_database_path: Path = field(default_factory=lambda: Path(os.getenv(
+        "DISTRICT_DATABASE_PATH", str(Path(__file__).resolve().parent / "features" / "district_correction" / "data" / "catalog.sqlite3"))))
+    district_llm_base_url: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_BASE_URL", ""))
+    district_llm_api_key: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_API_KEY", ""))
+    district_llm_model: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_MODEL", ""))
+    district_llm_max_cases: int = field(default_factory=lambda: int(os.getenv("DISTRICT_LLM_MAX_CASES", "100")))
+    district_excluded_companies: frozenset = field(default_factory=lambda: frozenset(
+        name.strip().upper() for name in os.getenv("DISTRICT_EXCLUDED_COMPANIES", "TEST").split(",") if name.strip()))
+    district_llm_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("DISTRICT_LLM_TIMEOUT_SECONDS", "15")))
 
     # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
     # مفرَّغ عليه اللهجة العربية (نموذج transformers عادي، يعمل بعملية FastAPI

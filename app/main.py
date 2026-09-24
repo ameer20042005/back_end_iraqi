@@ -10,6 +10,8 @@ from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.engine import llm_engine
+from app.features.district_correction.router import load_catalog as load_district_catalog
+from app.features.district_correction.router import router as district_correction_router
 from app.features.order_intake.router import router as order_intake_router
 from app.features.openai_compat.router import router as openai_compat_router
 from app.features.order_intake.transcribe import warmup as warmup_transcriber
@@ -36,6 +38,7 @@ async def _warmup_audio_models() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await llm_engine.start()
+    load_district_catalog(app)
     warmup_task = asyncio.create_task(_warmup_audio_models())
     try:
         yield
@@ -73,6 +76,7 @@ app.add_middleware(
 
 app.include_router(sales_router)
 app.include_router(openai_compat_router)
+app.include_router(district_correction_router)
 app.include_router(order_intake_router)
 app.include_router(voice_followup_router)
 

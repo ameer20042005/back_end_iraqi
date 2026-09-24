@@ -1,5 +1,7 @@
 # back_end_iraqi — FastAPI على RunPod
 
+ميزة تصحيح مناطق شركات التوصيل ضمن [`app/features/district_correction`](app/features/district_correction)، وتعتمد ملفات Excel الموجودة في `assets/address/address`. تعمل مع بقية الواجهات على المنفذ 8000؛ [عقد المراسلة وPostman](docs/district-correction-api.md).
+
 باكند FastAPI جاهز للعمل محلياً وعلى RunPod بصورة `ubuntu:22.04` خام —
 `start.sh` يبني كل شي لازم من الصفر بأول إقلاع (Python/pip، vLLM nightly
 بدعم Gemma 4 مع torch المتوافق، ffmpeg/libsndfile1).
@@ -11,6 +13,7 @@
 | وكيل مبيعات | `app/features/sales/` | يقنع العميل بالشراء ويقترح منتجات؛ يرجع طلبات أدوات OpenAI لينفّذها العميل |
 | واجهة OpenAI | `app/features/openai_compat/` | واجهة Chat Completions متوافقة مع OpenAI وتدعم native function calling |
 | إنشاء طلب متعدد الوسائط | `app/features/order_intake/` | نص أو صوت أو صورة → JSON طلب مباشرة |
+| تصحيح مناطق شركات التوصيل | `app/features/district_correction/` | يصحح المنطقة ويفصل تفاصيل العنوان حسب الشركة والمحافظة |
 
 الموديل، RAG، الجلسات، كتالوج المنتجات، وصيغة الطلب مشتركة بجذر `app/` (تفصيل الملفات أدناه).
 
@@ -55,6 +58,8 @@ uvicorn app.main:app --reload --port 8000
 | `POST /sales/chat/completions` | مبيعات OpenAI-compatible؛ التاريخ وتنفيذ الأدوات عند العميل | `sales_api_key` |
 | `POST /sales/chat/stream` | نفس AI API بصيغة OpenAI SSE | `sales_api_key` |
 | `POST /orders/create` | إنشاء طلب من `text`/`audio`/`image` (multipart، مدخل واحد بس) — يرجع JSON طلب مباشرة بدون محادثة | `orders_api_key` |
+| `POST /v1/district-correction` | تصحيح دفعة مناطق لجهة توصيل واحدة؛ [الطلب والرد](docs/district-correction-api.md) | `district_api_key` |
+| `GET /v1/district-correction/ready` | جاهزية كتالوج المناطق | لا |
 | `POST /voice_followup/ask` | متابعة صوتية — يستقبل تفاصيل طلب (من باك اند السستم) ويرجع سؤالاً صوتياً WAV | `voice_followup_api_key` |
 | `POST /voice_followup/respond` | يستقبل رد الزبون الصوتي، يحلّل السبب ويرسله لباك اند السستم، يرجع صوت شكر WAV | `voice_followup_api_key` |
 | `GET /docs` | واجهة Swagger التفاعلية | لا |
@@ -119,7 +124,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 ## الإعداد الثابت
 
-كل الإعدادات موجودة حصراً في `app/config.py` ولا يمكن تغييرها من `.env` أو من متغيرات بيئة النظام. عدّل حقول `Settings` هناك، بما فيها `model_name` و`vllm_base_url` و`vllm_port` و`gpu_memory_utilization` و`max_model_len` والمفاتيح. إذا احتاج Hugging Face صلاحية للوصول إلى الموديل، اكتبها في `hf_token` بنفس الملف.
+الإعدادات معرّفة في `app/config.py`. مفتاح تصحيح المناطق `district_api_key` ثابت هناك مثل بقية المفاتيح، وقيم تشغيل الميزة الاختيارية تُقرأ من متغيرات البيئة `DISTRICT_*`، وتبقى بقية إعدادات الموديل والميزات في `Settings`. سر Hugging Face يُقرأ من `HF_TOKEN`.
 
 **تنبيه أمني**: القيم في هذا الملف مرئية لكل من يصل إلى المستودع؛ لا تنشره علناً إن وضعت فيه مفاتيح أو توكنات حقيقية.
 
