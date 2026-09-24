@@ -22,7 +22,7 @@ from app.engine import llm_engine
 from app.features.order_intake.prompts import build_order_intake_prompt
 from app.features.order_intake.transcribe import transcribe
 from app.features.order_intake.vision import order_image_reader
-from app.features.sales.service import resolve_order
+from app.order_service import resolve_order
 from app.order_extraction import correct_location, state_code_for
 from app.order_schema import (
     OrderConfirmation,

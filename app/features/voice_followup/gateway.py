@@ -51,7 +51,7 @@ class HttpVoiceFollowupSubmitter(VoiceFollowupSubmitter):
         # بيانات الزبون كاملة من الطلب الأصلي (المصدر الوحيد الموثوق —
         # لا نستنتج اسماً أو رقماً أو موقعاً من رد الزبون الصوتي نفسه) +
         # ملخّص السبب المستخرَج من رده. نفس مبدأ resolve_order بـ
-        # app/features/sales/service.py: لا نعيد حساب أو نخترع، فقط نمرر
+        # app/order_service.py: لا نعيد حساب أو نخترع، فقط نمرر
         # ما وصل فعلاً من مصادر موثوقة.
         payload = {
             "order_id": order.order_id,

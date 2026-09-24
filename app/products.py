@@ -77,7 +77,7 @@ class HttpProductRepository(ProductRepository):
     TODO: رابط ومسارات باك اند السستم الفعلية غير معروفة بعد —
     `SYSTEM_BACKEND_BASE_URL` (app/config.py) ومسارات `search`/`get_by_id`
     أدناه أفضل تخمين موثَّق. عدّلها فقط عند توفر التفاصيل الحقيقية؛ الواجهة
-    (ProductRepository) والمستدعين (app/tools/products.py, sales/service.py)
+    (ProductRepository) والمستدعين (app/tools/products.py, app/order_service.py)
     لا يتغيّرون.
     """
 

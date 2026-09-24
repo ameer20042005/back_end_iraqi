@@ -39,7 +39,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 curl -X POST http://localhost:8000/sales/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
-  -d '{"message": "شنو عندكم لابتوبات؟"}'
+  -d '{"model":"sales","messages":[{"role":"user","content":"شنو عندكم لابتوبات؟"}]}'
 
 # إنشاء طلب (multipart)
 curl -X POST http://localhost:8000/orders/create \
@@ -70,87 +70,35 @@ curl -X POST http://localhost:8000/voice_followup/ask \
 
 ---
 
-## آلية عمل الموديل داخلياً — مخطط JSON صارم لكل رد (tool_call / final_answer)
+## آلية المبيعات الحالية
 
-**هذا داخلي بحت وما يظهر بجسم استجابة `/sales/chat`** — العميل المستهلك للـ API يشوف فقط `answer` النهائي كنص عادي. القسم هذا يشرح كيف يقرر النموذج نفسه، بجهة الخادم، متى يحتاج بيانات المنتج قبل ما يصيغ الجواب (`app/tool_loop.py`).
+المبيعات تستخدم native OpenAI tool calling بتوليد واحد. العميل يدير التاريخ وينفّذ الأدوات. [عقد المبيعات الكامل](sales-openai-compatible.md).
 
-مسار `sales` مقيَّد بـ **guided decoding** (`response_format.json_schema` بجهة vLLM — انظر `app/engine.py`) بهذا المخطط الصارم:
+## أدوات الشحن في واجهة OpenAI
 
-```json
-{
-  "response_format": {
-    "type": "json_schema",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "action": {"enum": ["tool_call", "final_answer"]},
-        "tool_call": {
-          "type": "object",
-          "properties": {
-            "tool": {"type": "string"},
-            "args": {"type": "object"}
-          },
-          "required": ["tool"]
-        },
-        "final_answer": {"type": "string"}
-      },
-      "required": ["action"]
-    }
-  }
-}
-```
+مسار `POST /v1/chat/completions` لا ينفذ أدوات الشحن داخل هذا الخادم. تطبيق العميل
+يرسل تعريفات الأدوات ضمن `tools`، ينفذ الاستدعاء الناتج بهوية الموظف المخوّلة، ثم يعيد
+نتيجته برسالة `role: "tool"`. أسماء الأدوات المعتمدة هي:
 
-vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decoding) — الموديل **لا يقدر** يخرج JSON خارج هذا الشكل، بعكس البروتوكول النصي القديم (`[TOOL_CALL]{...}[/TOOL_CALL]`) اللي كان عرضة لانحراف الموديل عن الصيغة.
-
-### كيف تُستهلك النتيجة (`app/tool_loop.py::run_with_tools`)
-
-1. الموديل يولّد رداً واحداً مطابقاً للمخطط أعلاه.
-2. **إذا `action == "tool_call"`**: الباك اند يقرأ `tool_call.tool` (اسم الأداة) و`tool_call.args` (معاملاتها)، ينفّذ الأداة المطابقة مثل `search_products`، ويضيف نتيجتها للمحادثة، ثم يعيد التوليد بجولة ثانية.
-3. **إذا `action == "final_answer"`**: `final_answer` هو النص الذي يصل للعميل فعلياً بحقل `answer` بجسم الاستجابة — تنتهي الحلقة.
-
-**مثال `tool_call` فعلي** (النموذج يطلب الكتالوج أول مرة بالمحادثة — انظر "تحميل الكتالوج مرة وحدة بالجلسة" أدناه):
-```json
-{
-  "action": "tool_call",
-  "tool_call": {"tool": "search_products", "args": {}}
-}
-```
-
-**مثال `final_answer` فعلي** (بعد ما استلم نتيجة الأداة):
-```json
-{
-  "action": "final_answer",
-  "final_answer": "عدنا لابتوب لينوفو IdeaPad 15 بسعر 750,000 دينار، شنو رأيك؟"
-}
-```
-
-### الأدوات المسجَّلة فعلياً بكل ميزة
-
-| الميزة | الأداة (`tool`) | التنفيذ الفعلي |
+| الاسم | الغرض | المعاملات المطلوبة |
 |---|---|---|
-| المبيعات | `search_products` | `app/tools/products.py::search_products_tool` — استعلام حي على باك اند السستم، **مرة وحدة لكل جلسة** (انظر أدناه) |
+| `searchShipments` | البحث عن شحنات مطابقة لمعيار مثل رقم الوصل أو الهاتف أو الحالة. | معيار بحث واحد على الأقل، مثل `receiptNumber` أو `phone` |
+| `countShipments` | إرجاع العدد الكلي للشحنات المطابقة لنفس فلاتر البحث، من دون اعتبار صفحة النتائج عدداً كاملاً. | فلتر واحد على الأقل، مثل `status` أو `phone` أو نطاق تاريخ |
+| `getShipmentHistory` | إرجاع تسلسل مراحل شحنة واحدة، مع مددها وأسباب التأخير المتاحة. | `receiptNumber` أو معرّف الشحنة الذي يتوقعه تطبيق العميل |
 
-النموذج **ما يفترض وجود أدوات أخرى غير المسجَّلة**؛ لو رجّع `tool_call.tool` باسم غير معروف، الباك اند يرجّع `{"error": "أداة غير معروفة: ..."}` كنتيجة، والموديل يكمل الحلقة (بدل ما ينهار).
+هذه أسماء `function.name` حرفياً بحالة الأحرف نفسها. لا يرسل العميل إلا الأدوات التي
+يستطيع تنفيذها؛ إذا لم يرسل أداة مناسبة، يطلب الوكيل معياراً أو يوضح أن البيانات غير
+متاحة بدلاً من التخمين.
 
-### تحميل الكتالوج مرة وحدة بالجلسة (بدل بحث لكل عنصر)
-
-أول استدعاء لـ`search_products` بكل جلسة يجيب الكتالوج من باك اند السستم ويخزّنه بذاكرة الجلسة (`app/sessions.py::cache_catalog`)، ثم يُحقن **تلقائياً** كرسالة `system` إضافية بكل رسالة لاحقة (`app/context_blocks.py::catalog_context_block`). الحجم المحقون محدود بـ`settings.max_injected_records` لحماية ميزانية `max_model_len`.
-
-### حقل إضافي بالمبيعات: `order_ready`
-
-مخطط `/sales/chat` يوسّع المخطط الأساسي بحقل إضافي واحد (عبر `app.tool_loop.build_schema`):
+مثال لتعريف الأدوات الثلاث:
 
 ```json
-{
-  "action": "final_answer",
-  "final_answer": "زين، ثبّتلك الطلب — تأكدلي الاسم والهاتف والعنوان صح؟",
-  "order_ready": false
-}
+[
+  {"type":"function","function":{"name":"searchShipments","description":"Search authorized shipments","parameters":{"type":"object","properties":{"receiptNumber":{"type":"string"},"phone":{"type":"string"},"status":{"type":"string"}},"minProperties":1}}},
+  {"type":"function","function":{"name":"countShipments","description":"Count authorized shipments matching filters","parameters":{"type":"object","properties":{"phone":{"type":"string"},"status":{"type":"string"},"fromDate":{"type":"string"},"toDate":{"type":"string"}},"minProperties":1}}},
+  {"type":"function","function":{"name":"getShipmentHistory","description":"Get stage history for one authorized shipment","parameters":{"type":"object","properties":{"receiptNumber":{"type":"string"}},"required":["receiptNumber"]}}}
+]
 ```
-
-`order_ready: true` يعني الموديل قرر إن العميل أكّد الشراء صراحةً بعد ملخّص الطلب — هذا **يحل محل** علامة `[ORDER_READY]` النصية القديمة. القرار النهائي بتثبيت الطلب فعلياً لا يعتمد على هذا الحقل وحده: بوابة حتمية منفصلة (`_missing_order_fields`، انظر `app/features/sales/router.py`) تتحقق أن الاسم/الهاتف/العنوان مذكورة فعلاً بكلام العميل قبل قبول `order_ready=true` — لو نقص أي حقل، الطلب لا يُثبَّت مهما رجّع الموديل.
-
----
 
 ## عقد باك اند السستم — الشكل الرسمي لاستجابات المنتجات
 
@@ -235,131 +183,7 @@ vLLM يقيّد التوليد بهذا المخطط فعلياً (guided decodi
 
 ## وكيل المبيعات
 
-### `POST /sales/chat`
-رد كامل (بدون بث). يحاول يقنع العميل بالشراء، يقترح منتج إضافي، ويثبّت الطلب تلقائياً (`order`) لما العميل يوافق صراحة.
-
-**جسم الطلب:**
-```json
-{
-  "message": "شنو عندكم لابتوبات؟",
-  "session_id": null,
-  "max_tokens": null,
-  "temperature": null,
-  "image_base64": null
-}
-```
-
-| الحقل | النوع | إلزامي | الوصف |
-|---|---|---|---|
-| `message` | string | نعم | رسالة العميل |
-| `session_id` | string \| null | لا | لاستمرار نفس المحادثة؛ اتركه فارغ أول مرة وخزّن القيمة اللي ترجع لك واستخدمها بالطلبات التالية |
-| `max_tokens` | int \| null | لا | يتجاوز `MAX_NEW_TOKENS` الافتراضي لهذا الطلب فقط |
-| `temperature` | float \| null | لا | يتجاوز `TEMPERATURE` الافتراضي لهذا الطلب فقط |
-| `image_base64` | string \| null | لا | صورة منتج (JPEG/PNG...) مُرمَّزة base64 خام (بلا بادئة `data:image/...;base64,`) — الموديل يحللها ويطابقها مع الكتالوج المحقون (مطابقة تامة، أو بديل مشابه، أو نفي صريح). يحتاج Pillow + خادم vLLM جاهز (نفس متطلبات `/orders/create` بالصور) — بدونها `501`. صورة base64 غير صالحة → `400`؛ صورة تعذّرت قراءتها → `422` |
-
-**استجابة 200 (بدون تثبيت طلب):**
-```json
-{
-  "session_id": "6ca92bdb-98fd-4843-a1e1-824b736c8587",
-  "answer": "عندنا لابتوب لينوفو IdeaPad 15 بسعر 750000 دينار...",
-  "order": null,
-  "engine": "vllm",
-  "tool_calls": [
-    {
-      "tool": "search_products",
-      "args": {},
-      "result": {"results": [{"id": "p001", "name": "لابتوب لينوفو IdeaPad 15", "price": 750000, "currency": "IQD"}]}
-    }
-  ]
-}
-```
-
-**استجابة 200 (العميل وافق على الشراء — `order` معبّى):**
-```json
-{
-  "session_id": "6ca92bdb-98fd-4843-a1e1-824b736c8587",
-  "answer": "زين، ثبّتلك الطلب...",
-  "order": {
-    "order_id": "068e8271-3bf3-43c5-8958-f3353a8472f3",
-    "created_at": "2026-07-09T16:28:56.225180+00:00",
-    "customer_name": null,
-    "customer_phone": null,
-    "customer_address": null,
-    "items": [
-      {
-        "product_id": "p003",
-        "product_name": "ماوس لاسلكي لوجيتك",
-        "quantity": 1,
-        "unit_price": 15000.0,
-        "currency": "IQD",
-        "line_total": 15000.0,
-        "matched": true
-      }
-    ],
-    "suggested_product": null,
-    "subtotal": 15000.0,
-    "total": 15000.0,
-    "currency": "IQD",
-    "notes": null,
-    "confirmation_message": "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
-  },
-  "engine": "vllm"
-}
-```
-
-| الحقل | النوع | الوصف |
-|---|---|---|
-| `session_id` | string | نفسه لو أرسلته، أو معرّف جديد تولّد تلقائياً |
-| `answer` | string | رد الوكيل للعميل (نص المحادثة العادي، بدون أي علامات داخلية) |
-| `order` | object \| null | `null` إلا لو العميل أكّد الشراء بنفس هذا الرد — عندها كائن `OrderConfirmation` كامل (تفصيله بالأسفل) |
-| `engine` | string | `"vllm"` (توليد حقيقي) أو `"fallback"` (محلياً بدون GPU) |
-| `tool_calls` | array | سجل استدعاءات أداة `search_products` بهذا الدور فقط (`{tool, args, result}` لكل استدعاء) — للشفافية/التصحيح فقط، لا يدخل بأي منطق قرار. مصفوفة فارغة لو الموديل جاوب بلا أداة أو بوضع `fallback` |
-
-**ملاحظة مهمة**: `order` يظهر فقط بالرد اللي فيه العميل أكّد الشراء صراحة. أي رد بعده (لو رجع يسأل شي ثاني بنفس الجلسة) يرجّع `order: null` من جديد. القرار بالاكتمال يجيك من حقل `order_ready` داخلي بمخطط guided_json (انظر [README.md](README.md#آلية-الوكيل-يقرر-واستدعاء-الأدوات))، مو من علامة نصية بالرد.
-
-### `POST /sales/chat/stream`
-نفس المدخل بالضبط، لكن بصيغة SSE (`Content-Type: text/event-stream`) — **بث حقيقي توكن-بتوكن** (لا قطعة واحدة): جولة قرار مصغّرة أولاً وراءها بلا بث (استدعاء أداة `search_products` + تحديد `order_ready` عبر `guided_json` — لازم يكتمل هذا الجزء لأنه JSON مقيَّد)، ثم — إذا البوابة الحتمية لم تحجب تثبيت الطلب — جولة نص حرة تُبث فعلياً دلتا-بدلتا فور توليد كل توكن من vLLM (`stream: true`، بلا `guided_json`)، مستفيدة من prefix caching (نفس بادئة السياق محسوبة أصلاً بجولة القرار). أول توكن يصل العميل فور بدء جولة النص، بدل انتظار الرد كاملاً.
-
-**تدفق الأحداث:**
-```
-data: {"delta": "عندنا"}
-
-data: {"delta": " لابتوب"}
-
-data: {"delta": " لينوفو IdeaPad 15 بسعر 750000 دينار..."}
-
-data: {"done": true, "session_id": "...", "order": null, "tool_calls": [...]}
-
-```
-
-- عدة أحداث `delta` متتالية، كل واحد يحمل جزءاً من الرد بترتيب وصوله من الموديل (اربطها بالتسلسل — النص الكامل = تجميعها).
-- استثناء: لو حُجب تثبيت الطلب لنقص بيانات (اسم/هاتف/عنوان)، يوصل سؤال حتمي واحد كدلتا وحيدة بدل توليد حر (أسرع وأدق من انتظار الموديل).
-- الحدث الأخير دايماً `{"done": true, ...}` ويحمل `order` (نفس شكل `/sales/chat` — `null` أو كائن `OrderConfirmation` كامل) و`tool_calls` (سجل استدعاء `search_products` بهذا الدور، نفس شكل `/sales/chat`).
-- محلياً بدون GPU (`engine` غير جاهز): دلتا واحدة بالرد الاحتياطي، ثم `done` بـ`tool_calls: []`.
-
-**مثال عميل (JavaScript، `fetch` + `ReadableStream`، أو `EventSource` لو عدّلت الطلب لـ GET — حالياً POST فتحتاج `fetch`):**
-```js
-const res = await fetch("http://localhost:8000/sales/chat/stream", {
-  method: "POST",
-  headers: {"Content-Type": "application/json"},
-  body: JSON.stringify({message: "شلونكم؟", session_id: sessionId}),
-});
-const reader = res.body.getReader();
-const decoder = new TextDecoder();
-let buffer = "";
-while (true) {
-  const {done, value} = await reader.read();
-  if (done) break;
-  buffer += decoder.decode(value, {stream: true});
-  for (const line of buffer.split("\n\n")) {
-    if (!line.startsWith("data: ")) continue;
-    const event = JSON.parse(line.slice(6));
-    // event.delta أو event.done
-  }
-}
-```
-
----
+POST /sales/chat/completions يستقبل model وmessages وtools ويرجع chat.completion. العميل يرسل تعريفات الأدوات وينفذها مثل `/v1/chat/completions`. المساران /sales/chat و/sales/chat/stream أسماء بديلة بنفس المدخل الجديد. [الحقول والأمثلة وترحيل العملاء](sales-openai-compatible.md).
 
 ## إنشاء طلب من نص/صوت/صورة
 

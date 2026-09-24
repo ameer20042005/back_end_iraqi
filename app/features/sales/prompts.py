@@ -1,23 +1,7 @@
 # -*- coding: utf-8 -*-
-"""نصوص وكيل المبيعات ووكيل استخراج الطلب.
-
-كلا الوكيلين نفس الموديل (Gemma 4 + محوّل اللهجة العراقية)؛ الفرق بينهما نص
-الـ system prompt فقط — نفس فكرة "Custom GPT" فوق موديل واحد بدل تدريب/تحميل
-موديل منفصل لكل مهمة.
-
-الرد مقيَّد بمخطط app.tool_loop.TOOL_LOOP_SCHEMA: الموديل يطلب أداة
-search_products صراحةً متى احتاج بيانات منتج **أول مرة فقط بكل جلسة**
-(انظر app/tools/products.py) — بعدها الكتالوج الكامل يتحقن تلقائياً بكل
-رسالة (build_sales_prompt أدناه، `catalog`)، ويعلن اكتمال الطلب بحقل
-order_ready بدل علامة نصية بآخر الرد."""
-
-from typing import Dict, List, Optional
-
-from app.context_blocks import catalog_context_block
+"""System prompt for the OpenAI-compatible sales endpoint."""
 
 from app.lang import KURDISH_PROMPT_RULES
-
-Message = Dict[str, str]
 
 SALES_SYSTEM_PROMPT = """أنت نموذج اسمه JENI من شركة DATUM. أنت وكيل مبيعات عراقي محترف وبارع بفن الإقناع، تتحدث باللهجة العراقية بالكامل.
 هدفك: مساعدة العميل باختيار المنتج المناسب ودفعه لإتمام الشراء بأسلوب ودود وغير مزعج، مع اقتراح منتج إضافي مكمّل أو بديل (Upsell/Cross-sell) دائماً عندما يكون مناسباً.
@@ -72,31 +56,9 @@ SALES_SYSTEM_PROMPT = """أنت نموذج اسمه JENI من شركة DATUM. أ
 تذكير أخير (أهم قاعدة بهذا البرومت كله): ما تذكر اسم منتج أو سعر أو ماركة بأي رد نهائي بلا سند حرفي من الكتالوج (مرفقاً فوق البرومت أو عبر نتيجة search_products) — بلا استثناء، حتى لو السؤال عام أو الأداة فشلت بالمرة السابقة. لو الكتالوج ما فيه المطلوب، گول "أتأكدلك" أو "غير متوفر حالياً" — لا تختلق بديلاً غير موجود فعلاً بالكتالوج."""
 
 
-def build_sales_prompt(
-    history: List[Message],
-    user_message: str,
-    catalog: Optional[List[dict]] = None,
-    catalog_total: Optional[int] = None,
-) -> List[Message]:
-    """`catalog`: الكتالوج المخزَّن بالجلسة (app/sessions.py::cached_catalog)
-    مقصوصاً بسقف الحقن، إن وُجد — يُحقن كرسالة system إضافية بعد
-    SALES_SYSTEM_PROMPT وقبل تاريخ المحادثة (انظر app/context_blocks.py::
-    catalog_context_block). `catalog_total`: العدد الأصلي قبل القصّ — لو
-    أكبر من المعروض يُعلَن للموديل أن الكتالوج جزئي (العطل B1).
-    None/فاضي = لسا ما انحمّل الكتالوج بهذي الجلسة، فيبقى "قاعدة صفر" تفرض
-    استدعاء search_products أول مرة."""
-    messages: List[Message] = [{"role": "system", "content": SALES_SYSTEM_PROMPT}]
-    block = catalog_context_block(catalog or [], total=catalog_total)
-    if block:
-        messages.append({"role": "system", "content": block})
-    messages.extend(history)
-    messages.append({"role": "user", "content": user_message})
-    return messages
-
-
-# build_order_extraction_prompt حُذفت مع مخططها — استخراج الطلب من المحادثة
-# يستعمل build_order_intake_prompt (برومت plane.md) بـ
-# app/features/sales/router.py::_maybe_build_order.
+def build_sales_prompt(messages: list[dict]) -> list[dict]:
+    """Prepend the sales owner prompt to client-owned OpenAI messages."""
+    return [{"role": "system", "content": SALES_OPENAI_SYSTEM_PROMPT}, *messages]
 
 
 # ---------------------------------------------------------------------------
@@ -113,3 +75,19 @@ def build_sales_prompt(
 # للكردية تكسرها بلا ما يلاحظ أحد، لأن الاسم المترجم ما راح يطابق ولا
 # سطر بالكتالوج عند أي مراجعة.
 SALES_SYSTEM_PROMPT = SALES_SYSTEM_PROMPT + KURDISH_PROMPT_RULES
+
+
+# The original system prompt above stays unchanged. This second system message
+# only maps its old structured-output vocabulary to native OpenAI tool calls.
+SALES_NATIVE_PROTOCOL = """تعليمات بروتوكول OpenAI native tools:
+- احتفظ بكل قواعد SALES_SYSTEM_PROMPT كما هي.
+- action=tool_call وtool_call وargs تعني استدعاء function أصلي في tool_calls؛ لا تطبعها كنص JSON.
+- final_answer يعني assistant.content طبيعي بلا غلاف action أو order_ready.
+- الأدوات المعتمدة حصراً هي: search_products، get_product_details، get_categories، get_customer_orders، get_order_details، وcreate_order. استدعِ الاسم المناسب حرفياً فقط إذا كان موجوداً ضمن tools المرسلة بهذا الطلب.
+- استعمل create_order فقط بعد اكتمال المعلومات، ثم عرض الملخص، ثم موافقة العميل الصريحة برسالة لاحقة. لا تقل إن الطلب تثبّت قبل أن تعيد الأداة success=true.
+- استعمل get_customer_orders وget_order_details لطلبات الزبون، ولا تطلب أو تعرض بيانات طلب لا أعادتها الأداة.
+- العميل يملك تاريخ المحادثة وينفّذ الأدوات؛ الخادم لا يحتفظ بجلسة ولا ينفّذ الأدوات.
+- استخدم فقط الأدوات المرسلة في الطلب. tenant وصلاحيات الصفحة والمخزن يحددها منفذ الأداة من هوية العميل الموثقة.
+"""
+
+SALES_OPENAI_SYSTEM_PROMPT = SALES_SYSTEM_PROMPT + "\n\n" + SALES_NATIVE_PROTOCOL

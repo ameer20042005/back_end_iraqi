@@ -252,120 +252,9 @@ public class MultipartUpload {
 
 ---
 
-## 2) ميزة المبيعات — `sales`
+## 2) ميزة المبيعات — sales
 
-> ✅ **طريقة الإرسال: `application/json` (JSON خالص)** + هيدر `X-API-Key`
-
-### الوصف
-وكيل محادثة (chatbot) يتحدث بالعامية العراقية كبائع حقيقي: يجاوب استفسارات المنتجات (يستعلم عن السعر والتوفر لحظياً من كتالوج حي)، يجمع بيانات الزبون تدريجياً (المنتج، الاسم، الهاتف، العنوان)، ولما تكتمل كل البيانات يثبّت الطلب تلقائياً ويرجعه ضمن الرد. تدعم الميزة جلسة محادثة مستمرة عبر `session_id`.
-
-### الاستخدام
-كل رسالة من الزبون تُرسل كطلب مستقل يحمل نفس `session_id` (من أول رد استلمته)، والخادم يحتفظ بذاكرة المحادثة داخلياً. أول رسالة بلا `session_id` يُنشئ الخادم واحداً جديداً ويرجعه بالاستجابة.
-
-يوجد مساران:
-- `POST /sales/chat` — رد كامل دفعة واحدة (JSON عادي).
-- `POST /sales/chat/stream` — نفس المنطق لكن الرد يصل تدريجياً (Server-Sent Events / streaming)، مفيد لعرض الكتابة حرفاً-بحرف بالواجهة.
-
-### نقطة النهاية — رد كامل
-
-```
-POST /sales/chat
-Content-Type: application/json
-X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2
-```
-
-#### ماذا يجب أن ترسل (JSON)
-
-| الحقل | النوع | إلزامي | الوصف |
-|---|---|---|---|
-| `message` | string | ✅ | رسالة الزبون الحالية |
-| `session_id` | string أو null | ❌ | معرّف الجلسة (أرجعه من أول رد لتكملة نفس المحادثة). اتركه فارغاً بأول رسالة |
-| `max_tokens` | int أو null | ❌ | حد أقصى لطول الرد المولَّد (اختياري، افتراضي داخلي إن لم يُرسل) |
-| `temperature` | float أو null | ❌ | درجة العشوائية بالتوليد (اختياري) |
-| `image_base64` | string أو null | ❌ | صورة منتج (base64 خام، بلا بادئة `data:image/...;base64,`) — الوكيل يحللها ويطابقها مع الكتالوج، يقترح بديلاً مشابهاً لو ما لگى تطابقاً تاماً. يحتاج Pillow + خادم vLLM جاهز؛ بدونها `501` |
-
-#### مثال — أول رسالة
-```bash
-curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/sales/chat" \
-  -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "عندكم غسالات اتوماتيك؟"}'
-```
-
-#### مثال — تكملة نفس المحادثة
-```bash
-curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/sales/chat" \
-  -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "اريدها، اسمي سارة", "session_id": "3f6e2b1a-....-...."}'
-```
-
-#### مثال — صورة منتج
-```bash
-curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/sales/chat" \
-  -H "X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2" \
-  -H "Content-Type: application/json" \
-  -d "{\"message\": \"شنو هذا، عدكم شي مثله؟\", \"image_base64\": \"$(base64 -w0 product.jpg)\"}"
-```
-
-### شكل الاستجابة (`/sales/chat`)
-`200 OK`:
-
-```json
-{
-  "session_id": "3f6e2b1a-9c2d-4e1a-8f3b-1a2b3c4d5e6f",
-  "answer": "أي حبيبتي، عدنا غسالة اتوماتيك 7 كيلو بسعر 350 الف دينار. أشگد اسمك الكريم؟",
-  "order": null,
-  "engine": "vllm",
-  "tool_calls": [
-    {
-      "tool": "search_products",
-      "args": {},
-      "result": {
-        "results": [
-          {"id": "P-102", "name": "غسالة اتوماتيك 7 كيلو", "price": 350000, "currency": "IQD"}
-        ]
-      }
-    }
-  ]
-}
-```
-
-- `order`: يبقى `null` طول المحادثة، ويمتلئ ببنية `OrderConfirmation` (نفس شكل استجابة `/orders/create` أعلاه) فقط بالدور اللي يكتمل فيه الطلب (اسم + هاتف + عنوان + منتج مذكورين فعلاً من الزبون).
-- `engine`: `"vllm"` عند رد حقيقي من النموذج، أو `"fallback"` إذا الخادم بوضع بديل بلا GPU جاهز.
-- `tool_calls`: للشفافية فقط. **`search_products` تُستدعى مرة وحدة لكل جلسة** — تجيب الكتالوج كاملاً ويُحقن تلقائياً بكل رسالة لاحقة، فتبقى `tool_calls` فاضية بأغلب الأدوار (الموديل يدوّر بالكتالوج المحقون بلا حاجة أداة جديدة).
-
-### نقطة النهاية — رد متدفّق (Streaming)
-
-```
-POST /sales/chat/stream
-Content-Type: application/json
-X-API-Key: sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2
-```
-
-نفس جسم الطلب تماماً مثل `/sales/chat` (`message` + `session_id` اختياري + ...). الاستجابة هنا **ليست JSON عادي** بل `text/event-stream` (Server-Sent Events) — كل سطر بصيغة:
-
-```
-data: {"delta": "أي "}
-
-data: {"delta": "حبيبتي"}
-
-...
-
-data: {"done": true, "session_id": "3f6e2b1a-...", "order": null, "tool_calls": [...]}
-```
-
-- كل رسالة `delta` هي جزء جديد من نص الرد (اربطها بالتسلسل لتكوين النص الكامل).
-- الرسالة الأخيرة تحمل `"done": true` مع `session_id` النهائي و`order` (نفس بنية `OrderConfirmation` إن اكتمل الطلب، وإلا `null`) و`tool_calls`.
-- استهلاكها من جهة العميل يكون بقراءة الاستجابة سطراً-سطراً (EventSource بالمتصفح، أو streaming HTTP client).
-
-### أخطاء محتملة
-| الكود | السبب |
-|---|---|
-| `401` | مفتاح `X-API-Key` غلط |
-| `422` | جسم JSON ناقص الحقل الإلزامي `message` أو نوع بيانات غلط |
-
----
+المبيعات الآن OpenAI-compatible: POST /sales/chat/completions، مع model/messages/tools. العميل يدير المحادثة وينفذ `search_products` و`get_product_details` و`get_categories` و`get_customer_orders` و`get_order_details` و`create_order`. المفتاح نفسه X-API-Key الخاص بالمبيعات. [العقد الكامل وتعريفات الأدوات وأمثلة الترحيل والبث](sales-openai-compatible.md).
 
 ## 3) ميزة المتابعة الصوتية — `voice_followup`
 
@@ -648,7 +537,7 @@ curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/voice_followup/postpo
 | الميزة | Endpoint | نوع الجسم | المفتاح |
 |---|---|---|---|
 | إنشاء الطلبات | `POST /orders/create` | `multipart/form-data` (حقل واحد: `text` أو `audio` أو `image`) | `sk-orders-...` |
-| المبيعات (رد كامل) | `POST /sales/chat` | `application/json` (`message`, `session_id`) | `sk-sales-...` |
+| المبيعات (رد كامل) | `POST /sales/chat` | `application/json` (`model`, `messages`, `tools`) | `sk-sales-...` |
 | المبيعات (بث) | `POST /sales/chat/stream` | `application/json` (نفس أعلاه) | `sk-sales-...` |
 | المتابعة الصوتية — سؤال | `POST /voice_followup/ask` | `application/json` (تفاصيل الطلب) | `sk-voicefu-...` |
 | المتابعة الصوتية — رد | `POST /voice_followup/respond?session_id=...` | `multipart/form-data` (`audio`) | `sk-voicefu-...` |

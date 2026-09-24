@@ -956,7 +956,9 @@
     if (path === "/") return jsonResponse({ status: "ok", service: "back_end_iraqi", docs: "/docs" });
 
     function demoChatTurn(body) {
-      var message = body.message || "";
+      var messages = body.messages || [];
+      var lastUser = messages.slice().reverse().find(function (item) { return item.role === "user"; });
+      var message = body.message || (lastUser && (typeof lastUser.content === "string" ? lastUser.content : "")) || "";
       var hits = demoSearchProducts(message, 5, null, false);
       var toolCalls = [];
       if (hits.length) {
@@ -973,15 +975,16 @@
       };
     }
 
-    if (path === "/sales/chat") {
+    if (path === "/sales/chat" || path === "/sales/chat/completions") {
       var body = JSON.parse(options.body || "{}");
       var turn = demoChatTurn(body);
       return jsonResponse({
-        session_id: turn.session_id,
-        answer: turn.answer,
-        engine: "demo",
-        order: null,
-        tool_calls: turn.toolCalls
+        id: "chatcmpl-demo",
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: body.model || "sales",
+        choices: [{ index: 0, message: { role: "assistant", content: turn.answer }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
       });
     }
 
@@ -992,24 +995,15 @@
       // كان الرد حقيقياً أو تجريبياً.
       var streamBody = JSON.parse(options.body || "{}");
       var streamTurn = demoChatTurn(streamBody);
-      var words = streamTurn.answer.split(/(\s+)/); // يحافظ على الفراغات كأجزاء
       var encoder = new TextEncoder();
 
       var readable = new ReadableStream({
         async start(controller) {
-          for (var i = 0; i < words.length; i++) {
-            await new Promise(function (r) { setTimeout(r, 25 + Math.random() * 35); });
-            controller.enqueue(encoder.encode(
-              "data: " + JSON.stringify({ delta: words[i] }) + "\n\n"
-            ));
-          }
           controller.enqueue(encoder.encode(
-            "data: " + JSON.stringify({
-              done: true,
-              session_id: streamTurn.session_id,
-              tool_calls: streamTurn.toolCalls
-            }) + "\n\n"
+            "data: " + JSON.stringify({ id: "chatcmpl-demo", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: streamBody.model || "sales", choices: [{ index: 0, delta: { role: "assistant", content: streamTurn.answer }, finish_reason: null }] }) + "\n\n"
           ));
+          controller.enqueue(encoder.encode("data: " + JSON.stringify({ id: "chatcmpl-demo", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: streamBody.model || "sales", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }) + "\n\n"));
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           controller.close();
         }
       });
@@ -1161,11 +1155,11 @@
       group: "وكيل المبيعات",
       id: "salesChat",
       method: "POST",
-      path: "/sales/chat",
-      title: "POST /sales/chat",
-      desc: "رد كامل (بدون بث). يحاول يقنع العميل بالشراء، يقترح منتج إضافي أو بديل مشابه، ويثبّت الطلب تلقائياً عند الموافقة الصريحة. يقبل صورة منتج اختيارية (يحللها ويطابقها مع الكتالوج). يحتاج مفتاح API المبيعات (X-API-Key).",
+      path: "/sales/chat/completions",
+      title: "POST /sales/chat/completions",
+      desc: "مبيعات بصيغة OpenAI. التاريخ ونتائج الأدوات عند العميل. أرسل الدور ثم أضف نتيجة الأداة أو رسالة العميل التالية إلى messages.",
       apiKeyService: "sales",
-      render: renderChatForm
+      render: renderSalesNativeForm
     },
     {
       group: "وكيل المبيعات",
@@ -1173,9 +1167,9 @@
       method: "POST",
       path: "/sales/chat/stream",
       title: "POST /sales/chat/stream",
-      desc: "نفس مدخل /sales/chat، لكن بث Server-Sent Events — يظهر أول جزء من الرد بسرعة قبل اكتماله. يحتاج مفتاح API المبيعات.",
+      desc: "نفس مدخل OpenAI، مع SSE بعد اكتمال فحص الرد. النهاية data: [DONE].",
       apiKeyService: "sales",
-      render: renderChatStreamForm
+      render: renderSalesNativeForm
     },
     {
       group: "إنشاء طلب",
@@ -1418,12 +1412,13 @@
             fetch(baseUrl() + "/sales/chat", {
               method: "POST",
               headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader("sales")),
-              // بدون session_id — كل طلب جلسة مستقلة حتى ما تتداخل الذاكرة
-              body: JSON.stringify({ message: msgInput.value + " (#" + (idx + 1) + ")" })
+              body: JSON.stringify({ model: "sales", tools: [], messages: [
+                { role: "user", content: msgInput.value + " (#" + (idx + 1) + ")" }
+              ] })
             })
               .then(function (res) {
                 return res.json().then(function (json) {
-                  return { idx: idx, status: res.status, ms: Math.round(performance.now() - reqStart), answer: (json && json.answer) || "" };
+                  return { idx: idx, status: res.status, ms: Math.round(performance.now() - reqStart), answer: (json.choices && json.choices[0].message.content) || "" };
                 });
               })
               .catch(function (e) {
@@ -1461,7 +1456,63 @@
     };
   }
 
-  /* ---------------- Sales chat (full) ---------------- */
+  /* ---------------- Client-owned OpenAI sales conversation ---------------- */
+  function renderSalesNativeForm(container, ep) {
+    var panel = makePanel("طلب OpenAI — التاريخ ونتائج الأدوات قابلة للتحرير");
+    var editor = document.createElement("textarea");
+    editor.dir = "ltr";
+    editor.style.minHeight = "320px";
+    editor.style.width = "100%";
+    editor.value = JSON.stringify({ model: "sales", messages: [{ role: "user", content: "هلا" }], tools: [], stream: ep.id === "salesChatStream" }, null, 2);
+    panel.appendChild(editor);
+    var send = makeButton("أرسل الدور");
+    var actions = makeActionsRow(send);
+    panel.appendChild(actions);
+    container.appendChild(panel);
+    var output = document.createElement("pre");
+    output.className = "json-view";
+    output.dir = "ltr";
+    container.appendChild(output);
+    send.onclick = async function () {
+      send.setBusy(true);
+      try {
+        var request = JSON.parse(editor.value);
+        if (ep.id === "salesChatStream") request.stream = true;
+        var response = await fetch(baseUrl() + ep.path, {
+          method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, apiKeyHeader("sales")),
+          body: JSON.stringify(request)
+        });
+        var raw = await response.text();
+        output.textContent = raw;
+        if (!response.ok) return;
+        var assistant = null;
+        if ((response.headers.get("content-type") || "").indexOf("text/event-stream") >= 0) {
+          raw.split(/\r?\n/).forEach(function (line) {
+            if (line.indexOf("data: ") !== 0 || line === "data: [DONE]") return;
+            var event = JSON.parse(line.slice(6));
+            var delta = event.choices && event.choices[0].delta;
+            if (delta && delta.role) {
+              assistant = Object.assign({}, delta);
+              if (assistant.tool_calls) assistant.tool_calls = assistant.tool_calls.map(function (call) {
+                var copy = Object.assign({}, call); delete copy.index; return copy;
+              });
+            }
+          });
+        } else {
+          var completion = JSON.parse(raw);
+          output.textContent = JSON.stringify(completion, null, 2);
+          assistant = completion.choices[0].message;
+        }
+        if (assistant) {
+          request.messages.push(assistant);
+          editor.value = JSON.stringify(request, null, 2);
+        }
+      } catch (error) { output.textContent = error.message; }
+      finally { send.setBusy(false); }
+    };
+  }
+
+  /* ---------------- Legacy sales UI helpers (not mounted) ---------------- */
   function renderChatForm(container, ep) {
     var sessionKey = "session_" + ep.id;
     var sessionId = null;

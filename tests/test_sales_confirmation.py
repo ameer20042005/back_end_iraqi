@@ -21,7 +21,7 @@ import re
 
 import pytest
 
-from app.features.sales.service import _new_order_id
+from app.order_service import _new_order_id
 from app.guards import check_numbers
 
 # ملخّص الطلب الحقيقي من اللقطة — الجملة اللي كانت تكسر التثبيت.

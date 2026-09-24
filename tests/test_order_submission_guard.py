@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""فحص حارس الإرسال لنظام الطلبات (app/features/sales/service.py).
+"""فحص حارس الإرسال لنظام الطلبات (app/order_service.py).
 
 بوابة الاكتمال بالراوتر تحرس **المدخل** (هل ذكر العميل بياناته؟)، لكن بينها
 وبين الإرسال تجري خطوة استخراج بالموديل ممكن تفشل — وعندها كان يُبنى طلب من
@@ -9,8 +9,7 @@ order_submitter الحقيقي (HttpOrderSubmitter) يرسل طلباً HTTP ف�
 السستم — نستبدله هنا بمزوّد وهمي بالذاكرة (monkeypatch) حتى نفحص *هل* حاول
 الإرسال بلا الحاجة لخادم حقيقي، بنفس مبدأ _FakeEngine بـtest_tool_loop.py.
 
-يغطي مسارات الطلب كلها لأنها كلها تمر بـ resolve_order:
-/sales/chat و/orders/create (نص، صوت، صورة).
+يغطي مسار /orders/create (نص، صوت، صورة) الذي يمر بـ resolve_order.
 
 التشغيل:  python -m pytest tests/test_order_submission_guard.py -v
 """
@@ -19,8 +18,8 @@ import asyncio
 
 import pytest
 
-from app.features.sales import service
-from app.features.sales.service import _submission_blockers, resolve_order
+from app import order_service as service
+from app.order_service import _submission_blockers, resolve_order
 from app.order_schema import OrderExtraction, OrderItemExtraction
 
 _API_KEY = "test-key"
