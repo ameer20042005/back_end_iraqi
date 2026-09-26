@@ -105,7 +105,13 @@ def match_case(case: CaseRequest, allowed: list[dict]) -> CaseResponse:
 
 
 def candidate_names(text: str, allowed: list[dict], limit: int = 20) -> list[str]:
-    key = matching_key(text)
-    scores = sorted(((SequenceMatcher(None, key, matching_key(item["name"])).ratio(), item["name"])
-                     for item in allowed), reverse=True)
+    words = text.split()
+    lengths = {len(item["name"].split()) for item in allowed}
+    windows = {length: [matching_key(" ".join(words[start:start + length]))
+                        for start in range(len(words) - length + 1)]
+               for length in lengths if length <= len(words)}
+    whole = matching_key(text)
+    scores = sorted(((max(SequenceMatcher(None, matching_key(item["name"]), window).ratio()
+                          for window in (windows.get(len(item["name"].split()), []) or [whole])),
+                      item["name"]) for item in allowed), reverse=True)
     return [name for _, name in scores[:limit]]

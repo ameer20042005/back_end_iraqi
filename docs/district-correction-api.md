@@ -28,7 +28,7 @@ Content-Type: application/json
 ```
 
 الحقول `district_source_dir` و`district_database_path` في `app/config.py` تقبل تجاوز المسار عبر `DISTRICT_SOURCE_DIR` و`DISTRICT_DATABASE_PATH`. الاستيراد يسجل الصفوف المكررة أو غير الصالحة في [تقرير الاستيراد](district-correction-import-report.json).
-مسار LLM اختياري؛ اضبط `DISTRICT_LLM_BASE_URL` و`DISTRICT_LLM_MODEL` و`DISTRICT_LLM_API_KEY` عند الحاجة، و`DISTRICT_LLM_TIMEOUT_SECONDS` للمهلة، و`DISTRICT_LLM_MAX_CASES` (الافتراضي 100) لأقصى عدد حالات تُرسل للـLLM في الطلب الواحد. يمكن استخدام عنوان vLLM الحالي مثل `http://127.0.0.1:18001/v1` والموديل المحدد في `app/config.py`. بلا هذه المتغيرات تبقى المطابقة الحتمية فعالة وتعود الحالات الغامضة `UNRESOLVED`.
+تستخدم الخدمة خادم vLLM والموديل المحددين في `app/config.py` افتراضياً لتحليل الحالات التي ليست مطابقة حرفياً. يمكن تجاوزهما عبر `DISTRICT_LLM_BASE_URL` و`DISTRICT_LLM_MODEL`، وضبط `DISTRICT_LLM_API_KEY` عند الحاجة، و`DISTRICT_LLM_TIMEOUT_SECONDS` للمهلة، و`DISTRICT_LLM_MAX_CASES` (الافتراضي 100) لأقصى عدد حالات تُرسل للـLLM في الطلب الواحد. عند تعذر الوصول إلى النموذج تعود الحالة `UNRESOLVED` مع رمز الخطأ المناسب.
 
 ## شكل الطلب
 
@@ -118,13 +118,13 @@ Content-Type: application/json
 }
 ```
 
-`correctDistrict` يساوي الاسم الرسمي **حرفياً** من كتالوج `companyName + stateCode` لكل حالة محلولة. `originalDistrict` يبقى كما أرسله Spring. `addressDetails` يحذف بادئة المنطقة المكررة فقط ويحفظ بقية تفاصيل العنوان. درجات الثقة محسوبة من مسار المطابقة؛ لا تؤخذ من رقم يعيده LLM.
+`correctDistrict` يساوي الاسم الرسمي **حرفياً** من كتالوج `companyName + stateCode` لكل حالة محلولة. `originalDistrict` يبقى كما أرسله Spring. في الحالات التي يحللها النموذج، يحمل `addressDetails` بقية تفاصيل الموقع والعنوان بعد فصل المنطقة والمحافظة؛ وفي المطابقة الحرفية تُحذف بادئة المنطقة المكررة من العنوان. درجات الثقة محسوبة من مسار المطابقة؛ لا تؤخذ من رقم يعيده LLM.
 
 | `status` | المعنى |
 |---|---|
 | `EXACT_MATCH` | اسم مطابق حرفياً لكتالوج الشركة والمحافظة. |
 | `NORMALIZED_MATCH` | اختلاف كتابة واضح وفريد بعد التطبيع للبحث. |
-| `SPLIT_ADDRESS` | بداية النص منطقة رسمية والباقي تفاصيل عنوان، أو تكررت المنطقة ببداية العنوان. |
+| `SPLIT_ADDRESS` | استُخرج اسم منطقة من النص الكامل ونُقلت تفاصيل الموقع الأخرى إلى `addressDetails`؛ يُقبل اختيار النموذج فقط إذا طابق كتالوج الشركة والمحافظة. |
 | `FUZZY_MATCH` | تشابه مرتفع وفارق واضح عن المرشح التالي. |
 | `AI_MATCH` | اختار LLM مرشحاً من القائمة المسموحة واجتاز فحص العضوية والتسلسل والمحافظة. |
 | `UNRESOLVED` | لا يوجد اختيار موثوق؛ يُحفظ `district` و`address` الأصليان. |

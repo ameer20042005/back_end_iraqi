@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.features.district_correction.catalog import Catalog, import_catalog
 from app.features.district_correction.correction import CorrectionService
-from app.features.district_correction.llm import SYSTEM_PROMPT, LLMError
+from app.features.district_correction.llm import SYSTEM_PROMPT, LLMClient, LLMError
 from app.features.district_correction.matching import candidate_names
 from app.features.district_correction.normalization import normalize
 from app.features.district_correction.models import CaseRequest, CorrectionRequest
@@ -73,6 +73,40 @@ def test_spelling_and_address_splitting(catalog):
     assert correct(index, [case(6, "شطره", state="DHI")])[0].correctDistrict != "الشطرة"
 
 
+def test_district_after_administrative_label_and_governorate(catalog):
+    index = catalog[0]
+    cases = [
+        case(13, "قضاء الموفقيه واسط حي الزهراء", state="WST", state_name="واسط"),
+        case(14, "واسط قضاء الموفقيه حي الزهراء", state="WST", state_name="واسط"),
+        case(15, "الموفقية واسط حي الزهراء", state="WST", state_name="واسط"),
+    ]
+    reason = ("District 'الموفقية' was extracted from 'قضاء الموفقيه'; "
+              "'واسط' is the governorate; 'حي الزهراء' should be moved to address details.")
+    llm = FakeLLM([{"excelSequence": item.excelSequence, "originalDistrict": item.district,
+                    "correctDistrict": "الموفقية", "addressDetails": "حي الزهراء",
+                    "stateCode": "WST", "status": "SPLIT_ADDRESS", "reason": reason}
+                   for item in cases])
+    rows = correct(index, cases, company="KHAYAL", llm=llm)
+    for row in rows:
+        assert (row.correctDistrict, row.addressDetails, row.confidence, row.status) == (
+            "الموفقية", "حي الزهراء", 0.94, "SPLIT_ADDRESS")
+        assert row.errorCode is None
+    assert rows[0].originalDistrict == "قضاء الموفقيه واسط حي الزهراء"
+    assert rows[0].reason == reason
+    assert "الموفقية" in llm.allowed_names
+    assert correct(index, cases[:1], company="KHAYAL")[0].status == "UNRESOLVED"
+
+
+def test_district_embedded_after_address_description(catalog):
+    original = case(2, "نهاية شارع القدس مقابيل الاسماك البغدادي", state="KRK")
+    answer = [{"excelSequence": 2, "originalDistrict": original.district,
+               "correctDistrict": "شارع القدس", "addressDetails": "نهاية مقابيل الاسماك البغدادي",
+               "stateCode": "KRK", "status": "SPLIT_ADDRESS"}]
+    row = correct(catalog[0], [original], company="KHAYAL", llm=FakeLLM(answer))[0]
+    assert (row.correctDistrict, row.addressDetails, row.status) == (
+        "شارع القدس", "نهاية مقابيل الاسماك البغدادي", "SPLIT_ADDRESS")
+
+
 def test_unresolved_and_invalid_state_preserve_input(catalog):
     rows = correct(catalog[0], [case(1, "حي غير واضح", "قرب الجامع"),
                                case(2, "الكرادة", state="BAD")])
@@ -117,8 +151,10 @@ class FakeLLM:
 
     def __init__(self, answer):
         self.answer = answer
+        self.allowed_names = []
 
     async def resolve(self, company, state_code, cases, allowed_names):
+        self.allowed_names = allowed_names
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer
@@ -135,6 +171,10 @@ def test_llm_cannot_invent_or_change_case(catalog):
                          "stateCode": "BGD", "correctDistrict": "الكرادة", "status": "AI_MATCH"}]
     row = correct(index, [original], llm=FakeLLM(changed_sequence))[0]
     assert row.status == "UNRESOLVED" and row.correctDistrict == original.district
+    missing_details = [{"excelSequence": 5, "originalDistrict": original.district,
+                        "stateCode": "BGD", "correctDistrict": "الكرادة", "status": "SPLIT_ADDRESS"}]
+    row = correct(index, [original], llm=FakeLLM(missing_details))[0]
+    assert row.status == "UNRESOLVED" and row.errorCode == "LLM_INVALID_RESPONSE"
 
 
 def test_llm_timeout_does_not_abort_batch(catalog):
@@ -227,6 +267,7 @@ def test_postman_example_matches_integrated_endpoint(catalog, monkeypatch):
     configured = replace(settings, district_database_path=path, district_api_key="secret")
     monkeypatch.setattr(service_router, "settings", configured)
     monkeypatch.setattr(service_auth, "settings", configured)
+    monkeypatch.setattr(service_router, "LLMClient", lambda _settings: NoLLM())
     collection_path = Path(__file__).resolve().parents[1] / "docs" / "district-correction-postman.json"
     collection = json.loads(collection_path.read_text(encoding="utf-8"))
     variables = {item["key"]: item["value"] for item in collection["variable"]}
@@ -247,6 +288,12 @@ def test_postman_example_matches_integrated_endpoint(catalog, monkeypatch):
 
 def test_prompt_requires_ai_match_status():
     assert "AI_MATCH" in SYSTEM_PROMPT
+    assert "SPLIT_ADDRESS" in SYSTEM_PROMPT
+
+
+def test_district_llm_uses_existing_model_by_default():
+    client = LLMClient(replace(settings, district_llm_base_url="", district_llm_model=""))
+    assert client.configured
 
 
 def test_valid_llm_choice_is_accepted(catalog):

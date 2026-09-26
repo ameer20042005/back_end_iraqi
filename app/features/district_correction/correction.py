@@ -62,13 +62,15 @@ class CorrectionService:
                 continue
             result = match_case(case, allowed)
             results[case.excelSequence] = result
-            if result.status == "UNRESOLVED" and case.district.strip() and self.llm.configured:
+            if result.status != "EXACT_MATCH" and case.district.strip() and self.llm.configured:
                 unresolved_groups[code].append(case)
         return results, unresolved_groups
 
     @staticmethod
     def _candidates(chunk: list[CaseRequest], allowed: list[dict]) -> list[str]:
-        return sorted({name for case in chunk for name in candidate_names(case.district, allowed)})
+        if len(allowed) <= 150:
+            return sorted(item["name"] for item in allowed)
+        return sorted({name for case in chunk for name in candidate_names(case.district, allowed, limit=30)})
 
     async def _apply_llm(self, company, code, chunk, candidates, full_names, results) -> None:
         try:
@@ -88,12 +90,19 @@ class CorrectionService:
             item = by_sequence[case.excelSequence]
             name = item.get("correctDistrict")
             if item.get("status") == "UNRESOLVED":
+                results[case.excelSequence] = unresolved(case)
                 continue
-            if (item.get("status") != "AI_MATCH" or
+            status = item.get("status")
+            suggested_details = item.get("addressDetails")
+            suggested_reason = item.get("reason")
+            if (status not in ("AI_MATCH", "SPLIT_ADDRESS") or
                     item.get("originalDistrict") != case.district or
                     not isinstance(item.get("stateCode"), str) or
                     item["stateCode"].upper() != code or
-                    not isinstance(name, str) or name not in full_names or name not in candidates):
+                    not isinstance(name, str) or name not in full_names or name not in candidates or
+                    (suggested_details is not None and not isinstance(suggested_details, str)) or
+                    (status == "SPLIT_ADDRESS" and suggested_details is None) or
+                    (suggested_reason is not None and not isinstance(suggested_reason, str))):
                 results[case.excelSequence] = unresolved(case, "LLM result failed catalog validation.",
                                                           "LLM_INVALID_RESPONSE")
                 continue
@@ -102,9 +111,12 @@ class CorrectionService:
             details = case.address if address is None else address
             if remainder:
                 details = (remainder + " " + details).strip()
+            if suggested_details is not None:
+                details = suggested_details.strip()
             results[case.excelSequence] = CaseResponse(
                 excelSequence=case.excelSequence, originalDistrict=case.district,
-                correctDistrict=name, addressDetails=details, confidence=0.78,
-                status="AI_MATCH", reason="LLM selection validated against company and state catalog.",
+                correctDistrict=name, addressDetails=details,
+                confidence=0.94 if status == "SPLIT_ADDRESS" else 0.78,
+                status=status, reason=suggested_reason or "LLM selection validated against company and state catalog.",
                 stateCode=code,
             )
