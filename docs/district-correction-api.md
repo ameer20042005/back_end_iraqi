@@ -27,8 +27,7 @@ Content-Type: application/json
 .venv\Scripts\python.exe -m app.features.district_correction.import_excel_catalogs --report docs/district-correction-import-report.json
 ```
 
-الحقول `district_source_dir` و`district_database_path` في `app/config.py` تقبل تجاوز المسار عبر `DISTRICT_SOURCE_DIR` و`DISTRICT_DATABASE_PATH`. الاستيراد يسجل الصفوف المكررة أو غير الصالحة في [تقرير الاستيراد](district-correction-import-report.json). الشركات المذكورة في `DISTRICT_EXCLUDED_COMPANIES` (الافتراضي `TEST`) تبقى في قاعدة SQLite لكنها لا تُحمَّل في الخدمة؛ اضبط المتغير فارغاً لتفعيلها كلها.
-
+الحقول `district_source_dir` و`district_database_path` في `app/config.py` تقبل تجاوز المسار عبر `DISTRICT_SOURCE_DIR` و`DISTRICT_DATABASE_PATH`. الاستيراد يسجل الصفوف المكررة أو غير الصالحة في [تقرير الاستيراد](district-correction-import-report.json).
 مسار LLM اختياري؛ اضبط `DISTRICT_LLM_BASE_URL` و`DISTRICT_LLM_MODEL` و`DISTRICT_LLM_API_KEY` عند الحاجة، و`DISTRICT_LLM_TIMEOUT_SECONDS` للمهلة، و`DISTRICT_LLM_MAX_CASES` (الافتراضي 100) لأقصى عدد حالات تُرسل للـLLM في الطلب الواحد. يمكن استخدام عنوان vLLM الحالي مثل `http://127.0.0.1:18001/v1` والموديل المحدد في `app/config.py`. بلا هذه المتغيرات تبقى المطابقة الحتمية فعالة وتعود الحالات الغامضة `UNRESOLVED`.
 
 ## شكل الطلب
@@ -64,7 +63,7 @@ Content-Type: application/json
 
 | الحقل | النوع | المطلوب | المعنى |
 |---|---|---|---|
-| `companyName` | string | نعم | اسم الشركة كما في الكتالوج: `ALZAEEM`, `FUHOOD`, `KHAYAL`, `RIYAM`. شركة `TEST` مستبعدة افتراضياً. |
+| `companyName` | string | نعم | اسم الشركة كما في الكتالوج: `ALZAEEM`, `FUHOOD`, `KHAYAL`, `RIYAM`, `TEST`. |
 | `cases` | array | نعم | من 1 إلى 10,000 حالة في الطلب الواحد. تبقى بالترتيب نفسه في الرد. |
 | `excelSequence` | integer | نعم | رقم فريد لكل صف داخل الطلب؛ يستخدمه Spring لربط الرد بصف Excel. |
 | `stateCode` | string | نعم | رمز المحافظة الرسمي مثل `BGD` أو `DHI`، حتى 20 حرفاً. يقيّد البحث قبل المطابقة. |
@@ -155,8 +154,8 @@ Content-Type: application/json
 
 استورد [district-correction-postman.json](district-correction-postman.json)، ثم افتح المجموعة → **Variables**:
 
-1. اضبط `district_base_url` على `http://127.0.0.1:8000` أو رابط الباك اند المنشور.
-2. اضبط `district_api_key` على قيمة `district_api_key` في `app/config.py`. القيمة فارغة في ملف المجموعة.
+1. `baseUrl` مضبوط على رابط الباك اند المنشور نفسه في [postman_collection.json](postman_collection.json)؛ غيّره إلى `http://127.0.0.1:8000` للتجربة المحلية.
+2. `district_api_key` مضبوط على قيمة `district_api_key` في `app/config.py`.
 3. شغّل `Ready` للتأكد من تحميل الكتالوج، ثم `تصحيح دفعة — محافظتان وعنوان مفصول`. داخل المجموعة طلبان إضافيان للتحقق من رفض المفتاح الخاطئ والمفقود، وطلب لشركة غير معروفة.
 
 للتجربة عبر curl:

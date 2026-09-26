@@ -135,7 +135,7 @@ def import_catalog(source_dir: Path, database_path: Path) -> dict:
 class Catalog:
     """Immutable in-memory snapshot, scoped by company and state."""
 
-    def __init__(self, database_path: Path, excluded_companies: frozenset = frozenset()):
+    def __init__(self, database_path: Path):
         self.by_company = {}
         self.states = {}
         with closing(sqlite3.connect(database_path)) as db:
@@ -146,8 +146,6 @@ class Catalog:
                 FROM company_districts d JOIN companies c ON c.id = d.company_id
                 ORDER BY c.name, d.state_code, d.district_name
             """):
-                if company in excluded_companies:
-                    continue
                 self.by_company.setdefault(company, {}).setdefault(code, []).append(
                     {"name": name, "source_id": source_id})
 

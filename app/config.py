@@ -126,8 +126,6 @@ class Settings:
     district_llm_api_key: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_API_KEY", ""))
     district_llm_model: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_MODEL", ""))
     district_llm_max_cases: int = field(default_factory=lambda: int(os.getenv("DISTRICT_LLM_MAX_CASES", "100")))
-    district_excluded_companies: frozenset = field(default_factory=lambda: frozenset(
-        name.strip().upper() for name in os.getenv("DISTRICT_EXCLUDED_COMPANIES", "TEST").split(",") if name.strip()))
     district_llm_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("DISTRICT_LLM_TIMEOUT_SECONDS", "15")))
 
     # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper

@@ -35,8 +35,7 @@ def load_catalog(app) -> None:
     try:
         if _catalog_is_stale(settings.district_source_dir, settings.district_database_path):
             import_catalog(settings.district_source_dir, settings.district_database_path)
-        app.state.district_catalog = Catalog(settings.district_database_path,
-                                             settings.district_excluded_companies)
+        app.state.district_catalog = Catalog(settings.district_database_path)
     except Exception as exc:
         app.state.district_catalog_error = type(exc).__name__
         logger.exception("district_catalog_startup_failed")

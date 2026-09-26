@@ -1,12 +1,12 @@
 {
   "info": {
     "name": "Iraqi District Correction API",
-    "description": "ميزة ضمن الباك اند الحالي على المنفذ 8000. اضبط district_api_key من متغيرات المجموعة؛ لا يوجد مفتاح حقيقي داخل الملف.",
+    "description": "ميزة ضمن الباك اند الحالي. baseUrl نفس رابط مجموعة postman_collection.json، وdistrict_api_key هو مفتاح الخدمة في app/config.py.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "district_base_url", "value": "http://127.0.0.1:8000", "type": "string" },
-    { "key": "district_api_key", "value": "", "type": "string" }
+    { "key": "baseUrl", "value": "https://1spx1ivrqcvt1h-8000.proxy.runpod.net", "type": "string" },
+    { "key": "district_api_key", "value": "sk-district-7ea5de0fb1b68f0283df460dea42b2df", "type": "string" }
   ],
   "item": [
     {
@@ -14,7 +14,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": { "raw": "{{district_base_url}}/health", "host": ["{{district_base_url}}"], "path": ["health"] },
+        "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
         "description": "200 يعني أن عملية FastAPI تعمل؛ لا يفحص قاعدة البيانات ولا يحتاج مفتاحاً."
       }
     },
@@ -23,7 +23,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": { "raw": "{{district_base_url}}/v1/district-correction/ready", "host": ["{{district_base_url}}"], "path": ["v1", "district-correction", "ready"] },
+        "url": { "raw": "{{baseUrl}}/v1/district-correction/ready", "host": ["{{baseUrl}}"], "path": ["v1", "district-correction", "ready"] },
         "description": "200 عند تحميل الكتالوج وضبط المفتاح، وإلا 503. لا يستدعي LLM."
       }
     },
@@ -43,7 +43,7 @@
               "raw": "{\n  \"companyName\": \"FUHOOD\",\n  \"cases\": [\n    {\"excelSequence\": 1, \"stateName\": \"DHI_QAR\", \"stateCode\": \"DHI\", \"district\": \"شطره\", \"address\": \"الشطرة قرب السوق العام\"},\n    {\"excelSequence\": 2, \"stateName\": \"BAGHDAD\", \"stateCode\": \"BGD\", \"district\": \"الكرادة شارع الرشيد، بناية 10\", \"address\": \"\"},\n    {\"excelSequence\": 3, \"stateName\": \"BAGHDAD\", \"stateCode\": \"BGD\", \"district\": \"حي غير واضح\", \"address\": \"قرب الجامع\"}\n  ]\n}",
               "options": { "raw": { "language": "json" } }
             },
-            "url": { "raw": "{{district_base_url}}/v1/district-correction", "host": ["{{district_base_url}}"], "path": ["v1", "district-correction"] },
+            "url": { "raw": "{{baseUrl}}/v1/district-correction", "host": ["{{baseUrl}}"], "path": ["v1", "district-correction"] },
             "description": "أرسل دفعة واحدة لشركة واحدة. كل صف يحوي stateCode الخاص به. نتائج الحالات تبقى بنفس ترتيب الإدخال."
           },
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
@@ -63,7 +63,7 @@
               { "key": "Content-Type", "value": "application/json", "type": "text" }
             ],
             "body": { "mode": "raw", "raw": "{\"companyName\":\"FUHOOD\",\"cases\":[{\"excelSequence\":1,\"stateCode\":\"DHI\",\"district\":\"الشطرة\"}]}", "options": { "raw": { "language": "json" } } },
-            "url": { "raw": "{{district_base_url}}/v1/district-correction", "host": ["{{district_base_url}}"], "path": ["v1", "district-correction"] },
+            "url": { "raw": "{{baseUrl}}/v1/district-correction", "host": ["{{baseUrl}}"], "path": ["v1", "district-correction"] },
             "description": "يتحقق من رفض المفتاح غير الصحيح كما في بقية خدمات المشروع."
           },
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 401', function () { pm.response.to.have.status(401); });"] } }]
@@ -74,7 +74,7 @@
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json", "type": "text" }],
             "body": { "mode": "raw", "raw": "{\"companyName\":\"FUHOOD\",\"cases\":[{\"excelSequence\":1,\"stateCode\":\"DHI\",\"district\":\"الشطرة\"}]}", "options": { "raw": { "language": "json" } } },
-            "url": { "raw": "{{district_base_url}}/v1/district-correction", "host": ["{{district_base_url}}"], "path": ["v1", "district-correction"] },
+            "url": { "raw": "{{baseUrl}}/v1/district-correction", "host": ["{{baseUrl}}"], "path": ["v1", "district-correction"] },
             "description": "الهيدر إلزامي؛ غيابه يرجع 422 مثل بقية الراوترات."
           },
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 422', function () { pm.response.to.have.status(422); });"] } }]
@@ -88,7 +88,7 @@
               { "key": "Content-Type", "value": "application/json", "type": "text" }
             ],
             "body": { "mode": "raw", "raw": "{\"companyName\":\"UNKNOWN\",\"cases\":[{\"excelSequence\":1,\"stateCode\":\"BGD\",\"district\":\"الكرادة\"}]}", "options": { "raw": { "language": "json" } } },
-            "url": { "raw": "{{district_base_url}}/v1/district-correction", "host": ["{{district_base_url}}"], "path": ["v1", "district-correction"] },
+            "url": { "raw": "{{baseUrl}}/v1/district-correction", "host": ["{{baseUrl}}"], "path": ["v1", "district-correction"] },
             "description": "يتحقق من عزل كتالوجات الشركات."
           },
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 404', function () { pm.response.to.have.status(404); });"] } }]

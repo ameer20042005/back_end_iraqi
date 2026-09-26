@@ -188,8 +188,7 @@ def test_api_auth_errors_and_readiness(catalog, monkeypatch):
     monkeypatch.setattr(service_auth, "settings", configured)
     with TestClient(service_main.app) as client:
         assert client.get("/health").status_code == 200
-        assert client.get("/v1/district-correction/ready").json()["companies"] == [
-            name for name in index.companies() if name != "TEST"]
+        assert client.get("/v1/district-correction/ready").json()["companies"] == index.companies()
         payload = {"companyName": "ALZAEEM", "cases": [{"excelSequence": 1, "stateCode": "BGD", "district": "الكرادة"}]}
         missing = client.post("/v1/district-correction", json=payload)
         assert missing.status_code == 422
@@ -200,7 +199,7 @@ def test_api_auth_errors_and_readiness(catalog, monkeypatch):
         payload["companyName"] = "NO_COMPANY"
         assert client.post("/v1/district-correction", headers={"X-API-Key": "secret"}, json=payload).status_code == 404
         payload["companyName"] = "TEST"
-        assert client.post("/v1/district-correction", headers={"X-API-Key": "secret"}, json=payload).status_code == 404
+        assert client.post("/v1/district-correction", headers={"X-API-Key": "secret"}, json=payload).status_code == 200
         non_ascii = client.post("/v1/district-correction", headers={"X-API-Key": "مفتاح".encode("utf-8")}, json=payload)
         assert non_ascii.status_code == 401
         payload["companyName"] = "ALZAEEM"
@@ -230,9 +229,12 @@ def test_postman_example_matches_integrated_endpoint(catalog, monkeypatch):
     monkeypatch.setattr(service_auth, "settings", configured)
     collection_path = Path(__file__).resolve().parents[1] / "docs" / "district-correction-postman.json"
     collection = json.loads(collection_path.read_text(encoding="utf-8"))
-    assert next(item["value"] for item in collection["variable"] if item["key"] == "district_api_key") == ""
+    variables = {item["key"]: item["value"] for item in collection["variable"]}
+    main_collection = json.loads((collection_path.parent / "postman_collection.json").read_text(encoding="utf-8"))
+    assert variables["baseUrl"] == next(item["value"] for item in main_collection["variable"] if item["key"] == "baseUrl")
+    assert variables["district_api_key"] == settings.district_api_key
     sample = collection["item"][2]["item"][0]["request"]
-    assert sample["url"]["raw"] == "{{district_base_url}}/v1/district-correction"
+    assert sample["url"]["raw"] == "{{baseUrl}}/v1/district-correction"
     assert sample["header"][0]["value"] == "{{district_api_key}}"
     with TestClient(service_main.app) as client:
         response = client.post("/v1/district-correction", headers={"X-API-Key": "secret"},
