@@ -118,7 +118,7 @@ from app.config import settings
 for value in (
     settings.model_name, settings.vllm_port, settings.api_port,
     settings.max_model_len, settings.gpu_memory_utilization,
-    settings.max_num_seqs, settings.hf_token or "",
+    settings.max_num_seqs,
 ):
     print(value)
 ')
@@ -128,8 +128,20 @@ API_PORT="${STATIC_CONFIG[2]}"
 MAX_MODEL_LEN="${STATIC_CONFIG[3]}"
 GPU_MEMORY_UTILIZATION="${STATIC_CONFIG[4]}"
 MAX_NUM_SEQS="${STATIC_CONFIG[5]}"
-export HF_TOKEN="${STATIC_CONFIG[6]}"
 VLLM_LOG="/tmp/vllm_boot.log"
+
+# الشرح: تنزيل الموديلات بدون أي توكن Hugging Face. كل المستودعات اللي
+# نستعملها عامة وغير gated، فما نحتاج مصادقة إطلاقاً. لكن huggingface_hub
+# يدوّر على توكن تلقائياً (متغير HF_TOKEN، أو الاسم القديم
+# HUGGING_FACE_HUB_TOKEN، أو ملف ~/.cache/huggingface/token من login سابق)
+# ويرسله مع كل طلب لو لقاه. الخطر: توكن قديم/ملغى ضابطه قالب RunPod يخلّي
+# الـHub يرد 401 حتى على مستودع عام. لذلك:
+#   · unset يمسح متغيرَي التوكن من بيئة هذا السكربت — وبالتالي من vLLM
+#     وuvicorn (Whisper/F5-TTS) لأنهم يرثون البيئة منه.
+#   · HF_HUB_DISABLE_IMPLICIT_TOKEN=1 يمنع إرسال توكن ملف login المخزَّن
+#     ضمنياً مع طلبات القراءة/التنزيل.
+# unset HF_TOKEN HUGGING_FACE_HUB_TOKEN
+# export HF_HUB_DISABLE_IMPLICIT_TOKEN=1
 
 # حزمة pip nvidia-cuda-nvcc-cu12 (المُثبَّتة تبعاً لـvllm) لا توفّر nvcc
 # فعلياً بهذا الإصدار — فيها ptxas وlibnvvm.so بس، بدون الملف التنفيذي nvcc

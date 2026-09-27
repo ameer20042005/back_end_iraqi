@@ -49,12 +49,8 @@ class Settings:
     # يطابق vllm_port أدناه؛ غيّرهما معاً عند نقل الخادم إلى منفذ آخر.
     vllm_base_url: str = "http://127.0.0.1:18001/v1"
 
-    # توكن Hugging Face — مطلوب لأن Gemma موديل بوابة (gated) وربما مستودع
-    # الموديل خاص. هذا استثناء الوحيد من مبدأ "كل الإعدادات هنا مباشرة": سرّ
-    # حقيقي بهذا الملف يوقفه GitHub push protection ويكشفه لأي أحد بالريبو،
-    # فيُقرأ فقط من متغير بيئة HF_TOKEN تضبطه بكل خادم عند النشر (RunPod
-    # Environment Variables) — لا قيمة افتراضية حقيقية هنا أبداً.
-    hf_token: Optional[str] = field(default_factory=lambda: os.environ.get("HF_TOKEN"))
+    # لا يوجد توكن Hugging Face: كل مستودعات الموديلات هنا (Gemma المدموج،
+    # Whisper، F5-TTS) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).
 
     # إعدادات خادم vLLM (يقرأها start.sh ويمررها كأعلام لـ `vllm serve`):
     # نسبة VRAM المحجوزة للموديل + KV cache.

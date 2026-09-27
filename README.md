@@ -36,7 +36,7 @@ uvicorn app.main:app --reload --port 8000
 1. أنشئ Pod من قالب بصورة **`ubuntu:22.04`** (الصورة أعلاه) — Container Disk **60GB+** موصى به (torch/vLLM المثبَّتين بأول إقلاع + الموديل المُنزَّل).
 2. في إعدادات القالب أضف `8000` إلى **Expose HTTP Ports**.
 3. انسخ المشروع للـ Pod (عبر Jupyter/SSH أو git clone) إلى `/workspace/back_end_iraqi`.
-4. عدّل القيم الثابتة في `app/config.py`، خصوصاً `hf_token` إذا كان تنزيل الموديل يحتاجه.
+4. عدّل القيم الثابتة في `app/config.py` عند الحاجة (لا يلزم توكن Hugging Face — الموديلات عامة).
 5. شغّل:
    ```bash
    cd /workspace/back_end_iraqi && bash start.sh
@@ -124,7 +124,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 ## الإعداد الثابت
 
-الإعدادات معرّفة في `app/config.py`. مفتاح تصحيح المناطق `district_api_key` ثابت هناك مثل بقية المفاتيح، وقيم تشغيل الميزة الاختيارية تُقرأ من متغيرات البيئة `DISTRICT_*`، وتبقى بقية إعدادات الموديل والميزات في `Settings`. سر Hugging Face يُقرأ من `HF_TOKEN`.
+الإعدادات معرّفة في `app/config.py`. مفتاح تصحيح المناطق `district_api_key` ثابت هناك مثل بقية المفاتيح، وقيم تشغيل الميزة الاختيارية تُقرأ من متغيرات البيئة `DISTRICT_*`، وتبقى بقية إعدادات الموديل والميزات في `Settings`. لا يوجد سر Hugging Face — الموديلات تُنزَّل بلا توكن.
 
 **تنبيه أمني**: القيم في هذا الملف مرئية لكل من يصل إلى المستودع؛ لا تنشره علناً إن وضعت فيه مفاتيح أو توكنات حقيقية.
 
@@ -139,14 +139,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
   التحويل المناسب تلقائياً أول استخدام (أول طلب أبطأ بسبب التنزيل، بعدها من
   الكاش)، ويُحمَّل على الـ GPU بنصف الدقة إن توفّر مع تقطيع تلقائي كل 30 ثانية.
 
-**خطوة لازمة قبل أول تشغيل — إعداد `hf_token`:**
-
-1. اقبل ترخيص Gemma على حسابك في Hugging Face (صفحة الموديل → Agree and access repository).
-2. تأكد أن نفس الحساب (أو حساب له صلاحية وصول) يقدر يفتح مستودع `ameer4wisam/gemma-iraqi-finetune` إذا كان خاصاً.
-3. ولّد Access Token من https://huggingface.co/settings/tokens (صلاحية Read تكفي).
-4. ضعه في `hf_token` داخل `app/config.py`.
-
-بدون هذا التوكن، أول تشغيل يفشل بخطأ 401/403 عند محاولة تحميل الموديل أو المحوّل.
+**لا حاجة لتوكن Hugging Face:** كل المستودعات المستعملة (`ameer4wisam/gemma-iraqi-10k-merged`، موديلات Whisper وF5-TTS) عامة وغير gated، فتُنزَّل بلا مصادقة. لو بيئة الـ Pod فيها `HF_TOKEN` قديم يسبب خطأ 401، فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ [start.sh](start.sh).
 
 ## تحسين بيانات التدريب — نصائح من الاختبار الفعلي
 

@@ -31,17 +31,7 @@ git clone https://github.com/ameer20042005/back_end_iraqi.git app
 cd /workspace/app
 ```
 
-### 4) حط توكن Hugging Face بالإعدادات الثابتة
-
-بدّل `hf_xxx` بتوكنك (شلون تجيبه: [قبل البدء](#1-توكن-hugging-face-hf_token)):
-
-افتح `app/config.py` وضع التوكن في الحقل `hf_token`:
-
-```python
-hf_token: Optional[str] = "hf_xxx"
-```
-
-### 5) شغّل السيرفر (يضل شغال بعد غلق الطرفية)
+### 4) شغّل السيرفر (يضل شغال بعد غلق الطرفية)
 
 ```bash
 cd /workspace/app
@@ -50,7 +40,7 @@ tmux kill-session -t api 2>/dev/null
 tmux new-session -d -s api 'bash start.sh > /tmp/api.log 2>&1'
 ```
 
-### 6) راقب لحد ما يجهز
+### 5) راقب لحد ما يجهز
 
 ```bash
 tail -f /tmp/api.log
@@ -58,7 +48,7 @@ tail -f /tmp/api.log
 
 أول تشغيل ياخذ **دقائق أطول من المعتاد** (صورة Ubuntu خام: تثبيت Python/pip + vLLM nightly + torch أولاً، ثم تحميل الموديل ~24GB). اخرج من المراقبة بـ `Ctrl+C` — يوقف `tail` بس، ما يمس السيرفر.
 
-### 7) تأكد إنه جاهز
+### 6) تأكد إنه جاهز
 
 ```bash
 curl -s http://127.0.0.1:8000/gpu | python3 -m json.tool
@@ -66,7 +56,7 @@ curl -s http://127.0.0.1:8000/gpu | python3 -m json.tool
 
 انتظر حتى يصير `"vllm_ready": true`.
 
-### 8) جرّب أول رد
+### 7) جرّب أول رد
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/sales/chat \
@@ -76,7 +66,7 @@ curl -s -X POST http://127.0.0.1:8000/sales/chat \
 
 لازم يرجع رد مبيعات عراقي بسعر من الكتالوج. لو رجع جملة اعتذار ثابتة مكررة، شوف [فحص صحة المُرمِّز](#فحص-صحة-المرمز-tokenizer).
 
-### 9) افتح لوحة الاختبار بالمتصفح
+### 8) افتح لوحة الاختبار بالمتصفح
 
 ```
 https://<POD_ID>-8000.proxy.runpod.net/test
@@ -84,7 +74,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test
 
 تلقى `<POD_ID>` بزر **Connect** → **HTTP Service [Port 8000]**.
 
-### 10) اغلق الطرفية
+### 9) اغلق الطرفية
 
 السيرفر يضل شغال داخل tmux. للتأكد: افتح طرفية جديدة وشغّل `curl -s http://127.0.0.1:8000/health`.
 
@@ -105,18 +95,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test
 
 ## قبل البدء — تجهيزات إلزامية
 
-### 1. توكن Hugging Face (`hf_token` في `app/config.py`)
-
-Gemma موديل بوابة (gated) ومستودع محوّل اللهجة العراقية خاص، فلازم توكن صحيح قبل أي تشغيل:
-
-1. افتح صفحة الموديل الأساس على Hugging Face: `google/gemma-4-12B-it` → اضغط **Agree and access repository**.
-2. تأكد أن نفس الحساب (أو حساب له صلاحية وصول) يقدر يفتح مستودع الموديل المدموج `ameer4wisam/gemma-iraqi-finetune-v2`.
-3. اذهب إلى https://huggingface.co/settings/tokens وولّد **Access Token** جديد (صلاحية **Read** تكفي للتشغيل؛ تحتاج **Write** فقط لو رح ترفع ملفات للمستودع).
-4. احتفظ بالتوكن جانباً — رح تحتاجه بخطوة متغيرات البيئة أدناه.
-
-بدون هذا التوكن، أول تشغيل يفشل بخطأ 401/403 عند تحميل الموديل أو المحوّل.
-
-### 2. حساب RunPod
+### 1. حساب RunPod
 
 أنشئ حساب على https://runpod.io وأضف رصيداً كافياً (GPU بذاكرة كبيرة مطلوبة — انظر توصية الـ GPU أدناه).
 
@@ -157,7 +136,7 @@ cd /workspace/app
 nano app/config.py
 ```
 
-ضع توكن Hugging Face في `hf_token` إن كان الموديل يتطلبه. وكل القيم الأخرى (`model_name`، `vllm_port`، `max_model_len`، `gpu_memory_utilization`...) ثابتة في `Settings` داخل الملف نفسه؛ عدّلها هناك فقط عند الحاجة.
+لا يلزم توكن Hugging Face — كل الموديلات المستعملة عامة وتُنزَّل بلا مصادقة. وكل القيم (`model_name`، `vllm_port`، `max_model_len`، `gpu_memory_utilization`...) ثابتة في `Settings` داخل الملف نفسه؛ عدّلها هناك فقط عند الحاجة.
 
 ### الخطوة 4 — التشغيل (بـ tmux حتى يضل شغال بعد غلق الطرفية)
 
@@ -285,7 +264,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test   (على RunPod)
 | السيرفر يموت أول ما تغلق الطرفية | ما اشتغل داخل tmux فعلياً (شائع: `Ctrl+B` `D` انضغطت غلط فظهرت كنص `^B^B`) | استخدم `tmux new-session -d` بالخطوة 4 — تبدأ منفصلة أصلاً بلا أي اختصار |
 | `git pull` يفشل بـ `no such ref was fetched` | الـ Pod على فرع محذوف من الريموت | `git fetch origin && git checkout main && git reset --hard origin/main` |
 | `bash start.sh` يطلع Nginx/SSH/Jupyter و«Pod is ready to use» | شغّلت سكربت إقلاع RunPod مو سكربت المشروع (كنت بمسار غلط) | `cd /workspace/app` أولاً، بعدين `bash start.sh` |
-| خطأ 401/403 عند التشغيل | `hf_token` مفقود أو غير صحيح، أو لم تقبل ترخيص Gemma | راجع قسم "قبل البدء" أعلاه |
+| خطأ 401 عند تنزيل الموديل رغم أنه عام | قالب الـ Pod ضابط `HF_TOKEN` قديم/ملغى، فيُرسَل مع الطلب ويرفضه الـ Hub | فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ `start.sh`، أو احذف المتغير من إعدادات الـ Pod |
 | `/gpu` يرجع `vllm_ready: false` باستمرار | خادم vLLM لسا يحمّل الموديل (~24GB أول مرة)، أو لسا بمرحلة تثبيت vLLM/torch nightly على Ubuntu الخام (أول إقلاع فقط)، أو فشل إقلاعه | راقب لوج الـ Pod (`tail -f /tmp/api.log`)؛ تأكد أن نسخة vLLM المثبَّتة تدعم Gemma 4 (الإصدارات المستقرة الحالية لا تدعمه — لازم nightly) |
 | نفاد ذاكرة GPU (CUDA OOM) | GPU المختار صغير جداً، أو `gpu_memory_utilization`/`max_model_len` مرتفعة جداً | اختر GPU أكبر (40GB+)، أو قلّل القيم في `app/config.py` |
 | الصفحة `/test` ما تتصل بالسيرفر (CORS) | نادراً — الـ CORS مفتوح للجميع افتراضياً بـ `app/main.py` | تأكد إن رابط السيرفر بحقل "رابط السيرفر" صحيح ويتضمن `https://` |
@@ -317,15 +296,15 @@ vocab: 5 (المطلوب 262144)
 [3] → '<unk>'
 ```
 
-بحالة العطل، ارفع `tokenizer.json` من الموديل الأساس لمستودعك (يتطلب توكن بصلاحية **Write**):
+بحالة العطل، ارفع `tokenizer.json` من الموديل الأساس لمستودعك (هذي الصيانة اليدوية الوحيدة اللي تحتاج توكن — بصلاحية **Write**، يُمرَّر لهذا الأمر فقط ولا يلزم للتشغيل):
 
 ```bash
 export HF_HUB_ENABLE_HF_TRANSFER=0
-python3 -c "
+HF_WRITE_TOKEN=hf_xxx python3 -c "
+import os
 from transformers import AutoTokenizer
 from huggingface_hub import upload_file
-from app.config import settings
-tok = settings.hf_token
+tok = os.environ['HF_WRITE_TOKEN']
 t = AutoTokenizer.from_pretrained('google/gemma-4-12B-it', token=tok)
 assert t.vocab_size == 262144, t.vocab_size
 t.save_pretrained('/tmp/tk')
