@@ -1,0 +1,6 @@
+{
+  "code-runner.respectShebang": false,
+  "code-runner.executorMap": {
+    "shellscript": "\"C:\\Program Files\\Git\\bin\\bash.exe\""
+  }
+}

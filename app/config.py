@@ -41,13 +41,18 @@ class Settings:
     # القيمة هنا تُستخدم باسم الموديل بطلبات /v1/chat/completions ويقرأها
     # start.sh لتمريرها لـ `vllm serve`.
     # start.sh يقرأ هذه القيمة مباشرة، لذلك لا يوجد مصدر ثانٍ قد يختلف عنها.
-    model_name: str = "ameer4wisam/gemma-iraqi-10k-merged"
+    #
+    # التشغيل المحلي (start_local.sh) يتجاوز الاسم والرابط بمتغيرَي البيئة
+    # LLM_MODEL وLLM_BASE_URL (افتراضياً http://localhost:1234/v1). start.sh ما
+    # يضبطهما أبداً، فتبقى القيم الثابتة على RunPod. `or` بدل قيمة getenv
+    # الافتراضية حتى ما تصير القيمة فارغة لو صُدِّر المتغير فارغاً.
+    model_name: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "ameer4wisam/gemma-iraqi-10k-merged")
 
     # عنوان خادم vLLM OpenAI-متوافق — الباك اند عميل HTTP رفيع فقط (انظر
     # app/engine.py). محلياً بدون أي خادم يبقى ready=False وكل الميزات ترجع
     # لوضع fallback.
     # يطابق vllm_port أدناه؛ غيّرهما معاً عند نقل الخادم إلى منفذ آخر.
-    vllm_base_url: str = "http://127.0.0.1:18001/v1"
+    vllm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL") or "http://127.0.0.1:18001/v1")
 
     # لا يوجد توكن Hugging Face: كل مستودعات الموديلات هنا (Gemma المدموج،
     # Whisper، F5-TTS) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).

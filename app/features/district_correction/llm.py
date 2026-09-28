@@ -1,27 +1,104 @@
 """Optional OpenAI-compatible batch resolver, always validated by the caller."""
 
 import json
+import re
 
 import httpx
 
 from app.config import Settings
 from .models import CaseRequest
 
-SYSTEM_PROMPT = """You normalize Iraqi delivery locations. Read the whole district and address text
-semantically; do not rely on a fixed list of administrative or address words. For each case, choose
-correctDistrict exactly from allowedDistricts for the given company and stateCode. Never invent a
-district. Preserve excelSequence and originalDistrict exactly. Remove governorate references from
-the location details. Put all remaining neighborhoods, streets, landmarks, and descriptions in
-addressDetails, together with the original address when present, without duplicating the district.
-Use SPLIT_ADDRESS when the district field also contains other location text or administrative
-context; otherwise use AI_MATCH. Give a concise reason explaining the choice and what was moved.
-If no allowed district is reliable, use UNRESOLVED, keep correctDistrict equal to originalDistrict,
-and preserve address. Return JSON only with cases as an array of objects: excelSequence,
-originalDistrict, correctDistrict, addressDetails, stateCode, status, reason."""
+SYSTEM_PROMPT = """You match Iraqi delivery addresses to a courier company's official district list
+(allowedDistricts, taken from the company's Excel sheet for this governorate). Understand each case by
+meaning, like a local dispatcher would; do not just compare letters.
+
+How to read a case:
+- The district field is free text typed by people. It may contain the district plus streets, landmarks,
+  house numbers, the governorate name, or words such as حي / منطقة / مجمع / محلة / قضاء / ناحية / جمعية.
+- Spelling varies: ة/ه, ى/ي, أ/إ/ا, with or without ال, missing or extra letters, Kurdish letters
+  (گ چ ڤ ژ ئ), Eastern or Western digits, typos. Arabic and Kurdish names of the same place are one place.
+- The governorate itself (for example بغداد, البصرة, واسط) is context, not a district, unless the list
+  contains a district that the text clearly names.
+- suggestedDistrict, when present, comes from spelling similarity. Verify it against the meaning of the
+  whole text; replace it when another allowed district fits better; ignore it when it is wrong.
+- Iraqi addresses are written area first, then the street, building or landmark inside it. When the text
+  names an area and then a street or landmark ("الكرادة شارع الرشيد، بناية 10"), the area is the district
+  (الكرادة) and the rest goes to addressDetails, even if that street also appears in allowedDistricts.
+  Choose a street- or landmark-named district only when the text names no area at all.
+- When the list has a combined name for the area and its neighborhood ("الفلوجة - حي الشهداء"), choose
+  that combined name over the area alone if the text names that neighborhood.
+- Numbers are part of names: شارع 20 is never شارع 40.
+
+What to return for each case:
+- correctDistrict: copied exactly, character for character, from allowedDistricts. Never invent or edit a
+  name. Keep excelSequence, originalDistrict and stateCode exactly as given.
+- addressDetails: everything else that locates the address (streets, landmarks, neighborhoods that are not
+  the chosen district) plus the original address, without repeating the district or the governorate.
+- status: SPLIT_ADDRESS when other location text was moved to addressDetails, otherwise AI_MATCH.
+- reason: one short sentence explaining the choice.
+- Returning a district is the main goal. Always choose the allowed district the text most likely refers
+  to, even when the spelling is poor, words are missing, or only part of the name is written; judge by
+  meaning, sound and the landmarks mentioned. When two districts fit, pick the more likely one and say
+  why in reason.
+- Use UNRESOLVED only when the text names no place at all that relates to any allowed district (for
+  example only "قرب الجامع" or a phone number); then keep correctDistrict equal to originalDistrict and
+  keep the address.
+
+Return JSON only: {"cases": [{excelSequence, originalDistrict, correctDistrict, addressDetails,
+stateCode, status, reason}, ...]} with one object per case."""
+
+_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S | re.I)
+_THINKING = re.compile(r"<think>.*?</think>", re.S | re.I)
 
 
 class LLMError(Exception):
     pass
+
+
+def response_format(allowed_names: list[str], cases: list[CaseRequest]) -> dict:
+    """JSON schema (OpenAI, vLLM and LM Studio all accept it) limiting names to real choices."""
+    names = sorted(set(allowed_names) | {case.district for case in cases})
+    item = {
+        "type": "object",
+        "properties": {
+            "excelSequence": {"type": "integer"},
+            "originalDistrict": {"type": "string"},
+            "correctDistrict": {"type": "string", "enum": names},
+            "addressDetails": {"type": "string"},
+            "stateCode": {"type": "string"},
+            "status": {"type": "string", "enum": ["AI_MATCH", "SPLIT_ADDRESS", "UNRESOLVED"]},
+            "reason": {"type": "string"},
+        },
+        "required": ["excelSequence", "originalDistrict", "correctDistrict", "addressDetails",
+                     "stateCode", "status", "reason"],
+    }
+    return {"type": "json_schema", "json_schema": {
+        "name": "district_cases",
+        "schema": {"type": "object", "properties": {"cases": {"type": "array", "items": item}},
+                   "required": ["cases"]},
+    }}
+
+
+def parse_cases(content) -> list:
+    """Case list from a model reply, tolerating fences, thinking blocks and surrounding prose."""
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("empty content")
+    text = _THINKING.sub("", content).strip()
+    fenced = _FENCE.search(text)
+    if fenced:
+        text = fenced.group(1).strip()
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        parsed = json.loads(text[start:end + 1])
+    if isinstance(parsed, dict) and isinstance(parsed.get("cases"), list):
+        return parsed["cases"]
+    if isinstance(parsed, list):
+        return parsed
+    raise ValueError("missing cases array")
 
 
 class LLMClient:
@@ -34,35 +111,39 @@ class LLMClient:
                     (self.settings.district_llm_model or self.settings.model_name))
 
     async def resolve(self, company: str, state_code: str, cases: list[CaseRequest],
-                      allowed_names: list[str]) -> list[dict]:
+                      allowed_names: list[str], hints: dict[int, str] | None = None) -> list[dict]:
+        hints = hints or {}
         payload = {
             "companyName": company, "stateCode": state_code,
             "allowedDistricts": allowed_names,
             "cases": [{"excelSequence": case.excelSequence, "originalDistrict": case.district,
                        "district": case.district, "address": case.address,
-                       "stateName": case.stateName, "stateCode": state_code}
+                       "stateName": case.stateName, "stateCode": state_code,
+                       "suggestedDistrict": hints.get(case.excelSequence)}
                       for case in cases],
         }
         url = (self.settings.district_llm_base_url or self.settings.vllm_base_url).rstrip("/")
         if not url.endswith("/chat/completions"):
             url += "/chat/completions" if url.endswith("/v1") else "/v1/chat/completions"
         headers = {"Authorization": f"Bearer {self.settings.district_llm_api_key}"} if self.settings.district_llm_api_key else {}
+        body = {
+            "model": self.settings.district_llm_model or self.settings.model_name,
+            "temperature": 0,
+            # Reasoning models (LM Studio) can spend 1000+ tokens thinking before the JSON; this is only a cap.
+            "max_tokens": min(12000, 4096 + len(cases) * 200),
+            "messages": [{"role": "system", "content": SYSTEM_PROMPT},
+                         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+            "response_format": response_format(allowed_names, cases),
+        }
         try:
             async with httpx.AsyncClient(timeout=self.settings.district_llm_timeout_seconds) as client:
-                response = await client.post(url, json={
-                    "model": self.settings.district_llm_model or self.settings.model_name,
-                    "temperature": 0,
-                    "max_tokens": min(3000, max(512, len(cases) * 120)),
-                    "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
-                    "response_format": {"type": "json_object"},
-                }, headers=headers)
+                response = await client.post(url, json=body, headers=headers)
+                if response.status_code in (400, 422):
+                    # Servers without structured-output support: ask again for plain JSON text.
+                    plain = {key: value for key, value in body.items() if key != "response_format"}
+                    response = await client.post(url, json=plain, headers=headers)
                 response.raise_for_status()
-                content = response.json()["choices"][0]["message"]["content"]
-                parsed = json.loads(content)
-                if not isinstance(parsed, dict) or not isinstance(parsed.get("cases"), list):
-                    raise ValueError("missing cases array")
-                return parsed["cases"]
+                return parse_cases(response.json()["choices"][0]["message"]["content"])
         except httpx.TimeoutException as exc:
             raise LLMError("LLM_TIMEOUT") from exc
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:

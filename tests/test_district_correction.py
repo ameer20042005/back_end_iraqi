@@ -88,13 +88,15 @@ def test_district_after_administrative_label_and_governorate(catalog):
                    for item in cases])
     rows = correct(index, cases, company="KHAYAL", llm=llm)
     for row in rows:
+        # The AI and the spelling match agree on the same Excel name.
         assert (row.correctDistrict, row.addressDetails, row.confidence, row.status) == (
-            "الموفقية", "حي الزهراء", 0.94, "SPLIT_ADDRESS")
+            "الموفقية", "حي الزهراء", 0.97, "SPLIT_ADDRESS")
         assert row.errorCode is None
     assert rows[0].originalDistrict == "قضاء الموفقيه واسط حي الزهراء"
     assert rows[0].reason == reason
     assert "الموفقية" in llm.allowed_names
-    assert correct(index, cases[:1], company="KHAYAL")[0].status == "UNRESOLVED"
+    # Without an AI the spelling match is the fallback and already finds the district.
+    assert correct(index, cases[:1], company="KHAYAL")[0].status == "SPLIT_ADDRESS"
 
 
 def test_district_embedded_after_address_description(catalog):
@@ -138,12 +140,19 @@ def test_ambiguous_normalization_does_not_force_a_match():
         by_company = {"X": {"BGD": []}}
         states = {"BGD": {}}
 
-        def districts(self, company, state_code):
-            return [{"name": "الحارة"}, {"name": "الحاره"}]
+        def __init__(self, names):
+            self.names = [{"name": name} for name in names]
 
-    row = correct(AmbiguousCatalog(), [case(1, "حاره")], company="X")[0]
+        def districts(self, company, state_code):
+            return self.names
+
+    # Two spellings of one place: the spelling closest to the text is chosen.
+    row = correct(AmbiguousCatalog(["الحارة", "الحاره"]), [case(1, "حاره")], company="X")[0]
+    assert (row.status, row.correctDistrict) == ("NORMALIZED_MATCH", "الحاره")
+    # Two different places behind one label-free reading are never forced.
+    row = correct(AmbiguousCatalog(["حي الحارة", "مجمع الحارة"]), [case(1, "الحارة")], company="X")[0]
     assert row.status == "UNRESOLVED"
-    assert row.correctDistrict == "حاره"
+    assert row.correctDistrict == "الحارة"
 
 
 class FakeLLM:
@@ -153,8 +162,9 @@ class FakeLLM:
         self.answer = answer
         self.allowed_names = []
 
-    async def resolve(self, company, state_code, cases, allowed_names):
+    async def resolve(self, company, state_code, cases, allowed_names, hints=None):
         self.allowed_names = allowed_names
+        self.hints = hints
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer
@@ -196,6 +206,8 @@ def test_malformed_llm_json_is_reported_without_losing_case(monkeypatch):
     from app.features.district_correction import llm as llm_module
 
     class BadResponse:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 
@@ -307,8 +319,9 @@ def test_valid_llm_choice_is_accepted(catalog):
 
 
 def test_fuzzy_rejects_close_runner_up_hidden_by_prefilter(catalog):
+    # "الاوله" is one typo away from "الاولى" and far from "الثانية", so the typo tier resolves it.
     row = correct(catalog[0], [case(1, "الفلوجة - حي الضباط الاوله", state="ANB")])[0]
-    assert row.status == "UNRESOLVED"
+    assert row.correctDistrict == "الفلوجة - حي الضباط الاولى"
 
 
 def test_llm_case_limit_marks_overflow(catalog):

@@ -367,6 +367,7 @@ class LLMEngine:
         return {
             "mode": "vllm_openai_client",
             "vllm_base_url": self._base_url,
+            "model": settings.model_name,
             "vllm_ready": self.ready,
             "vllm_inflight": self._inflight,
             "requests_served": self.metrics["requests_served"],

@@ -27,7 +27,18 @@ uvicorn app.main:app --reload --port 8000
 ثم افتح: http://localhost:8000/docs
 
 > ملاحظة: محلياً ماكو خادم vLLM (يحتاج GPU/Linux — `start.sh` يجهّزه تلقائياً على RunPod).
-> `/gpu` سترجع `vllm_ready: false`، ونقاط الذكاء التي تعتمد على vLLM لن تولّد رداً حتى يصبح الخادم جاهزاً.
+> بدونه نقاط الذكاء لن تولّد رداً — إلا إذا شغّلت خادم LLM محلياً كما بالقسم التالي.
+
+### التشغيل محلياً مع خادم LLM محلي (LM Studio)
+
+شغّل خادم LLM متوافق مع OpenAI على `http://localhost:1234/v1` وحمّل فيه موديلاً، ثم من Git Bash:
+
+```bash
+bash start_local.sh
+LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh   # خادم أو موديل آخر
+```
+
+السكربت يكتشف الموديل المحمَّل من `/v1/models` ويمرّر `LLM_BASE_URL` و`LLM_MODEL` لـ `app/config.py`. لوحة الاختبار على http://127.0.0.1:8000/test تعرض الرابط والموديل المستعملين فعلياً.
 
 ## الرفع على RunPod — Pod مباشر بصورة Ubuntu 22.04 خام
 

@@ -1,4 +1,10 @@
-"""Stateless request orchestration and strict post-LLM validation."""
+"""Stateless request orchestration: literal matches are final, the AI decides the rest.
+
+Every case whose district is not written exactly as in the company Excel catalog is
+sent to the LLM, which reads the text for meaning and must answer with a name from
+that catalog. Spelling-based matching only assists: it suggests a candidate to the
+LLM, orders the candidate list, and is the fallback when the LLM is unavailable.
+"""
 
 from collections import Counter, defaultdict
 
@@ -8,6 +14,11 @@ from .catalog import Catalog
 from .llm import LLMClient, LLMError
 from .matching import _strip_prefix, candidate_names, match_case, unresolved
 from .models import CaseRequest, CaseResponse, CorrectionRequest, CorrectionResponse
+from .normalization import normalize, phrase_key
+
+_CHUNK = 20
+_CANDIDATES_PER_CASE = 30
+_FULL_LIST_LIMIT = 150
 
 
 class CorrectionService:
@@ -20,39 +31,43 @@ class CorrectionService:
         company = request.companyName.strip().upper()
         if company not in self.catalog.by_company:
             raise ValueError("UNKNOWN_COMPANY")
-        results, unresolved_groups = await run_in_threadpool(self._match_all, company, request.cases)
+        results, llm_groups = await run_in_threadpool(self._match_all, company, request.cases)
 
         sent_to_llm = 0
-        for code, cases in unresolved_groups.items():
+        for code, cases in llm_groups.items():
             allowed = self.catalog.districts(company, code)
             full_names = {item["name"] for item in allowed}
-            for start in range(0, len(cases), 20):
-                chunk = cases[start:start + 20]
-                room = self.max_llm_cases - sent_to_llm
-                for case in chunk[max(room, 0):]:
-                    results[case.excelSequence] = unresolved(
-                        case, "LLM case limit reached for this request.", "LLM_LIMIT_EXCEEDED")
-                chunk = chunk[:max(room, 0)]
+            for start in range(0, len(cases), _CHUNK):
+                chunk = cases[start:start + _CHUNK]
+                room = max(self.max_llm_cases - sent_to_llm, 0)
+                for case in chunk[room:]:
+                    results[case.excelSequence] = self._fallback(
+                        results[case.excelSequence], case, "LLM case limit reached for this request.",
+                        "LLM_LIMIT_EXCEEDED")
+                chunk = chunk[:room]
                 if not chunk:
                     continue
-                candidates = await run_in_threadpool(self._candidates, chunk, allowed)
+                suggestions = {case.excelSequence: results[case.excelSequence] for case in chunk}
+                candidates = await run_in_threadpool(self._candidates, chunk, allowed, suggestions)
                 sent_to_llm += len(chunk)
-                await self._apply_llm(company, code, chunk, candidates, full_names, results)
+                await self._apply_llm(company, code, chunk, candidates, full_names, suggestions, results)
 
         ordered = [results[case.excelSequence] for case in request.cases]
         counts = Counter(result.status for result in ordered)
         metrics = {"company": company, "states": sorted({case.stateCode.strip().upper() for case in request.cases}),
                    "cases": len(ordered), "exact": counts["EXACT_MATCH"],
-                   "fuzzy": counts["FUZZY_MATCH"], "sent_to_llm": sent_to_llm,
+                   "fuzzy": counts["FUZZY_MATCH"], "ai": counts["AI_MATCH"], "sent_to_llm": sent_to_llm,
                    "unresolved": counts["UNRESOLVED"]}
         return CorrectionResponse(companyName=company, cases=ordered), metrics
 
     def _match_all(self, company: str, cases: list[CaseRequest]):
         results: dict[int, CaseResponse] = {}
-        unresolved_groups: dict[str, list[CaseRequest]] = defaultdict(list)
+        llm_groups: dict[str, list[CaseRequest]] = defaultdict(list)
         for case in cases:
             code = case.stateCode.strip().upper()
-            if code not in self.catalog.states or (case.stateName and self.catalog.state_code_for(case.stateName) != code):
+            named = self.catalog.state_code_for(case.stateName) if case.stateName.strip() else None
+            # stateCode is authoritative; a recognizable stateName must agree with it.
+            if code not in self.catalog.states or (named is not None and named != code):
                 results[case.excelSequence] = unresolved(case, "Unknown or inconsistent state.", "UNKNOWN_STATE")
                 continue
             allowed = self.catalog.districts(company, code)
@@ -60,51 +75,93 @@ class CorrectionService:
                 results[case.excelSequence] = unresolved(case, "No districts for this company and state.",
                                                           "EMPTY_DISTRICT_CATALOG")
                 continue
-            result = match_case(case, allowed)
+            state = self.catalog.states.get(code, {})
+            result = match_case(case, allowed, (state.get("name_ar"), state.get("name_en")))
             results[case.excelSequence] = result
-            if result.status != "EXACT_MATCH" and case.district.strip() and self.llm.configured:
-                unresolved_groups[code].append(case)
-        return results, unresolved_groups
+            # Only a district written exactly as in the Excel catalog skips the AI.
+            literal = result.status != "UNRESOLVED" and result.correctDistrict == case.district.strip()
+            if not literal and case.district.strip() and self.llm.configured:
+                llm_groups[code].append(case)
+        return results, llm_groups
 
     @staticmethod
-    def _candidates(chunk: list[CaseRequest], allowed: list[dict]) -> list[str]:
-        if len(allowed) <= 150:
+    def _candidates(chunk: list[CaseRequest], allowed: list[dict], suggestions: dict) -> list[str]:
+        """Catalog names shown to the LLM: the whole list when short, else the closest per case."""
+        if len(allowed) <= _FULL_LIST_LIMIT:
             return sorted(item["name"] for item in allowed)
-        return sorted({name for case in chunk for name in candidate_names(case.district, allowed, limit=30)})
+        names = set()
+        for case in chunk:
+            names.update(candidate_names(" ".join(filter(None, (case.district, case.address))), allowed,
+                                         limit=_CANDIDATES_PER_CASE))
+            suggestion = suggestions.get(case.excelSequence)
+            if suggestion is not None and suggestion.status != "UNRESOLVED":
+                names.add(suggestion.correctDistrict)
+        return sorted(names)
 
-    async def _apply_llm(self, company, code, chunk, candidates, full_names, results) -> None:
+    @staticmethod
+    def _catalog_name(value, candidates: list[str]) -> str | None:
+        """The LLM's choice as an exact catalog name, tolerating spelling-only differences."""
+        if not isinstance(value, str):
+            return None
+        if value in candidates:
+            return value
+        for key_function in (normalize, phrase_key):
+            matches = [name for name in candidates if key_function(name) == key_function(value)]
+            if len(matches) == 1:
+                return matches[0]
+        return None
+
+    @staticmethod
+    def _fallback(suggestion: CaseResponse, case: CaseRequest, why: str, error: str | None) -> CaseResponse:
+        """Without a usable AI answer, keep the spelling match if there is one."""
+        if suggestion.status != "UNRESOLVED":
+            return suggestion.model_copy(update={"reason": f"{suggestion.reason} AI check unavailable: {why}"})
+        return unresolved(case, why, error)
+
+    async def _apply_llm(self, company, code, chunk, candidates, full_names, suggestions, results) -> None:
+        hints = {sequence: result.correctDistrict for sequence, result in suggestions.items()
+                 if result.status != "UNRESOLVED"}
         try:
-            suggestions = await self.llm.resolve(company, code, chunk, candidates)
-            expected = {case.excelSequence for case in chunk}
-            if (len(suggestions) != len(chunk) or
-                    any(not isinstance(item, dict) or type(item.get("excelSequence")) is not int
-                        for item in suggestions) or
-                    {item["excelSequence"] for item in suggestions} != expected):
+            answers = await self.llm.resolve(company, code, chunk, candidates, hints)
+            if not isinstance(answers, list):
                 raise LLMError("LLM_INVALID_RESPONSE")
-            by_sequence = {item["excelSequence"]: item for item in suggestions}
         except LLMError as exc:
             for case in chunk:
-                results[case.excelSequence] = unresolved(case, str(exc), str(exc))
+                results[case.excelSequence] = self._fallback(suggestions[case.excelSequence], case,
+                                                             str(exc), str(exc))
             return
+        by_sequence = {}
+        for item in answers:
+            if isinstance(item, dict) and type(item.get("excelSequence")) is int:
+                by_sequence.setdefault(item["excelSequence"], item)
+        allowed = [name for name in candidates if name in full_names]
         for case in chunk:
-            item = by_sequence[case.excelSequence]
-            name = item.get("correctDistrict")
-            if item.get("status") == "UNRESOLVED":
-                results[case.excelSequence] = unresolved(case)
+            suggestion = suggestions[case.excelSequence]
+            item = by_sequence.get(case.excelSequence)
+            if item is None:
+                results[case.excelSequence] = self._fallback(
+                    suggestion, case, "LLM returned no answer for this case.", "LLM_INVALID_RESPONSE")
                 continue
-            status = item.get("status")
+            status = str(item.get("status") or "").strip().upper()
+            if status == "UNRESOLVED":
+                results[case.excelSequence] = self._fallback(
+                    suggestion, case, "LLM found no reliable catalog district.", None)
+                continue
+            name = self._catalog_name(item.get("correctDistrict"), allowed)
+            original = item.get("originalDistrict")
+            state_code = item.get("stateCode")
             suggested_details = item.get("addressDetails")
             suggested_reason = item.get("reason")
-            if (status not in ("AI_MATCH", "SPLIT_ADDRESS") or
-                    item.get("originalDistrict") != case.district or
-                    not isinstance(item.get("stateCode"), str) or
-                    item["stateCode"].upper() != code or
-                    not isinstance(name, str) or name not in full_names or name not in candidates or
+            if (status not in ("AI_MATCH", "SPLIT_ADDRESS") or name is None or
+                    (original is not None and (not isinstance(original, str) or
+                                               normalize(original) != normalize(case.district))) or
+                    (state_code is not None and (not isinstance(state_code, str) or
+                                                 state_code.strip().upper() != code)) or
                     (suggested_details is not None and not isinstance(suggested_details, str)) or
                     (status == "SPLIT_ADDRESS" and suggested_details is None) or
                     (suggested_reason is not None and not isinstance(suggested_reason, str))):
-                results[case.excelSequence] = unresolved(case, "LLM result failed catalog validation.",
-                                                          "LLM_INVALID_RESPONSE")
+                results[case.excelSequence] = self._fallback(
+                    suggestion, case, "LLM result failed catalog validation.", "LLM_INVALID_RESPONSE")
                 continue
             remainder = _strip_prefix(case.district, name)
             address = _strip_prefix(case.address, name)
@@ -113,10 +170,12 @@ class CorrectionService:
                 details = (remainder + " " + details).strip()
             if suggested_details is not None:
                 details = suggested_details.strip()
+            # Two independent methods agreeing on the same Excel name is the strongest signal.
+            agreed = suggestion.status != "UNRESOLVED" and suggestion.correctDistrict == name
+            confidence = 0.97 if agreed else 0.9 if status == "SPLIT_ADDRESS" else 0.85
             results[case.excelSequence] = CaseResponse(
                 excelSequence=case.excelSequence, originalDistrict=case.district,
-                correctDistrict=name, addressDetails=details,
-                confidence=0.94 if status == "SPLIT_ADDRESS" else 0.78,
-                status=status, reason=suggested_reason or "LLM selection validated against company and state catalog.",
+                correctDistrict=name, addressDetails=details, confidence=confidence, status=status,
+                reason=suggested_reason or "AI selection validated against the company Excel catalog.",
                 stateCode=code,
             )

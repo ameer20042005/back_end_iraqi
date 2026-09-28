@@ -1,0 +1,802 @@
+[
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "similar-letter",
+  "district": "الكاضمية - قرب مدرسة النور",
+  "expected": "الكاظمية",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "no-spaces",
+  "district": "جسرالمثنى",
+  "expected": "جسر المثنى",
+  "details": ""
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "missing-letter",
+  "district": "نواب الضاط - قرب جامع الرحمن",
+  "expected": "نواب الضباط",
+  "details": "قرب جامع الرحمن"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "glued-to-address",
+  "district": "بوابة الكاظميةقرب مدرسة النور",
+  "expected": "بوابة الكاظمية",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "doubled-letter",
+  "district": "النهرروان - مقابل مستشفى الولادة",
+  "expected": "النهروان",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "glued-governorate",
+  "district": "بغدادشقق السلام قرب مدرسة النور",
+  "expected": "شقق السلام",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "swapped-letters",
+  "district": "المهدنسين - مقابل مستشفى الولادة",
+  "expected": "المهندسين",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "typo-and-glued",
+  "district": "شارع المرب-قرب مدرسة النور",
+  "expected": "شارع المغرب",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "similar-letter",
+  "district": "الامين السالثة - خلف فندق بابل",
+  "expected": "الامين الثالثة",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "no-spaces",
+  "district": "الدورة-الوادي",
+  "expected": "الدورة - الوادي",
+  "details": ""
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "missing-letter",
+  "district": "الصرفية - خلف فندق بابل",
+  "expected": "الصرافية",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "glued-to-address",
+  "district": "متنزه الزوراءمقابل مستشفى الولادة",
+  "expected": "متنزه الزوراء",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "doubled-letter",
+  "district": "سبع ابككار - شارع المطاعم",
+  "expected": "سبع ابكار",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "glued-governorate",
+  "district": "بغدادالجلاعطة مقابل مستشفى الولادة",
+  "expected": "الجلاعطة",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "swapped-letters",
+  "district": "الدورة - الاكسان - شارع المطاعم",
+  "expected": "الدورة - الاسكان",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "typo-and-glued",
+  "district": "السعادة والكامة-مقابل مستشفى الولادة",
+  "expected": "السعادة والكرامة",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "similar-letter",
+  "district": "ساحة الفردوص - خلف فندق بابل",
+  "expected": "ساحة الفردوس",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "no-spaces",
+  "district": "شارعمعسكرالرشيد",
+  "expected": "شارع معسكر الرشيد",
+  "details": ""
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "missing-letter",
+  "district": "البليات - قرب مدرسة النور",
+  "expected": "البلديات",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "ALZAEEM",
+  "state": "BGD",
+  "kind": "glued-to-address",
+  "district": "باب الشيخشارع المطاعم",
+  "expected": "باب الشيخ",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "doubled-letter",
+  "district": "ام السوويج - مقابل مستشفى الولادة",
+  "expected": "ام السويج",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "glued-governorate",
+  "district": "البصرةالخليلية قرب مدرسة النور",
+  "expected": "الخليلية",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "swapped-letters",
+  "district": "بوابة الكمرة - خلف فندق بابل",
+  "expected": "بوابة الكرمة",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "typo-and-glued",
+  "district": "منوي لجم-شارع المطاعم",
+  "expected": "مناوي لجم",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "similar-letter",
+  "district": "خويصات - مقابل مستشفى الولادة",
+  "expected": "خويسات",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "no-spaces",
+  "district": "ساحةسعد",
+  "expected": "ساحة سعد",
+  "details": ""
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "missing-letter",
+  "district": "دور المار - قرب مدرسة النور",
+  "expected": "دور المطار",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "glued-to-address",
+  "district": "شقق الفاومقابل مستشفى الولادة",
+  "expected": "شقق الفاو",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "doubled-letter",
+  "district": "الحكييمية - مقابل مستشفى الولادة",
+  "expected": "الحكيمية",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "glued-governorate",
+  "district": "البصرةشارع الوطن قرب مدرسة النور",
+  "expected": "شارع الوطن",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "swapped-letters",
+  "district": "شارع الماكتب - مقابل مستشفى الولادة",
+  "expected": "شارع المكاتب",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "typo-and-glued",
+  "district": "صبخة الرب-شارع المطاعم",
+  "expected": "صبخة العرب",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "similar-letter",
+  "district": "سيترة بحرية - قرب مدرسة النور",
+  "expected": "سيطرة بحرية",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "no-spaces",
+  "district": "شارعالميثاق",
+  "expected": "شارع الميثاق",
+  "details": ""
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "missing-letter",
+  "district": "صناية حمدان - خلف فندق بابل",
+  "expected": "صناعية حمدان",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "glued-to-address",
+  "district": "محطة قطارقرب جامع الرحمن",
+  "expected": "محطة قطار",
+  "details": "قرب جامع الرحمن"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "doubled-letter",
+  "district": "الحياانية - خلف فندق بابل",
+  "expected": "الحيانية",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "glued-governorate",
+  "district": "البصرةطوبة ونخيلة خلف فندق بابل",
+  "expected": "طوبة ونخيلة",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "swapped-letters",
+  "district": "ميانء ام قصر - مقابل مستشفى الولادة",
+  "expected": "ميناء ام قصر",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "FUHOOD",
+  "state": "BAS",
+  "kind": "typo-and-glued",
+  "district": "شارع الوود-قرب جامع الرحمن",
+  "expected": "شارع الوفود",
+  "details": "قرب جامع الرحمن"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "similar-letter",
+  "district": "قريطاق - مقابل مستشفى الولادة",
+  "expected": "قريتاق",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "no-spaces",
+  "district": "كردهرش",
+  "expected": "كرده رش",
+  "details": ""
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "missing-letter",
+  "district": "كوري سلام - قرب مدرسة النور",
+  "expected": "كوتري سلام",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "glued-to-address",
+  "district": "رابرينقرب مدرسة النور",
+  "expected": "رابرين",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "doubled-letter",
+  "district": "شاررع برتي - شارع المطاعم",
+  "expected": "شارع برتي",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "glued-governorate",
+  "district": "أربيلغير محدد قرب مدرسة النور",
+  "expected": "غير محدد",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "swapped-letters",
+  "district": "كوروكسك - مقابل مستشفى الولادة",
+  "expected": "كوركوسك",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "typo-and-glued",
+  "district": "ميكه سور-مقابل مستشفى الولادة",
+  "expected": "ميركه سور",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "similar-letter",
+  "district": "طريق الموسل - قرب مدرسة النور",
+  "expected": "طريق الموصل",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "no-spaces",
+  "district": "طريقمخمور",
+  "expected": "طريق مخمور",
+  "details": ""
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "missing-letter",
+  "district": "خليان - شارع المطاعم",
+  "expected": "خليفان",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "glued-to-address",
+  "district": "مام زاوةمقابل مستشفى الولادة",
+  "expected": "مام زاوة",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "doubled-letter",
+  "district": "طريق كسنززان - قرب مدرسة النور",
+  "expected": "طريق كسنزان",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "glued-governorate",
+  "district": "أربيلهاوكاري مقابل مستشفى الولادة",
+  "expected": "هاوكاري",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "swapped-letters",
+  "district": "وزيارن - مقابل مستشفى الولادة",
+  "expected": "وزيران",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "typo-and-glued",
+  "district": "قورتان-خلف فندق بابل",
+  "expected": "قوريتان",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "similar-letter",
+  "district": "طريك كويه - خلف فندق بابل",
+  "expected": "طريق كويه",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "no-spaces",
+  "district": "طريقبنصلاوة",
+  "expected": "طريق بنصلاوة",
+  "details": ""
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "missing-letter",
+  "district": "رونكي - مقابل مستشفى الولادة",
+  "expected": "روناكي",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "KHAYAL",
+  "state": "ARB",
+  "kind": "glued-to-address",
+  "district": "خانزادمقابل مستشفى الولادة",
+  "expected": "خانزاد",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "doubled-letter",
+  "district": "ميثم / التممار - مقابل مستشفى الولادة",
+  "expected": "ميثم / التمار",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "glued-governorate",
+  "district": "النجفالجمهوريه كوفه شارع المطاعم",
+  "expected": "الجمهوريه كوفه",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "swapped-letters",
+  "district": "شارع المنثى - شارع المطاعم",
+  "expected": "شارع المثنى",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "typo-and-glued",
+  "district": "العبسية-قرب جامع الرحمن",
+  "expected": "العباسية",
+  "details": "قرب جامع الرحمن"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "similar-letter",
+  "district": "ام عباصيات - مقابل مستشفى الولادة",
+  "expected": "ام عباسيات",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "no-spaces",
+  "district": "ابوصخير",
+  "expected": "ابو صخير",
+  "details": ""
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "missing-letter",
+  "district": "البركية - مقابل مستشفى الولادة",
+  "expected": "البراكية",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "glued-to-address",
+  "district": "شارع زين العابدينقرب مدرسة النور",
+  "expected": "شارع زين العابدين",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "doubled-letter",
+  "district": "القزووينية - قرب مدرسة النور",
+  "expected": "القزوينية",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "glued-governorate",
+  "district": "النجفخان المخضر قرب جامع الرحمن",
+  "expected": "خان المخضر",
+  "details": "قرب جامع الرحمن"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "swapped-letters",
+  "district": "بنات السحن - قرب مدرسة النور",
+  "expected": "بنات الحسن",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "typo-and-glued",
+  "district": "الحيرية-قرب مدرسة النور",
+  "expected": "الحيدرية",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "similar-letter",
+  "district": "شارع الرصول - شارع المطاعم",
+  "expected": "شارع الرسول",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "no-spaces",
+  "district": "جسرالامامعلي",
+  "expected": "جسر الامام علي",
+  "details": ""
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "missing-letter",
+  "district": "شارع القعة - قرب مدرسة النور",
+  "expected": "شارع القطعة",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "glued-to-address",
+  "district": "معمل البيبسيمقابل مستشفى الولادة",
+  "expected": "معمل البيبسي",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "doubled-letter",
+  "district": "جريوويه - قرب مدرسة النور",
+  "expected": "جريويه",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "glued-governorate",
+  "district": "النجفشارع الجنسية مقابل مستشفى الولادة",
+  "expected": "شارع الجنسية",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "swapped-letters",
+  "district": "خان الصن - قرب مدرسة النور",
+  "expected": "خان النص",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "RIYAM",
+  "state": "NJF",
+  "kind": "typo-and-glued",
+  "district": "مستفى الصدر-شارع المطاعم",
+  "expected": "مستشفى الصدر",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "similar-letter",
+  "district": "الصراي أسواق فريش - قرب مدرسة النور",
+  "expected": "السراي أسواق فريش",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "no-spaces",
+  "district": "القدسقريهعداي",
+  "expected": "القدس قريه عداي",
+  "details": ""
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "missing-letter",
+  "district": "المقادية - مقابل مستشفى الولادة",
+  "expected": "المقدادية",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "glued-to-address",
+  "district": "منقطة نوفلقرب جامع الرحمن",
+  "expected": "منقطة نوفل",
+  "details": "قرب جامع الرحمن"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "doubled-letter",
+  "district": "تقااطع القدس - قرب جامع الرحمن",
+  "expected": "تقاطع القدس",
+  "details": "قرب جامع الرحمن"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "glued-governorate",
+  "district": "ديالىالمفرك جامع الشافعي خلف فندق بابل",
+  "expected": "المفرك جامع الشافعي",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "swapped-letters",
+  "district": "الحي فلكه الشدهاء - مقابل مستشفى الولادة",
+  "expected": "الحي فلكه الشهداء",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "typo-and-glued",
+  "district": "الحسويه-خلف فندق بابل",
+  "expected": "الحساويه",
+  "details": "خلف فندق بابل"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "similar-letter",
+  "district": "الأمين مدرسه المصاعي - قرب مدرسة النور",
+  "expected": "الأمين مدرسه المساعي",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "no-spaces",
+  "district": "تقاطعالجيزاني",
+  "expected": "تقاطع الجيزاني",
+  "details": ""
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "missing-letter",
+  "district": "فلكة مصطفى الجاد - شارع المطاعم",
+  "expected": "فلكة مصطفى الجواد",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "glued-to-address",
+  "district": "بهزر السيطره الجنوبيهشارع المطاعم",
+  "expected": "بهزر السيطره الجنوبيه",
+  "details": "شارع المطاعم"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "doubled-letter",
+  "district": "السرراي الدفاع المدني - مقابل مستشفى الولادة",
+  "expected": "السراي الدفاع المدني",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "glued-governorate",
+  "district": "ديالىجديدة الشط قرب مدرسة النور",
+  "expected": "جديدة الشط",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "swapped-letters",
+  "district": "شارع المسشتفى الجوازات - قرب جامع الرحمن",
+  "expected": "شارع المستشفى الجوازات",
+  "details": "قرب جامع الرحمن"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "typo-and-glued",
+  "district": "الطبو العقار-قرب مدرسة النور",
+  "expected": "الطابو العقار",
+  "details": "قرب مدرسة النور"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "similar-letter",
+  "district": "حد مكصر - قرب جامع الرحمن",
+  "expected": "حد مكسر",
+  "details": "قرب جامع الرحمن"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "no-spaces",
+  "district": "تقاطعالبلدة",
+  "expected": "تقاطع البلدة",
+  "details": ""
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "missing-letter",
+  "district": "المرك مركز الوحده - مقابل مستشفى الولادة",
+  "expected": "المفرك مركز الوحده",
+  "details": "مقابل مستشفى الولادة"
+ },
+ {
+  "company": "TEST",
+  "state": "DYL",
+  "kind": "glued-to-address",
+  "district": "صناعه حطينقرب جامع الرحمن",
+  "expected": "صناعه حطين",
+  "details": "قرب جامع الرحمن"
+ }
+]

@@ -7,7 +7,7 @@ from collections import Counter
 from contextlib import closing
 from pathlib import Path
 
-from .normalization import normalize
+from .normalization import compact_key, normalize
 from .xlsx_reader import records
 
 CITY_HEADERS = {
@@ -156,8 +156,10 @@ class Catalog:
         return self.by_company.get(company.upper(), {}).get(state_code.upper(), [])
 
     def state_code_for(self, value: str) -> str | None:
-        key = normalize(value)
+        key = compact_key(value)
+        if not key:
+            return None
         for code, names in self.states.items():
-            if key in (normalize(code), normalize(names["name_en"]), normalize(names["name_ar"])):
+            if key in (compact_key(code), compact_key(names["name_en"]), compact_key(names["name_ar"])):
                 return code
         return None
