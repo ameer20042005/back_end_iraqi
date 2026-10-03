@@ -643,6 +643,31 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
     return unresolved(case)
 
 
+def text_support(text: str, name: str) -> float:
+    """How closely the text spells `name` (0..1): best window similarity, by letters and by sound.
+
+    An AI pick is only trusted when the text actually writes it, even with typos or glued
+    words. A plausible-sounding district that the text never mentions ("البصره" -> "الزبير")
+    scores low. Real typos in the hard-case set score 0.8 or more; such picks 0.71 or less.
+    """
+    keys = [key for _, _, key in _tokens(text)]
+    glued = "".join(keys)
+    words = phrase_key(name).split()
+    best = 0.0
+    for form in filter(None, (words, without_label(words))):
+        target = " ".join(form)
+        compact = target.replace(" ", "")
+        if len(compact) >= _MIN_FUZZY_KEY and (compact in glued or sound_key(compact) in sound_key(glued)):
+            return 1.0
+        for length in range(1, len(keys) + 1):
+            for start in range(len(keys) - length + 1):
+                window = " ".join(keys[start:start + length])
+                joined = window.replace(" ", "")
+                best = max(best, _similarity(target, window), _similarity(compact, joined),
+                           _similarity(sound_key(compact), sound_key(joined)))
+    return best
+
+
 def candidate_names(text: str, allowed: list[dict], limit: int = 20) -> list[str]:
     """Shortlist for the LLM: catalog names closest to any run of words in the text.
 

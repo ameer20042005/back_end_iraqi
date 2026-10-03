@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .catalog import Catalog
 from .llm import LLMClient, LLMError
-from .matching import _strip_prefix, candidate_names, match_case, unresolved
+from .matching import _strip_prefix, candidate_names, match_case, text_support, unresolved
 from .models import CaseRequest, CaseResponse, CorrectionRequest, CorrectionResponse
 from .normalization import normalize, phrase_key
 
@@ -23,6 +23,8 @@ _LARGE_REQUEST = 100
 # Matches at or above this confidence (exact, normalized, clean split, typo tier)
 # are trusted over a different AI pick; below it the AI decides.
 _AI_REVIEW = 0.9
+# A new AI pick must be written in the text (typos allowed); see text_support.
+_AI_SUPPORT = 0.78
 
 # Legacy/source-sheet governorate codes seen in imported Excel files.  The
 # catalog uses the canonical codes from governorates.xlsx; these aliases are
@@ -240,6 +242,13 @@ class CorrectionService:
                 # outranks a small model's different pick ("صبخة الرب" is "صبخة العرب").
                 results[case.excelSequence] = suggestion.model_copy(update={
                     "reason": f"{suggestion.reason} AI suggested {name}; catalog spelling match kept."})
+                continue
+            if (name != suggestion.correctDistrict and
+                    text_support(f"{case.district} {case.address}", name) < _AI_SUPPORT):
+                # A small model fills gaps with plausible districts the text never names
+                # ("جسر ديالى" -> "الاعظمية"); unresolved is safer than a wrong delivery.
+                results[case.excelSequence] = self._fallback(
+                    suggestion, case, f"AI pick {name} is not written in the text.", None)
                 continue
             remainder = _strip_prefix(case.district, name)
             address = _strip_prefix(case.address, name)
