@@ -334,8 +334,8 @@ def test_state_name_for_another_governorate_is_rejected(catalog, state_name):
     ("الكرادة", "الكراده"), ("الكرادة", "كرادة"), ("المنصور", "منصور"), ("أربيل", "اربيل"),
     ("إسكان", "اسكان"), ("آمرلي", "امرلي"), ("الموانئ", "الموانى"), ("الموانئ", "الموانيء"),
     ("كربلاء", "كربلا"), ("مستشفى", "مستشفي"), ("کربلاء", "كربلاء"), ("الحی", "الحي"),
-    ("گولي", "كولي"), ("چوار", "جوار"), ("پيرمام", "بيرمام"), ("ڤيان", "فيان"),
-    ("ئاشتي", "اشتي"), ("ئاسودة", "اسودة"), ("الكـرادة", "الكرادة"), ("الكَرّادة", "الكرادة"),
+    ("گال", "كال"), ("باچر", "باجر"),
+    ("الكـرادة", "الكرادة"), ("الكَرّادة", "الكرادة"),
     ("شارع ٤٠", "شارع 40"), ("شارع ۴۰", "شارع 40"), ("الادريسي / الكرادة", "الادريسي الكرادة"),
     ("ابو غريب - الشيحه", "ابو غريب الشيحه"), ("بيتاسي.دهوك", "بيتاسي دهوك"), ("  الكرادة  ", "الكرادة"),
 ])
@@ -358,8 +358,8 @@ def test_compact_key_ignores_spaces(first, second):
 
 
 def test_surface_key_keeps_letters_as_written():
-    assert surface_key("گولي  شار") == "گولي شار"
-    assert surface_key("گولي شار") != surface_key("كولي شار")
+    assert surface_key("باچر  الصبح") == "باچر الصبح"
+    assert surface_key("باچر الصبح") != surface_key("باجر الصبح")
     assert surface_key("الكـرادة") == "الكرادة"
 
 
@@ -431,6 +431,8 @@ def test_llm_request_uses_json_schema_limited_to_catalog_names(monkeypatch):
     assert set(item["properties"]["correctDistrict"]["enum"]) == {"الشطرة", "الناصرية", "شطره"}
     assert item["properties"]["status"]["enum"] == ["AI_MATCH", "SPLIT_ADDRESS", "UNRESOLVED"]
     assert body["max_tokens"] >= 1024 and body["temperature"] == 0
+    assert body["reasoning_effort"] == "none"
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
 
 
 @pytest.mark.parametrize("status", [400, 422])
@@ -438,6 +440,9 @@ def test_llm_retries_without_schema_when_server_rejects_it(monkeypatch, status):
     sent = _client_with(monkeypatch, [_Response(status, ""), _Response(200, ANSWER)])
     assert _resolve()[0]["excelSequence"] == 1
     assert "response_format" in sent[0]["json"] and "response_format" not in sent[1]["json"]
+    assert sent[0]["json"]["reasoning_effort"] == sent[1]["json"]["reasoning_effort"] == "none"
+    assert sent[0]["json"]["chat_template_kwargs"] == sent[1]["json"]["chat_template_kwargs"] == {
+        "enable_thinking": False}
 
 
 @pytest.mark.parametrize("base_url, expected", [

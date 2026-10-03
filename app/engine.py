@@ -37,6 +37,7 @@ from typing import AsyncGenerator, Dict, List, Optional, Union
 import httpx
 
 from app.config import settings
+from app.llm_options import normal_generation_options
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,7 @@ class LLMEngine:
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": 0.0,  # حتمي دائماً — sampling = انهيار مخرجات (مجرَّب)
+            **normal_generation_options(),
         }
         if stream:
             body["stream"] = True

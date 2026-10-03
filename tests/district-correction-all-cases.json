@@ -1,0 +1,1860 @@
+{
+  "companyName": "ALZAEEM",
+  "cases": [
+    {
+      "excelSequence": 2,
+      "stateName": "ديالي",
+      "stateCode": "DYL",
+      "district": "ديالى قريه صخر",
+      "address": ""
+    },
+    {
+      "excelSequence": 3,
+      "stateName": "الديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه حي رفعت",
+      "address": ""
+    },
+    {
+      "excelSequence": 4,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد نفق الشرطه",
+      "address": ""
+    },
+    {
+      "excelSequence": 5,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "الحله بابل معمل الغاز",
+      "address": ""
+    },
+    {
+      "excelSequence": 6,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الامين الثانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 7,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "النجف الحولي",
+      "address": ""
+    },
+    {
+      "excelSequence": 8,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الحريه",
+      "address": ""
+    },
+    {
+      "excelSequence": 9,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "نجف حي العسكري",
+      "address": ""
+    },
+    {
+      "excelSequence": 10,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل شارع 60",
+      "address": ""
+    },
+    {
+      "excelSequence": 11,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد شارع فلسطين",
+      "address": ""
+    },
+    {
+      "excelSequence": 12,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "الناصريه شارع الامام علي",
+      "address": ""
+    },
+    {
+      "excelSequence": 13,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "اللطيفيه / المزرعه",
+      "address": ""
+    },
+    {
+      "excelSequence": 14,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "الناصريه قضاء الغراف",
+      "address": ""
+    },
+    {
+      "excelSequence": 15,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل الكفل",
+      "address": ""
+    },
+    {
+      "excelSequence": 16,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد حي الاعلام",
+      "address": ""
+    },
+    {
+      "excelSequence": 17,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الصرافيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 18,
+      "stateName": "صلاح الدين",
+      "stateCode": "SAH",
+      "district": "صلاح الدين الشرقاط",
+      "address": ""
+    },
+    {
+      "excelSequence": 19,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد المعلمين",
+      "address": ""
+    },
+    {
+      "excelSequence": 20,
+      "stateName": "موصل",
+      "stateCode": "MOS",
+      "district": "موصل كوكجلي",
+      "address": ""
+    },
+    {
+      "excelSequence": 21,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الشعله",
+      "address": ""
+    },
+    {
+      "excelSequence": 22,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الصويره",
+      "address": ""
+    },
+    {
+      "excelSequence": 23,
+      "stateName": "الانبار",
+      "stateCode": "ANB",
+      "district": "الانبار حي الشرطه",
+      "address": ""
+    },
+    {
+      "excelSequence": 24,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد المعالف",
+      "address": ""
+    },
+    {
+      "excelSequence": 25,
+      "stateName": "البصرة",
+      "stateCode": "BAS",
+      "district": "البصره الزبير",
+      "address": ""
+    },
+    {
+      "excelSequence": 26,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد البياع",
+      "address": ""
+    },
+    {
+      "excelSequence": 27,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الشعب",
+      "address": ""
+    },
+    {
+      "excelSequence": 28,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "النجف ناحيه الحيره",
+      "address": ""
+    },
+    {
+      "excelSequence": 29,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل عوفي",
+      "address": ""
+    },
+    {
+      "excelSequence": 30,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد 14 رمضان",
+      "address": ""
+    },
+    {
+      "excelSequence": 31,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط العزيزيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 32,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط العزيزيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 33,
+      "stateName": "كوت",
+      "stateCode": "KOT",
+      "district": "كوت الخاجيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 34,
+      "stateName": "عمارة",
+      "stateCode": "AMA",
+      "district": "العماره نهاوند",
+      "address": ""
+    },
+    {
+      "excelSequence": 35,
+      "stateName": "ميسان",
+      "stateCode": "AMA",
+      "district": "ميسان الميمونه",
+      "address": ""
+    },
+    {
+      "excelSequence": 36,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الرحمانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 37,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد البلديات",
+      "address": ""
+    },
+    {
+      "excelSequence": 38,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره القبله",
+      "address": ""
+    },
+    {
+      "excelSequence": 39,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الجديده",
+      "address": ""
+    },
+    {
+      "excelSequence": 40,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد ابو غريب",
+      "address": ""
+    },
+    {
+      "excelSequence": 41,
+      "stateName": "موصل",
+      "stateCode": "MOS",
+      "district": "موصل ناحيه كياره",
+      "address": ""
+    },
+    {
+      "excelSequence": 42,
+      "stateName": "سامراء",
+      "stateCode": "SAH",
+      "district": "سامراء حي الشهداء",
+      "address": ""
+    },
+    {
+      "excelSequence": 43,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء حي الاطباء",
+      "address": ""
+    },
+    {
+      "excelSequence": 44,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء شارع  الشيخ احمد الوائلي",
+      "address": ""
+    },
+    {
+      "excelSequence": 45,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "النجف الاشرف حي الجامعه",
+      "address": ""
+    },
+    {
+      "excelSequence": 46,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل الحصوه",
+      "address": ""
+    },
+    {
+      "excelSequence": 47,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره الزبير حي الخطوه",
+      "address": ""
+    },
+    {
+      "excelSequence": 48,
+      "stateName": "صلاح الدين",
+      "stateCode": "SAH",
+      "district": "صلاح الدين سامراء",
+      "address": ""
+    },
+    {
+      "excelSequence": 49,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "النجف ناحيه الحيره",
+      "address": ""
+    },
+    {
+      "excelSequence": 50,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل شارع مارنيا",
+      "address": ""
+    },
+    {
+      "excelSequence": 51,
+      "stateName": "ميسان",
+      "stateCode": "AMA",
+      "district": "ميسان العابجيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 52,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد اليرموك",
+      "address": ""
+    },
+    {
+      "excelSequence": 53,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء حولي 100",
+      "address": ""
+    },
+    {
+      "excelSequence": 54,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره الجمعيات",
+      "address": ""
+    },
+    {
+      "excelSequence": 55,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره الطويسه",
+      "address": ""
+    },
+    {
+      "excelSequence": 56,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره",
+      "address": ""
+    },
+    {
+      "excelSequence": 57,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد مدينه الصدر",
+      "address": ""
+    },
+    {
+      "excelSequence": 58,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الشرطه الرابعه",
+      "address": ""
+    },
+    {
+      "excelSequence": 59,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد حي الجهاد",
+      "address": ""
+    },
+    {
+      "excelSequence": 60,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "الدوره ابو طياره",
+      "address": ""
+    },
+    {
+      "excelSequence": 61,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الكوت",
+      "address": ""
+    },
+    {
+      "excelSequence": 62,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد مدينه الصدر",
+      "address": ""
+    },
+    {
+      "excelSequence": 63,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد حي البتول",
+      "address": ""
+    },
+    {
+      "excelSequence": 64,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الحي",
+      "address": ""
+    },
+    {
+      "excelSequence": 65,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد شارع المطار",
+      "address": ""
+    },
+    {
+      "excelSequence": 66,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "الشعب الاسواق المركزيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 67,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء الحولي",
+      "address": ""
+    },
+    {
+      "excelSequence": 68,
+      "stateName": "ميسان",
+      "stateCode": "AMA",
+      "district": "ميسان قطاع 30",
+      "address": ""
+    },
+    {
+      "excelSequence": 69,
+      "stateName": "ديالي",
+      "stateCode": "DYL",
+      "district": "ديالى شهربان",
+      "address": ""
+    },
+    {
+      "excelSequence": 70,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الحسينيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 71,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الطارميه",
+      "address": ""
+    },
+    {
+      "excelSequence": 72,
+      "stateName": "الحلة",
+      "stateCode": "BBL",
+      "district": "الحله شارع فاطمة الزهراء",
+      "address": ""
+    },
+    {
+      "excelSequence": 73,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد ابو دشير",
+      "address": ""
+    },
+    {
+      "excelSequence": 74,
+      "stateName": "أربيل",
+      "stateCode": "ARB",
+      "district": "اربيل عين كاوه",
+      "address": ""
+    },
+    {
+      "excelSequence": 75,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل شارع 80",
+      "address": ""
+    },
+    {
+      "excelSequence": 76,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الرضوانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 77,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "كوفه ميثم التمار",
+      "address": ""
+    },
+    {
+      "excelSequence": 78,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الزعفرانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 79,
+      "stateName": "كركوك",
+      "stateCode": "KRK",
+      "district": "كركوك الماس",
+      "address": ""
+    },
+    {
+      "excelSequence": 80,
+      "stateName": "الانبار",
+      "stateCode": "ANB",
+      "district": "فلوجه حي الشهداء",
+      "address": ""
+    },
+    {
+      "excelSequence": 81,
+      "stateName": "سليمانية",
+      "stateCode": "SMH",
+      "district": "السلمانيه برزييكاني",
+      "address": ""
+    },
+    {
+      "excelSequence": 82,
+      "stateName": "كركوك",
+      "stateCode": "KRK",
+      "district": "كركوك طوز خورماتو",
+      "address": ""
+    },
+    {
+      "excelSequence": 83,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الزعفرانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 84,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الزبيديه",
+      "address": ""
+    },
+    {
+      "excelSequence": 85,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "البلديات تقاطع الكهرباء",
+      "address": ""
+    },
+    {
+      "excelSequence": 86,
+      "stateName": "ذي قار",
+      "stateCode": "NAS",
+      "district": "ذي قار الرفاعي",
+      "address": ""
+    },
+    {
+      "excelSequence": 87,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الغزاليه",
+      "address": ""
+    },
+    {
+      "excelSequence": 88,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد مدينه الصدر",
+      "address": ""
+    },
+    {
+      "excelSequence": 89,
+      "stateName": "ذي قار",
+      "stateCode": "NAS",
+      "district": "ذي قار الشطره",
+      "address": ""
+    },
+    {
+      "excelSequence": 90,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الدوره",
+      "address": ""
+    },
+    {
+      "excelSequence": 91,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "ديوانيه شارع 30",
+      "address": ""
+    },
+    {
+      "excelSequence": 92,
+      "stateName": "صلاح الدين",
+      "stateCode": "SAH",
+      "district": "صلاح الدين بلد",
+      "address": ""
+    },
+    {
+      "excelSequence": 93,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره المدينه",
+      "address": ""
+    },
+    {
+      "excelSequence": 94,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الزعفرانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 95,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد علي الصالح",
+      "address": ""
+    },
+    {
+      "excelSequence": 96,
+      "stateName": "الانبار",
+      "stateCode": "ANB",
+      "district": "الانبار البغدادي",
+      "address": ""
+    },
+    {
+      "excelSequence": 97,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "الناصريه الاسكان",
+      "address": ""
+    },
+    {
+      "excelSequence": 98,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد سبع البور",
+      "address": ""
+    },
+    {
+      "excelSequence": 99,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الزعفرانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 100,
+      "stateName": "كركوك",
+      "stateCode": "KRK",
+      "district": "كركوك الحويجه",
+      "address": ""
+    },
+    {
+      "excelSequence": 101,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الاعظميه",
+      "address": ""
+    },
+    {
+      "excelSequence": 102,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد تقاطع درويش",
+      "address": ""
+    },
+    {
+      "excelSequence": 103,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد كراده داخل",
+      "address": ""
+    },
+    {
+      "excelSequence": 104,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الحسينيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 105,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الزعفرانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 106,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد حي الجامعه",
+      "address": ""
+    },
+    {
+      "excelSequence": 107,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "كوفه فلكت ملح",
+      "address": ""
+    },
+    {
+      "excelSequence": 108,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد العبيدي",
+      "address": ""
+    },
+    {
+      "excelSequence": 109,
+      "stateName": "الديوانية",
+      "stateCode": "DWN",
+      "district": "ديوانيه التقيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 110,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الصويره",
+      "address": ""
+    },
+    {
+      "excelSequence": 111,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد المحموديه",
+      "address": ""
+    },
+    {
+      "excelSequence": 112,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "الناصريه الشطره",
+      "address": ""
+    },
+    {
+      "excelSequence": 113,
+      "stateName": "صلاح الدين",
+      "stateCode": "SAH",
+      "district": "صلاح الدين قضاء العلم",
+      "address": ""
+    },
+    {
+      "excelSequence": 114,
+      "stateName": "صلاح الدين",
+      "stateCode": "SAH",
+      "district": "صلاح الدين الاسحاقي",
+      "address": ""
+    },
+    {
+      "excelSequence": 115,
+      "stateName": "ديالي",
+      "stateCode": "DYL",
+      "district": "ديالى بعقوبه",
+      "address": ""
+    },
+    {
+      "excelSequence": 116,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل الحصوه",
+      "address": ""
+    },
+    {
+      "excelSequence": 117,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "النجف العباسيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 118,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه ام الخيل",
+      "address": ""
+    },
+    {
+      "excelSequence": 119,
+      "stateName": "الانبار",
+      "stateCode": "ANB",
+      "district": "الانبار حديثه",
+      "address": ""
+    },
+    {
+      "excelSequence": 120,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره القديمه",
+      "address": ""
+    },
+    {
+      "excelSequence": 121,
+      "stateName": "ديالي",
+      "stateCode": "DYL",
+      "district": "ديالى السعديه",
+      "address": ""
+    },
+    {
+      "excelSequence": 122,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "ناصريه الحبوبي",
+      "address": ""
+    },
+    {
+      "excelSequence": 123,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "بصره القرنه",
+      "address": ""
+    },
+    {
+      "excelSequence": 124,
+      "stateName": "الانبار",
+      "stateCode": "ANB",
+      "district": "الانبار الكرمه",
+      "address": ""
+    },
+    {
+      "excelSequence": 125,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره القبله",
+      "address": ""
+    },
+    {
+      "excelSequence": 126,
+      "stateName": "رمادي",
+      "stateCode": "ANB",
+      "district": "الرمادي شارع البريد",
+      "address": ""
+    },
+    {
+      "excelSequence": 127,
+      "stateName": "كوت",
+      "stateCode": "KOT",
+      "district": "كوت الخاجيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 128,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه حي الجامعه",
+      "address": ""
+    },
+    {
+      "excelSequence": 129,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد البلديات لحوم البركه",
+      "address": ""
+    },
+    {
+      "excelSequence": 130,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل جبله",
+      "address": ""
+    },
+    {
+      "excelSequence": 131,
+      "stateName": "سماوة",
+      "stateCode": "SAM",
+      "district": "السماوه 7 نيسان",
+      "address": ""
+    },
+    {
+      "excelSequence": 132,
+      "stateName": "ديالي",
+      "stateCode": "DYL",
+      "district": "ديالى  الخالص",
+      "address": ""
+    },
+    {
+      "excelSequence": 133,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد مدينه الصدر",
+      "address": ""
+    },
+    {
+      "excelSequence": 134,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "ناصريه مدينه الصدر",
+      "address": ""
+    },
+    {
+      "excelSequence": 135,
+      "stateName": "رمادي",
+      "stateCode": "ANB",
+      "district": "الرمادي شارع60",
+      "address": ""
+    },
+    {
+      "excelSequence": 136,
+      "stateName": "الانبار",
+      "stateCode": "ANB",
+      "district": "الانبار قضاء حديثه",
+      "address": ""
+    },
+    {
+      "excelSequence": 137,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد مدينه الصدر",
+      "address": ""
+    },
+    {
+      "excelSequence": 138,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره الجزائر",
+      "address": ""
+    },
+    {
+      "excelSequence": 139,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد شارع الجزيره",
+      "address": ""
+    },
+    {
+      "excelSequence": 140,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل الحمزه الغربي",
+      "address": ""
+    },
+    {
+      "excelSequence": 141,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد البياع",
+      "address": ""
+    },
+    {
+      "excelSequence": 142,
+      "stateName": "نجف",
+      "stateCode": "NJF",
+      "district": "النجف البراكيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 143,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء البناء الجاهز",
+      "address": ""
+    },
+    {
+      "excelSequence": 144,
+      "stateName": "دهوك",
+      "stateCode": "DOH",
+      "district": "دهوك زري لاند",
+      "address": ""
+    },
+    {
+      "excelSequence": 145,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره الجبيله",
+      "address": ""
+    },
+    {
+      "excelSequence": 146,
+      "stateName": "ذي قار",
+      "stateCode": "NAS",
+      "district": "ذي قار الشطره شارع زكي الخياط",
+      "address": ""
+    },
+    {
+      "excelSequence": 147,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد مدينه الصدر",
+      "address": ""
+    },
+    {
+      "excelSequence": 148,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل المحاويل",
+      "address": ""
+    },
+    {
+      "excelSequence": 149,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد صليخ",
+      "address": ""
+    },
+    {
+      "excelSequence": 150,
+      "stateName": "سامراء",
+      "stateCode": "SAH",
+      "district": "سامراء",
+      "address": ""
+    },
+    {
+      "excelSequence": 151,
+      "stateName": "كركوك",
+      "stateCode": "KRK",
+      "district": "كركوك دوميز",
+      "address": ""
+    },
+    {
+      "excelSequence": 152,
+      "stateName": "موصل",
+      "stateCode": "MOS",
+      "district": "الموصل حي الاخاء",
+      "address": ""
+    },
+    {
+      "excelSequence": 153,
+      "stateName": "الانبار",
+      "stateCode": "ANB",
+      "district": "الفلوجه حي العسكري",
+      "address": ""
+    },
+    {
+      "excelSequence": 154,
+      "stateName": "صلاح الدين",
+      "stateCode": "SAH",
+      "district": "صلاح الدين الاسحاقي",
+      "address": ""
+    },
+    {
+      "excelSequence": 155,
+      "stateName": "موصل",
+      "stateCode": "MOS",
+      "district": "موصل حي المعلمين",
+      "address": ""
+    },
+    {
+      "excelSequence": 156,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد شهداء البياع",
+      "address": ""
+    },
+    {
+      "excelSequence": 157,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الوشاش",
+      "address": ""
+    },
+    {
+      "excelSequence": 158,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "النجف حي السلام",
+      "address": ""
+    },
+    {
+      "excelSequence": 159,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الحريه",
+      "address": ""
+    },
+    {
+      "excelSequence": 160,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه الحمزه الشرقي",
+      "address": ""
+    },
+    {
+      "excelSequence": 161,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الصويره",
+      "address": ""
+    },
+    {
+      "excelSequence": 162,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الشالجيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 163,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء حي الصمود",
+      "address": ""
+    },
+    {
+      "excelSequence": 164,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "جسر ديالى",
+      "address": ""
+    },
+    {
+      "excelSequence": 165,
+      "stateName": "الانبار",
+      "stateCode": "ANB",
+      "district": "الانبار حبانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 166,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "الناصريه الشطره",
+      "address": ""
+    },
+    {
+      "excelSequence": 167,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه قضاء غماس",
+      "address": ""
+    },
+    {
+      "excelSequence": 168,
+      "stateName": "سماوة",
+      "stateCode": "SAM",
+      "district": "السماوه السكك",
+      "address": ""
+    },
+    {
+      "excelSequence": 169,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء طوريج",
+      "address": ""
+    },
+    {
+      "excelSequence": 170,
+      "stateName": "كركوك",
+      "stateCode": "KRK",
+      "district": "كركوك حي اسرى",
+      "address": ""
+    },
+    {
+      "excelSequence": 171,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "بصره حي الحسين",
+      "address": ""
+    },
+    {
+      "excelSequence": 172,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الاندلس",
+      "address": ""
+    },
+    {
+      "excelSequence": 173,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره قضاء ابي الخصيب",
+      "address": ""
+    },
+    {
+      "excelSequence": 174,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الحريه",
+      "address": ""
+    },
+    {
+      "excelSequence": 175,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد بوب الشام",
+      "address": ""
+    },
+    {
+      "excelSequence": 176,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الشرقيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 177,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "نجف حي المكرمه",
+      "address": ""
+    },
+    {
+      "excelSequence": 178,
+      "stateName": "الحلة",
+      "stateCode": "BBL",
+      "district": "الحله حي الصحه",
+      "address": ""
+    },
+    {
+      "excelSequence": 179,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد البياع",
+      "address": ""
+    },
+    {
+      "excelSequence": 180,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "حي الجهاد مجمع النسيم",
+      "address": ""
+    },
+    {
+      "excelSequence": 181,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد حي الفرات",
+      "address": ""
+    },
+    {
+      "excelSequence": 182,
+      "stateName": "سامراء",
+      "stateCode": "SAH",
+      "district": "سامراء سوق مريم",
+      "address": ""
+    },
+    {
+      "excelSequence": 183,
+      "stateName": "الحلة",
+      "stateCode": "BBL",
+      "district": "حله شوملي",
+      "address": ""
+    },
+    {
+      "excelSequence": 184,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد جميله",
+      "address": ""
+    },
+    {
+      "excelSequence": 185,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه شارع الوكفه",
+      "address": ""
+    },
+    {
+      "excelSequence": 186,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد النصر",
+      "address": ""
+    },
+    {
+      "excelSequence": 187,
+      "stateName": "عمارة",
+      "stateCode": "AMA",
+      "district": "الاعماره ابو رمانه",
+      "address": ""
+    },
+    {
+      "excelSequence": 188,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الشعب",
+      "address": ""
+    },
+    {
+      "excelSequence": 189,
+      "stateName": "سماوة",
+      "stateCode": "SAM",
+      "district": "السماوه الشراكيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 190,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره الكرمه",
+      "address": ""
+    },
+    {
+      "excelSequence": 191,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "النجف الحيدريه",
+      "address": ""
+    },
+    {
+      "excelSequence": 192,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد حي الجامعه",
+      "address": ""
+    },
+    {
+      "excelSequence": 193,
+      "stateName": "ميسان",
+      "stateCode": "AMA",
+      "district": "ميسان الماجديه",
+      "address": ""
+    },
+    {
+      "excelSequence": 194,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "التاجي المصابيح",
+      "address": ""
+    },
+    {
+      "excelSequence": 195,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل الحله",
+      "address": ""
+    },
+    {
+      "excelSequence": 196,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء حي العسكري",
+      "address": ""
+    },
+    {
+      "excelSequence": 197,
+      "stateName": "عمارة",
+      "stateCode": "AMA",
+      "district": "الاعماره العابجيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 198,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الصويره",
+      "address": ""
+    },
+    {
+      "excelSequence": 199,
+      "stateName": "ذي قار",
+      "stateCode": "NAS",
+      "district": "ذي قار الجبايش",
+      "address": ""
+    },
+    {
+      "excelSequence": 200,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء الفريحه",
+      "address": ""
+    },
+    {
+      "excelSequence": 201,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل المسيب",
+      "address": ""
+    },
+    {
+      "excelSequence": 202,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "ديوانيه سنيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 203,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد مدينه الصدر",
+      "address": ""
+    },
+    {
+      "excelSequence": 204,
+      "stateName": "ديالي",
+      "stateCode": "DYL",
+      "district": "بعقوبه التحرير",
+      "address": ""
+    },
+    {
+      "excelSequence": 205,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "الناصريه الجبايش",
+      "address": ""
+    },
+    {
+      "excelSequence": 206,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل قريه بني ساله",
+      "address": ""
+    },
+    {
+      "excelSequence": 207,
+      "stateName": "كركوك",
+      "stateCode": "KRK",
+      "district": "كركوك الشورجه",
+      "address": ""
+    },
+    {
+      "excelSequence": 208,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره الجنينه",
+      "address": ""
+    },
+    {
+      "excelSequence": 209,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل الكفل",
+      "address": ""
+    },
+    {
+      "excelSequence": 210,
+      "stateName": "ديالي",
+      "stateCode": "DYL",
+      "district": "ديالى جلولاء",
+      "address": ""
+    },
+    {
+      "excelSequence": 211,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "نجف الكوفه",
+      "address": ""
+    },
+    {
+      "excelSequence": 212,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد السعدون",
+      "address": ""
+    },
+    {
+      "excelSequence": 213,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد المنصور",
+      "address": ""
+    },
+    {
+      "excelSequence": 214,
+      "stateName": "ديالي",
+      "stateCode": "DYL",
+      "district": "ديالى بعقوبه",
+      "address": ""
+    },
+    {
+      "excelSequence": 215,
+      "stateName": "ميسان",
+      "stateCode": "AMA",
+      "district": "ميسان حي الخليج",
+      "address": ""
+    },
+    {
+      "excelSequence": 216,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه السدير",
+      "address": ""
+    },
+    {
+      "excelSequence": 217,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره البهادريه",
+      "address": ""
+    },
+    {
+      "excelSequence": 218,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء حي الميلاد",
+      "address": ""
+    },
+    {
+      "excelSequence": 219,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه حي الفرات",
+      "address": ""
+    },
+    {
+      "excelSequence": 220,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره ام قصر",
+      "address": ""
+    },
+    {
+      "excelSequence": 221,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد حي النصر",
+      "address": ""
+    },
+    {
+      "excelSequence": 222,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الطالبيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 223,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء حي الامن",
+      "address": ""
+    },
+    {
+      "excelSequence": 224,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره المربد",
+      "address": ""
+    },
+    {
+      "excelSequence": 225,
+      "stateName": "موصل",
+      "stateCode": "MOS",
+      "district": "الموصل التكليف",
+      "address": ""
+    },
+    {
+      "excelSequence": 226,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد زيونه",
+      "address": ""
+    },
+    {
+      "excelSequence": 227,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه الدغاره",
+      "address": ""
+    },
+    {
+      "excelSequence": 228,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء سواده",
+      "address": ""
+    },
+    {
+      "excelSequence": 229,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الغزاليه",
+      "address": ""
+    },
+    {
+      "excelSequence": 230,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الزعفرانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 231,
+      "stateName": "الحلة",
+      "stateCode": "BBL",
+      "district": "الحله المسيب",
+      "address": ""
+    },
+    {
+      "excelSequence": 232,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "ناصريه شارع المستشفى",
+      "address": ""
+    },
+    {
+      "excelSequence": 233,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره القبله",
+      "address": ""
+    },
+    {
+      "excelSequence": 234,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الزعفرانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 235,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد ابو دشير",
+      "address": ""
+    },
+    {
+      "excelSequence": 236,
+      "stateName": "بابل",
+      "stateCode": "BBL",
+      "district": "بابل المسيب",
+      "address": ""
+    },
+    {
+      "excelSequence": 237,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء الحسينسه",
+      "address": ""
+    },
+    {
+      "excelSequence": 238,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "حي الجهاد",
+      "address": ""
+    },
+    {
+      "excelSequence": 239,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الحسينيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 240,
+      "stateName": "تكريت",
+      "stateCode": "SAH",
+      "district": "تكريت القادسيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 241,
+      "stateName": "المثنى",
+      "stateCode": "SAM",
+      "district": "المثنى حي الاعلام",
+      "address": ""
+    },
+    {
+      "excelSequence": 242,
+      "stateName": "بصرة",
+      "stateCode": "BAS",
+      "district": "البصره حي الاساتذه",
+      "address": ""
+    },
+    {
+      "excelSequence": 243,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء حي المصطفى",
+      "address": ""
+    },
+    {
+      "excelSequence": 244,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط حي الشهداء",
+      "address": ""
+    },
+    {
+      "excelSequence": 245,
+      "stateName": "موصل",
+      "stateCode": "MOS",
+      "district": "موصل حي الحدباء",
+      "address": ""
+    },
+    {
+      "excelSequence": 246,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "الشعب الديوان",
+      "address": ""
+    },
+    {
+      "excelSequence": 247,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد العبيدي",
+      "address": ""
+    },
+    {
+      "excelSequence": 248,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الدوره",
+      "address": ""
+    },
+    {
+      "excelSequence": 249,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الصويره",
+      "address": ""
+    },
+    {
+      "excelSequence": 250,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء حي العباس",
+      "address": ""
+    },
+    {
+      "excelSequence": 251,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط النعمانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 252,
+      "stateName": "ديالي",
+      "stateCode": "DYL",
+      "district": "ديالى بعقوبه",
+      "address": ""
+    },
+    {
+      "excelSequence": 253,
+      "stateName": "ناصرية",
+      "stateCode": "NAS",
+      "district": "ناصريه مدينه الصدر",
+      "address": ""
+    },
+    {
+      "excelSequence": 254,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد منصور",
+      "address": ""
+    },
+    {
+      "excelSequence": 255,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "ديوانيه حي الجامعه",
+      "address": ""
+    },
+    {
+      "excelSequence": 256,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الزعفرانيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 257,
+      "stateName": "المثنى",
+      "stateCode": "SAM",
+      "district": "المثنى حي الجمهوريه",
+      "address": ""
+    },
+    {
+      "excelSequence": 258,
+      "stateName": "كربلاء",
+      "stateCode": "KRB",
+      "district": "كربلاء سيف سعد",
+      "address": ""
+    },
+    {
+      "excelSequence": 259,
+      "stateName": "سماوة",
+      "stateCode": "SAM",
+      "district": "سماوه مجمع ام العصافير",
+      "address": ""
+    },
+    {
+      "excelSequence": 260,
+      "stateName": "واسط",
+      "stateCode": "KOT",
+      "district": "واسط الكوت",
+      "address": ""
+    },
+    {
+      "excelSequence": 261,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الغزاليه",
+      "address": ""
+    },
+    {
+      "excelSequence": 262,
+      "stateName": "ديوانية",
+      "stateCode": "DWN",
+      "district": "الديوانيه الدغاره",
+      "address": ""
+    },
+    {
+      "excelSequence": 263,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الامين",
+      "address": ""
+    },
+    {
+      "excelSequence": 264,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الطالبيه",
+      "address": ""
+    },
+    {
+      "excelSequence": 265,
+      "stateName": "بغداد",
+      "stateCode": "BGD",
+      "district": "بغداد الطارميه",
+      "address": ""
+    },
+    {
+      "excelSequence": 266,
+      "stateName": "النجف",
+      "stateCode": "NJF",
+      "district": "النجف حي العسكري",
+      "address": ""
+    }
+  ]
+}

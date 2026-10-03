@@ -8,12 +8,10 @@ _MARKS = re.compile(r"[ؐ-ًؚ-ٰٟۖ-ۭ]")
 PUNCTUATION = "،؛,;:!؟?./\\|()[]{}-_–—«»\"'`"
 _PUNCT = re.compile("[" + re.escape(PUNCTUATION) + "]+")
 _SPACE = re.compile(r"\s+")
-# Kurdish names often start with a hamza seat that reads as alef (ئاشتي = اشتي).
-_WORD_INITIAL_HAMZA = re.compile(r"(?<!\S)ئا?")
+# Arabic keyboard variants and letters used in Iraqi dialect writing.
 _LETTERS = str.maketrans({
-    "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ؤ": "و", "ئ": "ي", "ی": "ي", "ې": "ي",
-    "ک": "ك", "گ": "ك", "چ": "ج", "پ": "ب", "ڤ": "ف", "ژ": "ز",
-    "ە": "ه", "ۀ": "ه", "ھ": "ه",
+    "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ؤ": "و", "ئ": "ي", "ی": "ي",
+    "ک": "ك", "گ": "ك", "چ": "ج", "پ": "ب",
 })
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "0123456789" * 2)
 
@@ -27,7 +25,6 @@ GOVERNORATE_LABEL = "محافظه"
 def normalize(value: str) -> str:
     value = unicodedata.normalize("NFKC", value or "").strip()
     value = _MARKS.sub("", value).replace("ـ", "")
-    value = _WORD_INITIAL_HAMZA.sub("ا", value)
     value = value.translate(_LETTERS).translate(_DIGITS)
     value = _PUNCT.sub(" ", value)
     return _SPACE.sub(" ", value).strip().casefold()

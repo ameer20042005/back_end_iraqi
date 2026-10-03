@@ -6,6 +6,7 @@ that catalog. Spelling-based matching only assists: it suggests a candidate to t
 LLM, orders the candidate list, and is the fallback when the LLM is unavailable.
 """
 
+import asyncio
 from collections import Counter, defaultdict
 
 from starlette.concurrency import run_in_threadpool
@@ -22,10 +23,12 @@ _FULL_LIST_LIMIT = 150
 
 
 class CorrectionService:
-    def __init__(self, catalog: Catalog, llm: LLMClient, max_llm_cases: int = 100):
+    def __init__(self, catalog: Catalog, llm: LLMClient, max_llm_cases: int = 100,
+                 llm_concurrency: int = 2):
         self.catalog = catalog
         self.llm = llm
         self.max_llm_cases = max_llm_cases
+        self.llm_concurrency = max(1, llm_concurrency)
 
     async def correct(self, request: CorrectionRequest) -> tuple[CorrectionResponse, dict]:
         company = request.companyName.strip().upper()
@@ -34,6 +37,7 @@ class CorrectionService:
         results, llm_groups = await run_in_threadpool(self._match_all, company, request.cases)
 
         sent_to_llm = 0
+        jobs = []
         for code, cases in llm_groups.items():
             allowed = self.catalog.districts(company, code)
             full_names = {item["name"] for item in allowed}
@@ -48,9 +52,20 @@ class CorrectionService:
                 if not chunk:
                     continue
                 suggestions = {case.excelSequence: results[case.excelSequence] for case in chunk}
-                candidates = await run_in_threadpool(self._candidates, chunk, allowed, suggestions)
                 sent_to_llm += len(chunk)
+                jobs.append((code, chunk, allowed, full_names, suggestions))
+
+        # Reserve the case budget before scheduling, so completion order cannot
+        # change which rows receive the AI check. Only bounded batches are active.
+        semaphore = asyncio.Semaphore(self.llm_concurrency)
+
+        async def resolve_batch(job):
+            code, chunk, allowed, full_names, suggestions = job
+            async with semaphore:
+                candidates = await run_in_threadpool(self._candidates, chunk, allowed, suggestions)
                 await self._apply_llm(company, code, chunk, candidates, full_names, suggestions, results)
+
+        await asyncio.gather(*(resolve_batch(job) for job in jobs))
 
         ordered = [results[case.excelSequence] for case in request.cases]
         counts = Counter(result.status for result in ordered)
@@ -63,6 +78,8 @@ class CorrectionService:
     def _match_all(self, company: str, cases: list[CaseRequest]):
         results: dict[int, CaseResponse] = {}
         llm_groups: dict[str, list[CaseRequest]] = defaultdict(list)
+        matched = {}
+        state_lists = {}
         for case in cases:
             code = case.stateCode.strip().upper()
             named = self.catalog.state_code_for(case.stateName) if case.stateName.strip() else None
@@ -70,13 +87,20 @@ class CorrectionService:
             if code not in self.catalog.states or (named is not None and named != code):
                 results[case.excelSequence] = unresolved(case, "Unknown or inconsistent state.", "UNKNOWN_STATE")
                 continue
-            allowed = self.catalog.districts(company, code)
+            if code not in state_lists:
+                state_lists[code] = self.catalog.districts(company, code)
+            allowed = state_lists[code]
             if not allowed:
                 results[case.excelSequence] = unresolved(case, "No districts for this company and state.",
                                                           "EMPTY_DISTRICT_CATALOG")
                 continue
             state = self.catalog.states.get(code, {})
-            result = match_case(case, allowed, (state.get("name_ar"), state.get("name_en")))
+            key = (code, case.district, case.address)
+            if key in matched:
+                result = matched[key].model_copy(update={"excelSequence": case.excelSequence})
+            else:
+                result = match_case(case, allowed, (state.get("name_ar"), state.get("name_en")))
+                matched[key] = result
             results[case.excelSequence] = result
             # Only a district written exactly as in the Excel catalog skips the AI.
             literal = result.status != "UNRESOLVED" and result.correctDistrict == case.district.strip()
@@ -90,9 +114,12 @@ class CorrectionService:
         if len(allowed) <= _FULL_LIST_LIMIT:
             return sorted(item["name"] for item in allowed)
         names = set()
+        seen_texts = set()
         for case in chunk:
-            names.update(candidate_names(" ".join(filter(None, (case.district, case.address))), allowed,
-                                         limit=_CANDIDATES_PER_CASE))
+            text = " ".join(filter(None, (case.district, case.address)))
+            if text not in seen_texts:
+                names.update(candidate_names(text, allowed, limit=_CANDIDATES_PER_CASE))
+                seen_texts.add(text)
             suggestion = suggestions.get(case.excelSequence)
             if suggestion is not None and suggestion.status != "UNRESOLVED":
                 names.add(suggestion.correctDistrict)
@@ -131,13 +158,20 @@ class CorrectionService:
                                                              str(exc), str(exc))
             return
         by_sequence = {}
+        duplicates = set()
         for item in answers:
             if isinstance(item, dict) and type(item.get("excelSequence")) is int:
+                if item["excelSequence"] in by_sequence:
+                    duplicates.add(item["excelSequence"])
                 by_sequence.setdefault(item["excelSequence"], item)
         allowed = [name for name in candidates if name in full_names]
         for case in chunk:
             suggestion = suggestions[case.excelSequence]
             item = by_sequence.get(case.excelSequence)
+            if case.excelSequence in duplicates:
+                results[case.excelSequence] = self._fallback(
+                    suggestion, case, "LLM returned multiple answers for this case.", "LLM_INVALID_RESPONSE")
+                continue
             if item is None:
                 results[case.excelSequence] = self._fallback(
                     suggestion, case, "LLM returned no answer for this case.", "LLM_INVALID_RESPONSE")
@@ -169,7 +203,13 @@ class CorrectionService:
             if remainder:
                 details = (remainder + " " + details).strip()
             if suggested_details is not None:
-                details = suggested_details.strip()
+                # An empty model field must not erase the customer's address.
+                # The deterministic splitter is stronger when both methods agree.
+                supplied = suggested_details.strip()
+                if supplied:
+                    details = supplied
+                elif suggestion.status != "UNRESOLVED" and suggestion.correctDistrict == name:
+                    details = suggestion.addressDetails
             # Two independent methods agreeing on the same Excel name is the strongest signal.
             agreed = suggestion.status != "UNRESOLVED" and suggestion.correctDistrict == name
             confidence = 0.97 if agreed else 0.9 if status == "SPLIT_ADDRESS" else 0.85

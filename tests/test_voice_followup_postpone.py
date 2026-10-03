@@ -25,9 +25,7 @@ from app.features.voice_followup.prompts import (
     build_ask_prompt,
     build_turn_understanding_prompt,
     option_label,
-    option_label_ku,
 )
-from app.lang import Lang
 from app.features.voice_followup.schema import VoiceFollowupOrderRequest
 from app.features.voice_followup.router import (
     MAX_POSTPONE_DAYS,
@@ -148,12 +146,11 @@ def test_option_label_echoes_customer_phrasing():
     assert option_label("plus_4", 4) == "بعد 4 أيام"
 
 
-def test_kurdish_fallback_keeps_the_reply_and_date_label_in_sorani():
-    """لما vLLM غير متاح، الراوتر هو من يكتب الرد؛ لذلك لازم لغة
-    fallback تُستمد من رد الزبون ولا تعيد صباح للعربية."""
-    assert option_label_ku("plus_1", 1) == "سبەینێ"
-    answer = _postpone_fallback("confirmed", "plus_1", Lang.KU)
-    assert answer == "باشە، بۆ سبەینێ دایدەنین. سوپاس بۆ کاتت، خوات لەگەڵ."
+def test_fallback_keeps_arabic_reply_and_date_label():
+    assert _postpone_fallback("confirmed", "plus_1") == (
+        "تمام، خليناها باجر. مشكورين على وقتك، تصبح على خير.")
+    assert _postpone_fallback("clarify", None) == (
+        "عذراً، ما وضحت زين. تحب توصلك اليوم، باجر، لو أي يوم ثاني يناسبك؟")
 
 
 def test_weekday_resolves_to_next_occurrence():

@@ -243,6 +243,7 @@ _start_vllm() {
         --enable-prefix-caching \
         --enable-auto-tool-choice \
         --tool-call-parser gemma4 \
+        --default-chat-template-kwargs '{"enable_thinking":false}' \
         --limit-mm-per-prompt '{"image": 1, "audio": 0}' \
         > "${VLLM_LOG}" 2>&1 &
     VLLM_LAST_PID=$!

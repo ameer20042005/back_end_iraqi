@@ -6,6 +6,7 @@ import re
 import httpx
 
 from app.config import Settings
+from app.llm_options import normal_generation_options
 from .models import CaseRequest
 
 SYSTEM_PROMPT = """You match Iraqi delivery addresses to a courier company's official district list
@@ -15,8 +16,8 @@ meaning, like a local dispatcher would; do not just compare letters.
 How to read a case:
 - The district field is free text typed by people. It may contain the district plus streets, landmarks,
   house numbers, the governorate name, or words such as حي / منطقة / مجمع / محلة / قضاء / ناحية / جمعية.
-- Spelling varies: ة/ه, ى/ي, أ/إ/ا, with or without ال, missing or extra letters, Kurdish letters
-  (گ چ ڤ ژ ئ), Eastern or Western digits, typos. Arabic and Kurdish names of the same place are one place.
+- Spelling varies: ة/ه, ى/ي, أ/إ/ا, with or without ال, missing or extra letters,
+  Eastern or Western digits, and typos. Read addresses in Arabic and preserve catalog names literally.
 - The governorate itself (for example بغداد, البصرة, واسط) is context, not a district, unless the list
   contains a district that the text clearly names.
 - suggestedDistrict, when present, comes from spelling similarity. Verify it against the meaning of the
@@ -36,13 +37,12 @@ What to return for each case:
   the chosen district) plus the original address, without repeating the district or the governorate.
 - status: SPLIT_ADDRESS when other location text was moved to addressDetails, otherwise AI_MATCH.
 - reason: one short sentence explaining the choice.
-- Returning a district is the main goal. Always choose the allowed district the text most likely refers
-  to, even when the spelling is poor, words are missing, or only part of the name is written; judge by
-  meaning, sound and the landmarks mentioned. When two districts fit, pick the more likely one and say
-  why in reason.
-- Use UNRESOLVED only when the text names no place at all that relates to any allowed district (for
-  example only "قرب الجامع" or a phone number); then keep correctDistrict equal to originalDistrict and
-  keep the address.
+- Choose the allowed district supported by the text, even when the spelling is poor, words are
+  missing, or only part of the name is written; judge by meaning, sound and the landmarks mentioned.
+  When two different districts fit equally and the address provides no distinguishing evidence, use
+  UNRESOLVED. Never guess a district just because it appears in the list.
+- Use UNRESOLVED when the text names no related place (for example only "قرب الجامع" or a phone
+  number), or the choice is ambiguous; keep correctDistrict equal to originalDistrict and keep the address.
 
 Return JSON only: {"cases": [{excelSequence, originalDistrict, correctDistrict, addressDetails,
 stateCode, status, reason}, ...]} with one object per case."""
@@ -61,7 +61,7 @@ def response_format(allowed_names: list[str], cases: list[CaseRequest]) -> dict:
     item = {
         "type": "object",
         "properties": {
-            "excelSequence": {"type": "integer"},
+            "excelSequence": {"type": "integer", "enum": [case.excelSequence for case in cases]},
             "originalDistrict": {"type": "string"},
             "correctDistrict": {"type": "string", "enum": names},
             "addressDetails": {"type": "string"},
@@ -74,7 +74,8 @@ def response_format(allowed_names: list[str], cases: list[CaseRequest]) -> dict:
     }
     return {"type": "json_schema", "json_schema": {
         "name": "district_cases",
-        "schema": {"type": "object", "properties": {"cases": {"type": "array", "items": item}},
+        "schema": {"type": "object", "properties": {"cases": {
+            "type": "array", "items": item, "minItems": len(cases), "maxItems": len(cases)}},
                    "required": ["cases"]},
     }}
 
@@ -129,7 +130,8 @@ class LLMClient:
         body = {
             "model": self.settings.district_llm_model or self.settings.model_name,
             "temperature": 0,
-            # Reasoning models (LM Studio) can spend 1000+ tokens thinking before the JSON; this is only a cap.
+            **normal_generation_options(),
+            # Keep enough room for structured answers with many cases.
             "max_tokens": min(12000, 4096 + len(cases) * 200),
             "messages": [{"role": "system", "content": SYSTEM_PROMPT},
                          {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],

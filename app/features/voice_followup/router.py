@@ -36,7 +36,6 @@ from app.features.voice_followup import session_store, tts
 from app.features.voice_followup.gateway import voice_followup_submitter, voice_postpone_submitter
 from app.features.voice_followup.prompts import (
     option_label,
-    option_label_ku,
     build_analyze_prompt,
     build_ask_prompt,
     build_postpone_dialogue_prompt,
@@ -44,7 +43,6 @@ from app.features.voice_followup.prompts import (
     build_turn_understanding_prompt,
 )
 from app.features.voice_followup.schema import VoiceFollowupOrderRequest
-from app.lang import Lang, detect
 from app.system_backend import SystemBackendUnavailable
 
 logger = logging.getLogger(__name__)
@@ -324,41 +322,24 @@ _POSTPONE_FALLBACKS = {
     "wrong_number": "عذراً على الإزعاج، يبدو صار خطأ بالرقم. تصبح على خير.",
 }
 
-# نفس الردود، لكن للسوراني. هذا مهم تحديداً بمسار fallback: قاعدة البرومبت
-# تضمن لغة الرد عندما النموذج جاهز، أما هنا فالخادم هو الذي يكتب النص بنفسه.
-# نبقي القاموسين منفصلين بدلاً من ترجمة آلية حتى تكون العبارة المنطوقة طبيعية
-# وتبقى خالية تماماً من العربية عند الزبون الكردي.
-_POSTPONE_FALLBACKS_KU = {
-    "confirm_choice": "باشە، بۆ {option} دایدەنین، ڕاستە؟",
-    "clarify": "ببورە، کاتی گونجاوت ڕوون نەبوو. ئەمڕۆ، سبەینێ، یان کەی بۆت باشترە؟",
-    "give_up": "کێشە نییە، تیمەکەمان دواتر پەیوەندیت پێوە دەکات. خوات لەگەڵ.",
-    "reset_choice": "باشە، کاتێکی تر کەی بۆت گونجاوە؟",
-    "reconfirm": "تکایە تەنها بەڵێ یان نەخێر بڵێ.",
-    "confirmed": "باشە، بۆ {option} دایدەنین. سوپاس بۆ کاتت، خوات لەگەڵ.",
-    "wrong_number": "ببورە بۆ ناڕەحەتییەکە، وایە ژمارەکە هەڵەیە. خوات لەگەڵ.",
-}
-
 _FALLBACK_POSTPONE_OPENING = (
     "هلا بيك، وياك صباح من خدمة العملاء. عدنا شحنتك بانتظار التسليم، "
     "حاب تستلمها اليوم، لو تفضّل موعد ثاني يناسبك؟"
 )
 
 
-def _postpone_option_label(chosen: Optional[str], language: Lang) -> str:
-    """تسمية الموعد بنفس لغة الرد الاحتياطي، أو نص فارغ إذا ماكو موعد."""
+def _postpone_option_label(chosen: Optional[str]) -> str:
+    """تسمية الموعد بالعربية، أو نص فارغ إذا ماكو موعد."""
     if not chosen:
         return ""
     days = postpone_days(chosen)
-    if language is Lang.KU:
-        return option_label_ku(chosen, days)
     return option_label(chosen, days)
 
 
-def _postpone_fallback(reply_case: str, chosen: Optional[str], language: Lang) -> str:
-    """يرجع الرد الحتمي بلغته، بما فيه تسمية الموعد المؤكَّد."""
-    label = _postpone_option_label(chosen, language)
-    fallbacks = _POSTPONE_FALLBACKS_KU if language is Lang.KU else _POSTPONE_FALLBACKS
-    return fallbacks[reply_case].format(option=label)
+def _postpone_fallback(reply_case: str, chosen: Optional[str]) -> str:
+    """الرد العربي الحتمي، بما فيه تسمية الموعد المؤكَّد."""
+    label = _postpone_option_label(chosen)
+    return _POSTPONE_FALLBACKS[reply_case].format(option=label)
 
 
 async def _generate_postpone_opening(order: VoiceFollowupOrderRequest) -> str:
@@ -377,14 +358,11 @@ async def _generate_postpone_reply(
     reply_case: str,
     chosen: Optional[str],
 ) -> str:
-    # آخر عنصر بالتاريخ هو رد الزبون الذي يُجاب عنه الآن. الكشف هنا يخص
-    # fallback فقط؛ حين النموذج جاهز يرى الرد والتعليمة الموحدة بنفسه.
-    language = detect(history[-1]["content"]) if history else Lang.AR
     # التسمية تحتاج عدد الأيام لا مفتاح الخيار — و"weekday_D" ما يحمل
     # عدداً بذاته، فنحسبه بتاريخ اليوم عبر postpone_days.
-    label = _postpone_option_label(chosen, language)
+    label = _postpone_option_label(chosen)
     directive = _CASE_NOTES[reply_case].format(option=label)
-    fallback = _postpone_fallback(reply_case, chosen, language)
+    fallback = _postpone_fallback(reply_case, chosen)
     if not llm_engine.ready:
         return fallback
     messages = build_postpone_dialogue_prompt(order, history, directive)

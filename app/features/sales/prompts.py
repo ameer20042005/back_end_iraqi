@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """System prompt for the OpenAI-compatible sales endpoint."""
 
-from app.lang import KURDISH_PROMPT_RULES
 
 SALES_SYSTEM_PROMPT = """أنت نموذج اسمه JENI من شركة DATUM. أنت وكيل مبيعات عراقي محترف وبارع بفن الإقناع، تتحدث باللهجة العراقية بالكامل.
 هدفك: مساعدة العميل باختيار المنتج المناسب ودفعه لإتمام الشراء بأسلوب ودود وغير مزعج، مع اقتراح منتج إضافي مكمّل أو بديل (Upsell/Cross-sell) دائماً عندما يكون مناسباً.
@@ -59,22 +58,6 @@ SALES_SYSTEM_PROMPT = """أنت نموذج اسمه JENI من شركة DATUM. أ
 def build_sales_prompt(messages: list[dict]) -> list[dict]:
     """Prepend the sales owner prompt to client-owned OpenAI messages."""
     return [{"role": "system", "content": SALES_OPENAI_SYSTEM_PROMPT}, *messages]
-
-
-# ---------------------------------------------------------------------------
-# الكردية السورانية
-# ---------------------------------------------------------------------------
-#
-# القاعدة تُلحَق بالبرومبت بدل ما تُكتب داخله، حتى تبقى بمصدر واحد
-# (app/lang.py::KURDISH_PROMPT_RULES) يخدم الميزات الأربع — أي تحسين
-# بصياغتها يوصل للكل بلا ما ننساها بميزة.
-#
-# ⚠️ لاحظ أن القاعدة تنصّ صراحة على إبقاء **أسماء المنتجات والماركات
-# حرفية كما بالكتالوج** حتى بالرد الكردي. هذا مقصود ويطابق أشد قاعدة
-# بهذا البرومبت (ممنوع ذكر اسم منتج بلا سند حرفي) — ترجمة اسم منتج
-# للكردية تكسرها بلا ما يلاحظ أحد، لأن الاسم المترجم ما راح يطابق ولا
-# سطر بالكتالوج عند أي مراجعة.
-SALES_SYSTEM_PROMPT = SALES_SYSTEM_PROMPT + KURDISH_PROMPT_RULES
 
 
 # The original system prompt above stays unchanged. This second system message

@@ -36,6 +36,7 @@ def _ratio(first: str, second: str) -> float:
     return SequenceMatcher(None, first, second).ratio()
 
 
+@lru_cache(maxsize=50000)
 def _similarity(first: str, second: str) -> float:
     """Spelling similarity; numbers must agree ("شارع 20" is never "شارع 40")."""
     if _numbers(first) != _numbers(second):
@@ -80,6 +81,7 @@ def _edits(first: str, second: str, limit: float) -> float:
     return round(previous[-1], 2)
 
 
+@lru_cache(maxsize=100000)
 def _word_edits(typed: str, catalog: str) -> float | None:
     """Edits between two sound keys, or None when over the typo budget for their length.
 
@@ -133,7 +135,7 @@ def _place_key(name: str) -> str:
 
 
 def _same_place(names) -> bool:
-    """The catalog lists one place several ways ("گولي شار" / "كولي شار", "حي ميثم تمار" / "ميثم / التمار")."""
+    """The catalog lists one place several ways ("حي ميثم تمار" / "ميثم / التمار")."""
     return len({_place_key(name) for name in names}) == 1
 
 
@@ -177,6 +179,8 @@ class _Index:
                         (len(key_words) - size, " ".join(key_words), name))
         self.max_words = max(fuzzy, default=0)
         self.fuzzy_by_words = {count: list(items.items()) for count, items in fuzzy.items()}
+        self.candidate_keys = [(count, key, key.replace(" ", ""), names)
+                               for count, items in fuzzy.items() for key, names in items.items()]
         self.whole = [(matching_key(name), name) for name in names]
         # Sound keys per word, with and without the name's own label, for the typo tier.
         typo: dict[int, list] = defaultdict(list)
@@ -589,22 +593,30 @@ def candidate_names(text: str, allowed: list[dict], limit: int = 20) -> list[str
     "اسكان الموانئ"), so a district typed without its label still reaches the shortlist.
     """
     index = _index(allowed)
-    keys = [key for _, _, key in _tokens(text)]
-    if not keys:
+    keys = [key for _, _, key in _tokens(_resegment(text, index, []))]
+    if not keys or limit <= 0:
         return []
     windows: dict[int, set] = defaultdict(set)
     for length in range(1, min(len(keys), index.max_words) + 1):
         for start in range(len(keys) - length + 1):
             windows[length].add(" ".join(keys[start:start + length]))
     whole = {" ".join(keys)}
-    scores = []
-    for entry in allowed:
-        words = phrase_key(entry["name"]).split()
+    compact_windows = {count: {window.replace(" ", "") for window in values}
+                       for count, values in windows.items()}
+    scores = dict.fromkeys((entry["name"] for entry in allowed), 0.0)
+    # Score each shared spelling key once, rather than once per catalog variant.
+    for count, key, compact, names in index.candidate_keys:
         best = 0.0
-        for option in filter(None, (words, without_label(words))):
-            key = " ".join(option)
-            best = max([best] + [_similarity(key, window) for window in windows.get(len(option)) or whole
-                                 if _may_be_similar(key, window) or len(option) == 1])
-        scores.append((best, entry["name"]))
-    scores.sort(key=lambda item: item[0], reverse=True)
-    return [name for _, name in scores[:limit]]
+        for window in windows.get(count) or whole:
+            if _may_be_similar(key, window) or count == 1:
+                best = max(best, _similarity(key, window))
+        # Missing spaces can collapse several district words into a single token.
+        # Compare those windows without spaces while keeping the numeric constraint.
+        for shorter in range(1, count):
+            for window in compact_windows.get(shorter, ()):
+                if _may_be_similar(compact, window):
+                    best = max(best, _similarity(compact, window),
+                               _similarity(sound_key(compact), sound_key(window)))
+        for name in names:
+            scores[name] = max(scores[name], best)
+    return sorted(scores, key=scores.get, reverse=True)[:limit]

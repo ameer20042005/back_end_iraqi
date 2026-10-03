@@ -124,6 +124,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 - **Structured outputs**: استخراج الطلب يستخدم `guided_json` → `response_format: json_schema`.
 - **صور**: تُرسل كـ `image_url` (data URI base64) بنفس الطلب — نفس الموديل، ماكو نسخة ثانية.
 - **حتمي دائماً**: `temperature=0.0` بكل الطلبات (وصفة النوتبوك المعتمدة — أي sampling أنتج انهيار مخرجات بالتجربة).
+- **التفكير مطفأ**: ترسل الطلبات `reasoning_effort=none` و`enable_thinking=false`؛ ويبدأ خادم vLLM بهذه السياسة من `start.sh`.
 - **RAG محدود لاستخراج الطلب فقط**: `app/rag/` (لهجة + مواقع) يُستدعى فقط عند بناء الطلب النهائي (`plane.md`) لتصحيح المحافظة/المنطقة — لا يُحقن بردود المبيعات المباشرة، والموديل يطلب بيانات منتج بنفسه عبر أداة `search_products`.
 - **فاحص جاهزية**: `app/engine.py` يفحص خادم vLLM دورياً — الميزات تشتغل فوراً بوضع fallback وتتحول تلقائياً لوضع الموديل أول ما يكمل vLLM تحميل الأوزان (ويرجعن لـ fallback لو سقط الخادم).
 
@@ -145,9 +146,9 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
 
 - **المكتبات**: `start.sh` يبني كل شي من الصفر على Ubuntu 22.04 خام بأول إقلاع — Python/pip وأدوات بناء، متطلبات FastAPI (`requirements.txt`/`requirements-gpu.txt`، بإصدارات مثبَّتة بالضبط)، `ffmpeg`/`libsndfile1`، وأخيراً vLLM nightly بدعم Gemma 4 (يجيب معه torch المتوافق تلقائياً).
 - **الموديل المدموج** (`MODEL_NAME`): ينزّله خادم vLLM من Hugging Face Hub أول إقلاع ([start.sh](start.sh))، ويُخزَّن بذاكرة التخزين المؤقت (`~/.cache/huggingface` أو `HF_HOME`) فيُعاد استخدامه بالتشغيلات اللاحقة على نفس الـ pod/volume بدون إعادة تنزيل.
-- **موديلات الصوت**: اختيار العربي والسوراني صار مركزياً في `app/config.py` عبر
-  `stt_model_for()` و`tts_model_for()`. ينزّل `transformers.pipeline` موديل
-  التحويل المناسب تلقائياً أول استخدام (أول طلب أبطأ بسبب التنزيل، بعدها من
+- **موديلات الصوت**: اختيار الموديلات العربية صار مركزياً في `app/config.py` عبر
+  `stt_model()` و`tts_model()`. ينزّل `transformers.pipeline` موديل
+  التحويل العربي تلقائياً أول استخدام (أول طلب أبطأ بسبب التنزيل، بعدها من
   الكاش)، ويُحمَّل على الـ GPU بنصف الدقة إن توفّر مع تقطيع تلقائي كل 30 ثانية.
 
 **لا حاجة لتوكن Hugging Face:** كل المستودعات المستعملة (`ameer4wisam/gemma-iraqi-10k-merged`، موديلات Whisper وF5-TTS) عامة وغير gated، فتُنزَّل بلا مصادقة. لو بيئة الـ Pod فيها `HF_TOKEN` قديم يسبب خطأ 401، فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ [start.sh](start.sh).

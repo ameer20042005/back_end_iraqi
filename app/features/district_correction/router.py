@@ -64,7 +64,8 @@ async def correct(request_body: CorrectionRequest, request: Request):
     catalog = getattr(request.app.state, "district_catalog", None)
     if catalog is None:
         raise HTTPException(status_code=503, detail={"code": "CATALOG_UNAVAILABLE"})
-    service = CorrectionService(catalog, LLMClient(settings), settings.district_llm_max_cases)
+    service = CorrectionService(catalog, LLMClient(settings), settings.district_llm_max_cases,
+                                settings.district_llm_concurrency)
     started = time.monotonic()
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     try:

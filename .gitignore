@@ -7,3 +7,4 @@ __pycache__/
 .env
 app/features/district_correction/data/*.sqlite3
 app/features/district_correction/data/*.tmp
+benchmark-results/

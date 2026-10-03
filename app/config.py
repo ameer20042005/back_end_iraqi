@@ -10,12 +10,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from app.lang import Lang
-
 
 @dataclass(frozen=True)
 class SpeechToTextModel:
-    """نقطة تفتيش STT ومعطيات توليدها الخاصة باللغة."""
+    """نقطة تفتيش النسخ العربي ومعطيات توليدها."""
 
     repository: str
     language: Optional[str]
@@ -23,14 +21,13 @@ class SpeechToTextModel:
 
 @dataclass(frozen=True)
 class TextToSpeechModel:
-    """كل ملفات موديل F5-TTS اللازمة للغة واحدة، من مصدر إعداد واحد."""
+    """ملفات موديل النطق العراقي ومرجعه، من مصدر إعداد واحد."""
 
     repository: str
     checkpoint: str
     vocabulary: str
     reference_audio: str
     reference_text: str
-    reference_assets_on_hub: bool
 
 
 @dataclass(frozen=True)
@@ -127,6 +124,7 @@ class Settings:
     district_llm_api_key: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_API_KEY", ""))
     district_llm_model: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_MODEL", ""))
     district_llm_max_cases: int = field(default_factory=lambda: int(os.getenv("DISTRICT_LLM_MAX_CASES", "100")))
+    district_llm_concurrency: int = field(default_factory=lambda: max(1, int(os.getenv("DISTRICT_LLM_CONCURRENCY", "2"))))
     district_llm_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("DISTRICT_LLM_TIMEOUT_SECONDS", "15")))
 
     # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
@@ -144,84 +142,18 @@ class Settings:
     tts_ref_audio_ar: str = "reference/IRQ.wav"
     tts_ref_text_ar: str = "اا ما نقدر ناخذ وقت أكثر، ااا لأنه شروط كلش يحتاجلها وقت."
 
-    # -----------------------------------------------------------------
-    # الكردية السورانية (ckb)
-    # -----------------------------------------------------------------
-    #
-    # الشرح: القرار المعماري هنا أن الكردية **ما تحتاج كود جديد** — تحتاج
-    # نقاط تفتيش (checkpoints) ثانية بنفس الواجهتين الموجودتين:
-    #   · STT: موديل transformers عادي، نفس pipeline("automatic-speech-
-    #     recognition") المستعمل بالعربي (transcribe.py).
-    #   · TTS: موديل F5-TTS، نفس واجهة F5TTS(ckpt_file=..., vocab_file=...)
-    #     المستعملة بالعربي (voice_followup/tts.py) — بما فيها حاجته لصوت
-    #     مرجعي ونصّه الحرفي (zero-shot voice cloning).
-    # لذلك التفعيل = تعبئة هذي القيم + توجيه حسب اللغة، لا مسار مستقل.
-
-    # الشرح: Whisper الأصلي **ما يدعم الكردية إطلاقاً** — لغاته الـ99 ماكو
-    # بيها ku ولا ckb، وموديلنا العربي الحالي مفرَّغ على العربية وحدها.
-    # فلازم نقطة تفتيش مفرَّغة على السوراني. القيمة أدناه مفرَّغة من
-    # openai/whisper-small (نفس حجم موديلنا العربي) بمعدل خطأ كلمات ~24%.
-    #
-    whisper_model_ku: str = "roshna-omer/whisper-small-Kurdish-Sorani"
-
-    # الشرح: مهمة التوليد للموديل الكردي. **ما نمرر language="arabic"** كما
-    # بالعربي: الموديل مفرَّغ على الكردي، وفرض رمز لغة ثانية عليه يخرّب
-    # مخرجه. None تعني "خلّي إعدادات التوليد المحفوظة بالموديل نفسه تقرر"
-    # — وهي الصيغة الصحيحة لموديل مفرَّغ على لغة خارج قائمة Whisper.
-    whisper_language_ku: Optional[str] = None
-
-    # الشرح: موديل TTS الكردي — F5-TTS مثل العربي بالضبط، من مبادرة
-    # TTS4All. المستودع فيه ثلاثة أصوات (audiobook-female / audiobook-male
-    # / studio-male). نختار **الأنثوي** لأن شخصية المتابعة الصوتية "صباح"
-    # أنثى (انظر SABAH_SYSTEM_PROMPT)، وتبديل جنس الصوت بين العربي والكردي
-    # يخلي نفس الموظفة تبدو شخصين مختلفين.
-    #
-    tts_model_ku: str = "aranemini/central-kurdish-tts"
-    tts_ckpt_ku: str = "model-audiobook-female.pt"
-    tts_vocab_ku: str = "vocab.txt"
-
-    # الشرح: F5-TTS يحتاج صوتاً مرجعياً + نصّه الحرفي لكل توليد. المستودع
-    # الكردي يرفق زوجاً جاهزاً لكل صوت، فننزّلهما منه بدل ما نسجّل مرجعاً
-    # بأنفسنا — خلافاً للعربي اللي مرجعه ملف محلي (reference/IRQ.wav).
-    # النص ما نكتبه هنا: نقرأه من الملف المرافق وقت التحميل، لأن أي فرق
-    # حرف واحد بينه وبين التسجيل يخرّب جودة الاستنساخ.
-    #
-    tts_ref_audio_ku: str = "prompt-audiobook-female.wav"
-    tts_ref_text_ku: str = "prompt-audiobook-female.txt"
-
-    # الشرح: تحميل كسول — الموديلات الكردية **ما تنحمّل عند الإقلاع**
-    # (خلافاً للعربية، انظر warmup بـmain.py). السبب تشغيلي موثّق بالكود
-    # نفسه: vLLM يحجز أغلب VRAM على A40، وتحميل موديلين إضافيين دائماً
-    # يخاطر بـOOM يسقط المسار العربي (الأكثر استعمالاً) عشان مسار أقل
-    # استعمالاً. يُحمّل الموديل أول ما يوصل زبون كردي فعلاً، ويُفرَّغ بعد
-    # خمول بهذي المدة لإرجاع الذاكرة. صفر = لا تفريغ أبداً.
-    #
-    ku_model_idle_unload_seconds: int = 900
-
-    def stt_model_for(self, language: Lang) -> SpeechToTextModel:
+    def stt_model(self) -> SpeechToTextModel:
         """اختيار STT المركزي؛ ما تبقى شروط موديلات موزعة بالراوترات."""
-        if language is Lang.KU:
-            return SpeechToTextModel(self.whisper_model_ku, self.whisper_language_ku)
         return SpeechToTextModel(self.whisper_model_ar, self.whisper_language_ar)
 
-    def tts_model_for(self, language: Lang) -> TextToSpeechModel:
+    def tts_model(self) -> TextToSpeechModel:
         """اختيار TTS المركزي، شاملاً كل ملفات نقطة التفتيش والمرجع."""
-        if language is Lang.KU:
-            return TextToSpeechModel(
-                self.tts_model_ku,
-                self.tts_ckpt_ku,
-                self.tts_vocab_ku,
-                self.tts_ref_audio_ku,
-                self.tts_ref_text_ku,
-                True,
-            )
         return TextToSpeechModel(
             self.tts_model_ar,
             self.tts_ckpt_ar,
             self.tts_vocab_ar,
             self.tts_ref_audio_ar,
             self.tts_ref_text_ar,
-            False,
         )
 
 

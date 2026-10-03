@@ -33,3 +33,16 @@ def test_native_completion_passes_tools_without_guided_json(monkeypatch):
     assert captured["tool_choice"] == "auto"
     assert captured["guided_json"] is None
 
+
+def test_chat_completion_body_disables_reasoning_for_all_request_shapes():
+    tools = [{"type": "function", "function": {"name": "lookup", "parameters": {}}}]
+    bodies = [
+        LLMEngine._build_body([{"role": "user", "content": "hi"}], 32, None, None),
+        LLMEngine._build_body([{"role": "user", "content": "hi"}], 32, None,
+                              {"type": "object"}, stream=True),
+        LLMEngine._build_body([{"role": "user", "content": "hi"}], 32, None, None,
+                              tools=tools, tool_choice="auto"),
+    ]
+    for body in bodies:
+        assert body["reasoning_effort"] == "none"
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
