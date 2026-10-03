@@ -46,3 +46,30 @@ def test_chat_completion_body_disables_reasoning_for_all_request_shapes():
     for body in bodies:
         assert body["reasoning_effort"] == "none"
         assert body["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_vllm_rejection_surfaces_upstream_message():
+    import httpx
+    import pytest
+
+    from app.engine import LLMUpstreamError
+
+    message = "default chat template is no longer allowed"
+
+    def handler(request):
+        return httpx.Response(400, json={"error": {"message": message, "code": 400}})
+
+    engine = LLMEngine()
+    engine._ready = True
+    engine._client = httpx.AsyncClient(
+        base_url="http://vllm.test/v1", transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(LLMUpstreamError) as info:
+        asyncio.run(engine._chat_completion(
+            [{"role": "user", "content": "مرحبا"}], 16, None, None,
+        ))
+
+    assert info.value.message == message
+    assert info.value.upstream_status == 400
+    assert engine.metrics["errors"] == 1

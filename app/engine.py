@@ -49,6 +49,31 @@ _READY_POLL_SECONDS = 10   # فترة إعادة فحص جاهزية خادم vL
 _REQUEST_TIMEOUT = 120.0   # مهلة طلب توليد واحد (ثوانٍ)
 
 
+class LLMUpstreamError(RuntimeError):
+    """خطأ قادم من خادم vLLM (رفض الطلب أو تعذّر الاتصال به).
+
+    يحمل رسالة vLLM الحقيقية بدل HTTPStatusError خام كان يصل للعميل كـ500
+    عارية — مثل "default chat template is no longer allowed" عند تحميل نسخة
+    base بلا chat template. app/main.py يحوّله لرد 502 يعرض السبب.
+    يرث RuntimeError حتى يبقى متوافقاً مع أي مستدعٍ يلتقط RuntimeError."""
+
+    def __init__(self, message: str, upstream_status: Optional[int] = None):
+        super().__init__(message)
+        self.message = message
+        self.upstream_status = upstream_status
+
+
+def _upstream_error_message(resp: httpx.Response) -> str:
+    """يستخرج error.message من رد vLLM (صيغة OpenAI)، وإلا أول 300 حرف من النص."""
+    try:
+        error = resp.json().get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"])
+    except ValueError:
+        pass
+    return resp.text[:300] or resp.reason_phrase
+
+
 def _image_to_data_uri(image) -> str:
     """يحوّل صورة PIL إلى data URI (base64 JPEG) بصيغة OpenAI image_url —
     خادم vLLM يستقبل الصور بهذه الصيغة عبر /v1/chat/completions.
@@ -233,7 +258,16 @@ class LLMEngine:
         t0 = time.monotonic()
         try:
             resp = await self._client.post("/chat/completions", json=body)
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                message = _upstream_error_message(resp)
+                logger.error(
+                    "vLLM rejected the request (%s) for model %s: %s",
+                    resp.status_code, settings.model_name, message,
+                )
+                raise LLMUpstreamError(message, upstream_status=resp.status_code)
+        except httpx.HTTPError as exc:
+            self.metrics["errors"] += 1
+            raise LLMUpstreamError(f"تعذّر الاتصال بخادم vLLM: {exc}") from exc
         except Exception:
             self.metrics["errors"] += 1
             raise

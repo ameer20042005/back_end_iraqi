@@ -6,7 +6,6 @@ import re
 import httpx
 
 from app.config import Settings
-from app.llm_options import normal_generation_options
 from .models import CaseRequest
 
 SYSTEM_PROMPT = """You match Iraqi delivery addresses to a courier company's official district list
@@ -26,6 +25,10 @@ How to read a case:
   names an area and then a street or landmark ("الكرادة شارع الرشيد، بناية 10"), the area is the district
   (الكرادة) and the rest goes to addressDetails, even if that street also appears in allowedDistricts.
   Choose a street- or landmark-named district only when the text names no area at all.
+- A governorate center written first (الناصرية، الديوانية، الحلة، الموصل، كربلاء، النجف، العمارة،
+  الكوت، السماوة، الرمادي، بعقوبة، بغداد) is context like the governorate. When the text then names
+  another allowed district, a town, qadha or neighborhood ("الناصرية الشطرة", "الحلة المسيب"), choose
+  that district: it can be tens of kilometres from the center.
 - When the list has a combined name for the area and its neighborhood ("الفلوجة - حي الشهداء"), choose
   that combined name over the area alone if the text names that neighborhood.
 - Numbers are part of names: شارع 20 is never شارع 40.
@@ -129,8 +132,11 @@ class LLMClient:
         headers = {"Authorization": f"Bearer {self.settings.district_llm_api_key}"} if self.settings.district_llm_api_key else {}
         body = {
             "model": self.settings.district_llm_model or self.settings.model_name,
+            # Deterministic and without thinking: the schema-constrained answer
+            # must fit the timeout, and sampling only adds wrong district picks.
             "temperature": 0,
-            **normal_generation_options(),
+            "reasoning_effort": "none",
+            "chat_template_kwargs": {"enable_thinking": False},
             # Reasons are intentionally short; a compact output cap reduces
             # cloud generation time while leaving room for every structured row.
             "max_tokens": min(8192, max(2048, 700 + len(cases) * 120)),

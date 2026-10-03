@@ -4,12 +4,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.engine import llm_engine
+from app.config import settings
+from app.engine import LLMUpstreamError, llm_engine
 from app.features.district_correction.router import load_catalog as load_district_catalog
 from app.features.district_correction.router import router as district_correction_router
 from app.features.order_intake.router import router as order_intake_router
@@ -73,6 +74,19 @@ app.add_middleware(
         "X-Reply-Text", "X-Call-Status", "X-Chosen-Option", "X-Postpone-Saved",
     ],
 )
+
+@app.exception_handler(LLMUpstreamError)
+async def llm_upstream_error_handler(request: Request, exc: LLMUpstreamError):
+    """يحوّل رفض vLLM إلى 502 يعرض السبب الحقيقي بدل 500 عارية."""
+    return JSONResponse(
+        status_code=502,
+        content={
+            "detail": f"خادم النموذج رفض الطلب: {exc.message}",
+            "upstream_status": exc.upstream_status,
+            "model": settings.model_name,
+        },
+    )
+
 
 app.include_router(sales_router)
 app.include_router(openai_compat_router)

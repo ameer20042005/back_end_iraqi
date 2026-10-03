@@ -528,12 +528,61 @@ def test_everything_except_literal_matches_reaches_the_ai(catalog):
     assert llm.hints == {2: "الكرادة", 4: "الكرادة"}
 
 
-def test_ai_overrides_a_wrong_spelling_suggestion(catalog):
+def test_strong_spelling_match_outranks_a_different_ai_pick(catalog):
     def answer(cases):
         return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "الناصرية",
                  "addressDetails": "", "stateCode": "DHI", "status": "AI_MATCH", "reason": "meaning"}]
     row = one(catalog, "شطره", "FUHOOD", "DHI", llm=FakeLLM(answer))
-    assert (row.correctDistrict, row.status, row.confidence, row.reason) == ("الناصرية", "AI_MATCH", 0.85, "meaning")
+    assert (row.correctDistrict, row.status) == ("الشطرة", "NORMALIZED_MATCH")
+    assert "AI suggested الناصرية" in row.reason
+
+
+def test_ai_decides_a_center_kept_for_review(catalog):
+    def answer(cases):
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "طويريج",
+                 "addressDetails": "", "stateCode": "KRB", "status": "AI_MATCH", "reason": "typo of طويريج"}]
+    row = one(catalog, "كربلاء طوريج", "FUHOOD", "KRB", llm=FakeLLM(answer))
+    assert (row.correctDistrict, row.status, row.confidence) == ("طويريج", "AI_MATCH", 0.85)
+
+
+# The center is context; the district written after it is the answer.
+@pytest.mark.parametrize("state, district, expected, details", [
+    ("DHI", "الناصريه الشطره", "الشطرة", ""),
+    ("DHI", "الناصريه الجبايش", "الجبايش", ""),
+    ("DHI", "الناصريه قضاء الغراف", "الغراف", ""),
+    ("DHI", "ذي قار الشطره شارع زكي الخياط", "الشطرة", "شارع زكي الخياط"),
+    ("BBL", "الحله المسيب", "المسيب", ""),
+    ("BBL", "حله شوملي", "الشوملي", ""),
+    ("NIN", "موصل كوكجلي", "كوكجلي", ""),
+    ("QAD", "الديوانيه قضاء غماس", "غماس", ""),
+    ("QAD", "ديوانيه سنيه", "السنية", ""),
+    ("MYS", "الاعماره ابو رمانه", "ابو رمانة", ""),
+    ("NJF", "النجف الاشرف حي الجامعه", "حي الجامعة", ""),
+    ("ARB", "اربيل عين كاوه", "عينكاوا", ""),
+])
+def test_district_after_governorate_center(catalog, state, district, expected, details):
+    row = one(catalog, district, "FUHOOD", state)
+    assert (row.correctDistrict, row.addressDetails) == (expected, details)
+    assert row.confidence >= 0.93
+
+
+@pytest.mark.parametrize("state, district, center", [
+    ("KRB", "كربلاء طوريج", "كربلاء"),        # typo: the AI confirms طويريج
+    ("BGD", "بغداد الرضوانيه", "بغداد"),      # الرحمانية is only a fuzzy look-alike
+    ("KRB", "كربلاء حي الامن", "كربلاء"),     # حي الامين is a different place
+])
+def test_center_with_lookalike_rest_is_kept_for_ai_review(catalog, state, district, center):
+    row = one(catalog, district, "FUHOOD", state)
+    assert row.correctDistrict == center and row.confidence < 0.9
+
+
+@pytest.mark.parametrize("state, district, expected, details", [
+    ("BGD", "الكرادة شارع الرشيد، بناية 10", "الكرادة", "شارع الرشيد، بناية 10"),
+    ("BGD", "البلديات تقاطع الكهرباء", "البلديات", "تقاطع الكهرباء"),
+])
+def test_area_before_a_street_stays_the_district(catalog, state, district, expected, details):
+    row = one(catalog, district, "FUHOOD", state)
+    assert (row.correctDistrict, row.addressDetails) == (expected, details)
 
 
 def test_ai_agreeing_with_the_suggestion_raises_confidence(catalog):

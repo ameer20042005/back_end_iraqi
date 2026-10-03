@@ -20,6 +20,20 @@ _EXTRA_WORDS_ACCEPT = 0.75
 _MIN_FUZZY_KEY = 4
 AMBIGUOUS = object()
 _AMBIGUOUS_REASON = "Several catalog districts match equally; original district kept."
+# Governorates and their centers, which people write before the real district
+# ("الناصرية الشطرة", "الحلة المسيب"). Not qadha centers such as الفلوجة or
+# الزبير: their neighborhoods share names with other cities in the same governorate.
+_CENTERS = frozenset(phrase_key(name) for name in (
+    "بغداد", "البصرة", "الموصل", "نينوى", "الناصرية", "ذي قار", "الديوانية", "القادسية", "الحلة",
+    "بابل", "العمارة", "ميسان", "الكوت", "واسط", "السماوة", "المثنى", "كربلاء", "النجف", "الرمادي",
+    "الانبار", "بعقوبة", "ديالى", "تكريت", "صلاح الدين", "كركوك", "اربيل", "السليمانية", "دهوك"))
+# Honorifics written after a city name ("النجف الاشرف", "كربلاء المقدسة").
+_HONORIFICS = frozenset({word_key("الاشرف"), word_key("المقدسة")})
+_INSIDE_CENTER_REASON = "Specific catalog district written after the governorate center."
+# Confidence of a center kept while the rest of the text resembles another district:
+# below the large-request AI threshold, so the AI checks it.
+_CENTER_REVIEW = 0.8
+_REVIEW = object()
 
 
 @lru_cache(maxsize=50000)
@@ -119,6 +133,10 @@ def _strip_prefix(text: str, district: str) -> str | None:
     return text[tokens[count - 1][1]:].lstrip(_EDGES).rstrip()
 
 
+def _loose_compact(value: str) -> str:
+    return loose_key(phrase_key(value)).replace(" ", "")
+
+
 def _group(names: list[str], key_function) -> dict[str, set]:
     groups: dict[str, set] = defaultdict(set)
     for name in names:
@@ -162,6 +180,8 @@ class _Index:
         self.by_key = _group(names, matching_key)
         self.by_phrase = _group(names, phrase_key)
         self.by_compact = _group(names, compact_key)
+        # Final alef read as taa marbuta ("عين كاوه" -> "عينكاوا"), tried after the stricter keys.
+        self.by_loose = _group(names, _loose_compact)
         # Names without their own leading label: "اسكان موانئ" -> {"جمعية اسكان الموانئ"}.
         self.by_label_core: dict[str, set] = defaultdict(set)
         # Longer names by their leading words: "جامعه" -> [(1, "جامعه بصره", "جامعة البصرة"), ...].
@@ -278,7 +298,8 @@ def _details(case: CaseRequest, name: str, remainder: str = "") -> str:
 def _full_name(index: _Index, words: list[str], phrases: list[list[str]]) -> set | None:
     """A catalog name spelled like these words, or a labeled name without its label."""
     phrase = " ".join(words)
-    found = index.by_phrase.get(phrase) or index.by_compact.get(phrase.replace(" ", ""))
+    found = (index.by_phrase.get(phrase) or index.by_compact.get(phrase.replace(" ", ""))
+             or index.by_loose.get(_loose_compact(phrase)))
     if found or words in phrases:  # a bare governorate name is not "حي <governorate>"
         return found
     return index.by_label_core.get(phrase)
@@ -478,6 +499,33 @@ def _split(case: CaseRequest, raw: str, tokens, end: int, name: str, phrases, co
                      "Catalog match after ignoring label or governorate words.")
 
 
+def _inside_center(case: CaseRequest, index: _Index, state_names, raw: str, tokens, end: int,
+                   name: str, phrases):
+    """The district written after its governorate center ("الناصرية الشطرة" -> "الشطرة").
+
+    The center is context, like the governorate. When the rest of the text names a
+    catalog district exactly or by spelling only, that district is the answer. When the
+    rest only resembles a district (typo tier, fuzzy or ambiguous), returns _REVIEW so the
+    center is kept at review confidence. Returns None when the rest names no district.
+    """
+    if phrase_key(name) not in _CENTERS:
+        return None
+    rest = raw[tokens[end - 1][1]:]
+    while (rest_tokens := _tokens(rest)) and rest_tokens[0][2] in _HONORIFICS:
+        rest = rest[rest_tokens[0][1]:]
+    rest = _clean_remainder(rest, phrases)
+    if not rest:
+        return None
+    inner = _match_text(case.model_copy(update={"district": rest}), index, state_names)
+    if inner.status == "UNRESOLVED":
+        return _REVIEW if inner.reason == _AMBIGUOUS_REASON else None
+    if inner.correctDistrict == name:
+        return None
+    if inner.status in ("NORMALIZED_MATCH", "SPLIT_ADDRESS") and inner.confidence >= 0.93:
+        return inner.model_copy(update={"originalDistrict": case.district, "reason": _INSIDE_CENTER_REASON})
+    return _REVIEW
+
+
 def _fuzzy_confidence(score: float) -> float:
     return round(min(0.9, 0.84 + (score - _FUZZY_ACCEPT) * 0.5), 2)
 
@@ -529,6 +577,17 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
     def text(start: int, end: int) -> str:
         return raw[tokens[start][0]:tokens[end - 1][1]]
 
+    def split(end: int, name: str, confidence: float, reason: str, fuzzy: bool = False) -> CaseResponse:
+        inner = _inside_center(case, index, state_names, raw, tokens, end, name, phrases)
+        if isinstance(inner, CaseResponse):
+            return inner
+        result = _split(case, raw, tokens, end, name, phrases, confidence, reason, fuzzy)
+        if inner is _REVIEW:
+            result = result.model_copy(update={
+                "confidence": min(result.confidence, _CENTER_REVIEW),
+                "reason": result.reason + " The text after the center may name a more specific district."})
+        return result
+
     window = _window_match(index, keys, starts, phrases)
     if window is not None:
         end, start, names, matched = window
@@ -542,10 +601,9 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
             name = _choose(names, text(start, end + extra))
             if name is None:
                 return unresolved(case, _AMBIGUOUS_REASON)
-            return _split(case, raw, tokens, end + extra, name, phrases, _fuzzy_confidence(score),
-                          "Longer catalog district matched despite a spelling difference.", fuzzy=True)
-        return _split(case, raw, tokens, end, name, phrases, 0.94,
-                      "Catalog district extracted from start of district field.")
+            return split(end + extra, name, _fuzzy_confidence(score),
+                         "Longer catalog district matched despite a spelling difference.", fuzzy=True)
+        return split(end, name, 0.94, "Catalog district extracted from start of district field.")
     if ambiguous:
         return unresolved(case, _AMBIGUOUS_REASON)
 
@@ -557,8 +615,7 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
         end, start, names = typo
         name = _choose(names, text(start, end))
         if name is not None:
-            return _split(case, raw, tokens, end, name, phrases, 0.9,
-                          "Catalog district matched despite spelling mistakes.", fuzzy=True)
+            return split(end, name, 0.9, "Catalog district matched despite spelling mistakes.", fuzzy=True)
 
     whole = _whole_fuzzy(index, raw)
     if whole is not None and (name := _choose(whole[1], raw)):
@@ -581,8 +638,8 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
         name = _choose(names, text(start, end))
         if name is None:
             return unresolved(case, _AMBIGUOUS_REASON)
-        return _split(case, raw, tokens, end, name, phrases, _fuzzy_confidence(score),
-                      "Misspelled catalog district matched at start of district field.", fuzzy=True)
+        return split(end, name, _fuzzy_confidence(score),
+                     "Misspelled catalog district matched at start of district field.", fuzzy=True)
     return unresolved(case)
 
 

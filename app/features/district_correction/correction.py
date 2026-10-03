@@ -20,6 +20,9 @@ _CHUNK = 20
 _CANDIDATES_PER_CASE = 30
 _FULL_LIST_LIMIT = 150
 _LARGE_REQUEST = 100
+# Matches at or above this confidence (exact, normalized, clean split, typo tier)
+# are trusted over a different AI pick; below it the AI decides.
+_AI_REVIEW = 0.9
 
 # Legacy/source-sheet governorate codes seen in imported Excel files.  The
 # catalog uses the canonical codes from governorates.xlsx; these aliases are
@@ -132,9 +135,12 @@ class CorrectionService:
             # large Excel upload, deterministic normalized/split matches are
             # already catalog-validated; send only unresolved/fuzzy cases to
             # the cloud.  This removes most latency and token usage without
-            # weakening the fallback result.
+            # weakening the fallback result.  Matches below review confidence
+            # (a center kept while the text names a possible inner district)
+            # also go to the AI.
             literal = result.status != "UNRESOLVED" and result.correctDistrict == case.district.strip()
-            needs_ai = result.status in ("UNRESOLVED", "FUZZY_MATCH") if large_request else not literal
+            needs_ai = (result.status in ("UNRESOLVED", "FUZZY_MATCH") or result.confidence < _AI_REVIEW
+                        if large_request else not literal)
             if needs_ai and case.district.strip() and self.llm.configured:
                 llm_groups[code].append(case)
         return results, llm_groups
@@ -227,6 +233,13 @@ class CorrectionService:
                     (suggested_reason is not None and not isinstance(suggested_reason, str))):
                 results[case.excelSequence] = self._fallback(
                     suggestion, case, "LLM result failed catalog validation.", "LLM_INVALID_RESPONSE")
+                continue
+            if (suggestion.status != "UNRESOLVED" and suggestion.correctDistrict != name and
+                    suggestion.confidence >= _AI_REVIEW):
+                # The rule tiers never guess between places, so a strong spelling match
+                # outranks a small model's different pick ("صبخة الرب" is "صبخة العرب").
+                results[case.excelSequence] = suggestion.model_copy(update={
+                    "reason": f"{suggestion.reason} AI suggested {name}; catalog spelling match kept."})
                 continue
             remainder = _strip_prefix(case.district, name)
             address = _strip_prefix(case.address, name)
