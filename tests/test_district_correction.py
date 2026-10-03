@@ -310,7 +310,8 @@ def test_district_llm_uses_existing_model_by_default():
 
 def test_valid_llm_choice_is_accepted(catalog):
     index = catalog[0]
-    original = case(7, "مكان مجهول", "قرب الجامع")
+    # The rules leave it unresolved (district not at the start); the text names the pick.
+    original = case(7, "مكان مجهول قرب الكرادة", "قرب الجامع")
     chosen = candidate_names(original.district, index.districts("ALZAEEM", "BGD"))[0]
     answer = [{"excelSequence": 7, "originalDistrict": original.district,
                "stateCode": "BGD", "correctDistrict": chosen, "status": "AI_MATCH"}]

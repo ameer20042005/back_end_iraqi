@@ -90,10 +90,11 @@ def test_reported_examples_go_to_the_ai_with_the_spelling_suggestion(catalog, co
     llm = FakeLLM(LLMError("LLM_TIMEOUT"))
     rows = correct(catalog, [case(i, district, state=state) for i, (state, district, *_) in enumerate(REPORTED)],
                    company, llm)
-    assert sorted(sum(llm.calls, [])) == [0, 1, 2]
+    # "مجمع بوابة الكاظمية" is the catalog name with a label word: certain, no AI call.
+    assert sorted(sum(llm.calls, [])) == [0, 1]
     # The AI was unreachable, so the spelling suggestion is kept rather than lost.
     assert [row.correctDistrict for row in rows] == [expected for _, _, expected, *_ in REPORTED]
-    assert all("AI check unavailable" in row.reason for row in rows)
+    assert all("AI check unavailable" in row.reason for row in rows[:2])
 
 
 @pytest.mark.parametrize("company", COMPANIES)
@@ -106,9 +107,10 @@ def test_reported_examples_take_the_ai_answer(catalog, company):
     llm = FakeLLM(answer)
     rows = correct(catalog, [case(i, district, state=state) for i, (state, district, *_) in enumerate(REPORTED)],
                    company, llm)
-    assert [(row.correctDistrict, row.addressDetails, row.confidence) for row in rows] == [
-        (expected, details, 0.97) for _, _, expected, details, _ in REPORTED]
-    assert [row.reason for row in rows] == ["understood"] * 3
+    assert [(row.correctDistrict, row.addressDetails, row.confidence) for row in rows[:2]] == [
+        (expected, details, 0.97) for _, _, expected, details, _ in REPORTED[:2]]
+    assert [row.reason for row in rows[:2]] == ["understood"] * 2
+    assert (rows[2].correctDistrict, rows[2].status) == ("بوابة الكاظمية", "NORMALIZED_MATCH")
 
 
 # ---------------------------------------------------------------------------
@@ -515,34 +517,52 @@ def test_llm_failure_keeps_spelling_matches(catalog):
     assert [(row.correctDistrict, row.status) for row in rows[:2]] == [
         ("الشطرة", "NORMALIZED_MATCH"), ("الكرادة", "SPLIT_ADDRESS")]
     assert rows[1].addressDetails == "شارع الرشيد، بناية 10"
-    assert rows[0].errorCode is None and "LLM_INVALID_RESPONSE" in rows[0].reason
+    assert rows[0].errorCode is None and "LLM_INVALID_RESPONSE" in rows[1].reason
     assert (rows[2].status, rows[2].errorCode) == ("UNRESOLVED", "LLM_INVALID_RESPONSE")
-    assert sorted(sum(llm.calls, [])) == [1, 2, 3]
+    # "شطره" is the catalog name up to spelling: certain, so it never waits on the AI.
+    assert sorted(sum(llm.calls, [])) == [2, 3]
 
 
-def test_everything_except_literal_matches_reaches_the_ai(catalog):
+def test_only_uncertain_cases_reach_the_ai(catalog):
     llm = FakeLLM([])
     correct(catalog, [case(1, "الكرادة"), case(2, "الكراده"), case(3, "مكان مجهول"), case(4, "بغداد الكرادة"),
-                      case(5, "مكان مجهول اخر"), case(6, "الكرادة", "الكرادة قرب الجامع")], "FUHOOD", llm)
-    assert llm.calls == [[2, 3, 4, 5]]
-    assert llm.hints == {2: "الكرادة", 4: "الكرادة"}
+                      case(5, "مكان مجهول اخر"), case(6, "الكرادة", "الكرادة قرب الجامع"),
+                      case(7, "الكرادة شارع الرشيد")], "FUHOOD", llm)
+    # Exact, spelling-only and governorate-word matches are certain; a split is not.
+    assert llm.calls == [[3, 5, 7]]
+    assert llm.hints == {7: "الكرادة"}
 
 
-def test_strong_spelling_match_outranks_a_different_ai_pick(catalog):
+def test_large_requests_route_the_same_way(catalog):
+    llm = FakeLLM([])
+    cases = [case(number, "الكراده") for number in range(150)] + [case(150, "الكرادة شارع الرشيد")]
+    correct(catalog, cases, "FUHOOD", llm)
+    assert sum(llm.calls, []) == [150]
+
+
+def test_ai_decides_an_uncertain_match(catalog):
     def answer(cases):
         return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "الناصرية",
-                 "addressDetails": "", "stateCode": "DHI", "status": "AI_MATCH", "reason": "meaning"}]
-    row = one(catalog, "شطره", "FUHOOD", "DHI", llm=FakeLLM(answer))
-    assert (row.correctDistrict, row.status) == ("الشطرة", "NORMALIZED_MATCH")
-    assert "AI suggested الناصرية" in row.reason
+                 "addressDetails": "الشطره", "stateCode": "DHI", "status": "SPLIT_ADDRESS", "reason": "meaning"}]
+    row = one(catalog, "الناصريه الشطره", "FUHOOD", "DHI", llm=FakeLLM(answer))
+    assert (row.correctDistrict, row.status, row.confidence) == ("الناصرية", "SPLIT_ADDRESS", 0.9)
 
 
-def test_ai_decides_a_center_kept_for_review(catalog):
+def test_ai_agreeing_with_a_review_suggestion_is_not_boosted(catalog):
     def answer(cases):
-        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "طويريج",
-                 "addressDetails": "", "stateCode": "KRB", "status": "AI_MATCH", "reason": "typo of طويريج"}]
-    row = one(catalog, "كربلاء طوريج", "FUHOOD", "KRB", llm=FakeLLM(answer))
-    assert (row.correctDistrict, row.status, row.confidence) == ("طويريج", "AI_MATCH", 0.85)
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "بغداد",
+                 "addressDetails": "", "stateCode": "BGD", "status": "AI_MATCH", "reason": "kept"}]
+    row = one(catalog, "بغداد الرضوانيه", "FUHOOD", "BGD", llm=FakeLLM(answer))
+    assert (row.correctDistrict, row.status, row.confidence) == ("بغداد", "AI_MATCH", 0.85)
+
+
+@pytest.mark.parametrize("supplied", ["البصره قضاء", "محافظة البصرة", "قضاء"])
+def test_ai_details_without_location_are_dropped(catalog, supplied):
+    def answer(cases):
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "ابو الخصيب",
+                 "addressDetails": supplied, "stateCode": "BAS", "status": "SPLIT_ADDRESS", "reason": "town"}]
+    row = one(catalog, "البصره قضاء ابي الخصيب", "FUHOOD", "BAS", llm=FakeLLM(answer))
+    assert (row.correctDistrict, row.addressDetails) == ("ابو الخصيب", "")
 
 
 # The center is context; the district written after it is the answer.
@@ -559,17 +579,21 @@ def test_ai_decides_a_center_kept_for_review(catalog):
     ("MYS", "الاعماره ابو رمانه", "ابو رمانة", ""),
     ("NJF", "النجف الاشرف حي الجامعه", "حي الجامعة", ""),
     ("ARB", "اربيل عين كاوه", "عينكاوا", ""),
+    # one budgeted typo after the center
+    ("KRB", "كربلاء طوريج", "طويريج", ""),
+    ("NIN", "الموصل التكليف", "تلكيف", ""),
+    ("MYS", "الاعماره العابجيه", "العبجيه", ""),
+    # the only catalog name starting with the written words
+    ("KRB", "كربلاء حي الامن", "حي الامن الداخلي", ""),
 ])
 def test_district_after_governorate_center(catalog, state, district, expected, details):
     row = one(catalog, district, "FUHOOD", state)
     assert (row.correctDistrict, row.addressDetails) == (expected, details)
-    assert row.confidence >= 0.93
+    assert row.confidence >= 0.9
 
 
 @pytest.mark.parametrize("state, district, center", [
-    ("KRB", "كربلاء طوريج", "كربلاء"),        # typo: the AI confirms طويريج
     ("BGD", "بغداد الرضوانيه", "بغداد"),      # الرحمانية is only a fuzzy look-alike
-    ("KRB", "كربلاء حي الامن", "كربلاء"),     # حي الامين is a different place
 ])
 def test_center_with_lookalike_rest_is_kept_for_ai_review(catalog, state, district, center):
     row = one(catalog, district, "FUHOOD", state)
@@ -589,14 +613,14 @@ def test_ai_agreeing_with_the_suggestion_raises_confidence(catalog):
     def answer(cases):
         return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "الشطرة",
                  "addressDetails": "", "stateCode": "DHI", "status": "AI_MATCH", "reason": "same"}]
-    row = one(catalog, "شطره", "FUHOOD", "DHI", llm=FakeLLM(answer))
+    row = one(catalog, "الناصريه الشطره", "FUHOOD", "DHI", llm=FakeLLM(answer))
     assert (row.correctDistrict, row.confidence) == ("الشطرة", 0.97)
 
 
 def test_ai_unresolved_falls_back_to_the_suggestion(catalog):
     def answer(cases):
         return [{"excelSequence": 1, "status": "UNRESOLVED"}]
-    row = one(catalog, "شطره", "FUHOOD", "DHI", llm=FakeLLM(answer))
+    row = one(catalog, "الناصريه الشطره", "FUHOOD", "DHI", llm=FakeLLM(answer))
     assert (row.correctDistrict, row.status, row.errorCode) == ("الشطرة", "NORMALIZED_MATCH", None)
 
 
@@ -627,6 +651,11 @@ def test_shortlist_contains_the_spelling_suggestion(catalog):
     assert target in names
 
 
+# Not resolved by the rules (the district is not at the start), but the text names
+# الكرادة, so an AI pick of it passes the text-support check.
+MENTIONED = "مكان مجهول قرب الكرادة"
+
+
 def _answer(**fields):
     def build(cases):
         return [dict({"excelSequence": case.excelSequence, "originalDistrict": case.district,
@@ -644,11 +673,11 @@ def _answer(**fields):
     ({"stateCode": "bgd"}, ("الكرادة", "AI_MATCH")),
     ({"stateCode": None}, ("الكرادة", "AI_MATCH")),
     ({"originalDistrict": None}, ("الكرادة", "AI_MATCH")),
-    ({"originalDistrict": "  مكان   مجهول "}, ("الكرادة", "AI_MATCH")),
+    ({"originalDistrict": "  مكان   مجهول قرب  الكرادة "}, ("الكرادة", "AI_MATCH")),
     ({"reason": None}, ("الكرادة", "AI_MATCH")),
 ])
 def test_valid_llm_answers_are_accepted(catalog, fields, expected):
-    row = one(catalog, "مكان مجهول", "FUHOOD", "BGD", llm=FakeLLM(_answer(**fields)))
+    row = one(catalog, MENTIONED, "FUHOOD", "BGD", llm=FakeLLM(_answer(**fields)))
     assert (row.correctDistrict, row.status) == expected
     assert row.addressDetails == "قرب الجامع" and row.errorCode is None
 
@@ -667,6 +696,28 @@ def test_invalid_llm_answers_are_rejected(catalog, fields):
     assert (row.status, row.errorCode, row.correctDistrict) == ("UNRESOLVED", "LLM_INVALID_RESPONSE", "مكان مجهول")
 
 
+@pytest.mark.parametrize("district, chosen", [
+    ("البصره", "الزبير"), ("بغداد الرضوانيه", "الراشدية"), ("الانبار حي الشرطه", "حي الاندلس"),
+])
+def test_ai_pick_not_written_in_the_text_is_rejected(catalog, district, chosen):
+    state = {"البصره": "BAS", "بغداد الرضوانيه": "BGD", "الانبار حي الشرطه": "ANB"}[district]
+    def answer(cases):
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": chosen,
+                 "addressDetails": "", "stateCode": state, "status": "AI_MATCH", "reason": "guess"}]
+    row = one(catalog, district, "FUHOOD", state, llm=FakeLLM(answer))
+    # The rules' own answer (or the original text) is kept, never the unwritten pick.
+    assert row.correctDistrict != chosen and row.errorCode is None
+    assert "not written in the text" in row.reason
+
+
+def test_ai_pick_written_with_typos_is_accepted(catalog):
+    def answer(cases):
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "طوزخرماتو",
+                 "addressDetails": "", "stateCode": "KRK", "status": "AI_MATCH", "reason": "same town"}]
+    row = one(catalog, "كركوك طوز خورماتو", "FUHOOD", "KRK", llm=FakeLLM(answer))
+    assert (row.status, row.correctDistrict) == ("AI_MATCH", "طوزخرماتو")
+
+
 def test_llm_unresolved_keeps_input(catalog):
     row = one(catalog, "مكان مجهول", "FUHOOD", "BGD", "قرب الجامع", llm=FakeLLM(_answer(status="UNRESOLVED")))
     assert (row.status, row.errorCode, row.addressDetails) == ("UNRESOLVED", None, "قرب الجامع")
@@ -675,7 +726,7 @@ def test_llm_unresolved_keeps_input(catalog):
 def test_partial_llm_answer_only_fails_missing_cases(catalog):
     def build(cases):
         return _answer()(cases[:1]) + [{"excelSequence": 999, "status": "AI_MATCH"}, "junk"]
-    rows = correct(catalog, [case(1, "مكان مجهول"), case(2, "مكان مجهول اخر")], "FUHOOD", FakeLLM(build))
+    rows = correct(catalog, [case(1, MENTIONED), case(2, "مكان مجهول اخر")], "FUHOOD", FakeLLM(build))
     assert (rows[0].correctDistrict, rows[0].status) == ("الكرادة", "AI_MATCH")
     assert (rows[1].status, rows[1].errorCode) == ("UNRESOLVED", "LLM_INVALID_RESPONSE")
 
@@ -690,3 +741,21 @@ def test_match_case_never_leaves_the_supplied_list(catalog):
     for district in ("الكراده شارع 5", "منصور", "عنكاوا", "مجمع بوابة الكاظمية", "بغداد الكرادة"):
         row = match_case(case(1, district), allowed, ("بغداد", "BAGHDAD"))
         assert row.status == "UNRESOLVED" or row.correctDistrict in {"الكرادة", "المنصور"}
+
+
+@pytest.mark.parametrize("state, district", [
+    ("BGD", "جسر ديالى"),     # الجديد and القديم: two places start with these words
+    ("BAS", "البصره المربد"),  # المربد الجديد / المربد القديمة
+    ("BAS", "البصره"),         # a governorate alone never extends to "البصرة القديمة"
+])
+def test_prefix_of_several_places_or_a_governorate_stays_unresolved(catalog, state, district):
+    assert one(catalog, district, "FUHOOD", state).status == "UNRESOLVED"
+
+
+def test_misspelled_governorate_goes_to_the_ai(catalog):
+    def answer(cases):
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "المنصور",
+                 "addressDetails": "", "stateCode": "BGD", "status": "AI_MATCH", "reason": "بغدد is بغداد"}]
+    llm = FakeLLM(answer)
+    row = one(catalog, "بغدد المنصور", "FUHOOD", "BGD", llm=llm)
+    assert llm.calls == [[1]] and row.correctDistrict == "المنصور"

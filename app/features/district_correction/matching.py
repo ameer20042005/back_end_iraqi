@@ -30,9 +30,17 @@ _CENTERS = frozenset(phrase_key(name) for name in (
 # Honorifics written after a city name ("النجف الاشرف", "كربلاء المقدسة").
 _HONORIFICS = frozenset({word_key("الاشرف"), word_key("المقدسة")})
 _INSIDE_CENTER_REASON = "Specific catalog district written after the governorate center."
+_TYPO_REASON = "Catalog district matched despite spelling mistakes."
+_SPELLING_REASON = "Unique spelling-normalized catalog match."
+_DUPLICATE_REASON = "Closest spelling among duplicate catalog entries for one place."
+_WORDS_IGNORED_REASON = "Catalog match after ignoring label or governorate words."
+# Matches that involve no guess: the text is a catalog name up to spelling, or that name
+# with only the governorate or a label word around it. Everything else goes to the AI.
+CERTAIN_REASONS = frozenset({_SPELLING_REASON, _DUPLICATE_REASON, _WORDS_IGNORED_REASON})
+_PREFIX_REASON = "Only catalog district that begins with the written words."
 # Confidence of a center kept while the rest of the text resembles another district:
 # below the large-request AI threshold, so the AI checks it.
-_CENTER_REVIEW = 0.8
+CENTER_REVIEW = 0.8
 _REVIEW = object()
 
 
@@ -495,8 +503,7 @@ def _split(case: CaseRequest, raw: str, tokens, end: int, name: str, phrases, co
         return _response(case, name, _details(case, name, remainder), confidence, "SPLIT_ADDRESS", reason)
     if fuzzy:
         return _response(case, name, _details(case, name), confidence, "FUZZY_MATCH", reason)
-    return _response(case, name, _details(case, name), 0.93, "NORMALIZED_MATCH",
-                     "Catalog match after ignoring label or governorate words.")
+    return _response(case, name, _details(case, name), 0.93, "NORMALIZED_MATCH", _WORDS_IGNORED_REASON)
 
 
 def _inside_center(case: CaseRequest, index: _Index, state_names, raw: str, tokens, end: int,
@@ -505,8 +512,10 @@ def _inside_center(case: CaseRequest, index: _Index, state_names, raw: str, toke
 
     The center is context, like the governorate. When the rest of the text names a
     catalog district exactly or by spelling only, that district is the answer. When the
-    rest only resembles a district (typo tier, fuzzy or ambiguous), returns _REVIEW so the
-    center is kept at review confidence. Returns None when the rest names no district.
+    rest names a district through the typo tier (one budgeted typo, never a tie) or as the
+    only name starting with those words, that district is also the answer. When the rest
+    only resembles a district (fuzzy or ambiguous), returns _REVIEW so the center is kept
+    at review confidence. Returns None when the rest names no district.
     """
     if phrase_key(name) not in _CENTERS:
         return None
@@ -521,9 +530,37 @@ def _inside_center(case: CaseRequest, index: _Index, state_names, raw: str, toke
         return _REVIEW if inner.reason == _AMBIGUOUS_REASON else None
     if inner.correctDistrict == name:
         return None
-    if inner.status in ("NORMALIZED_MATCH", "SPLIT_ADDRESS") and inner.confidence >= 0.93:
-        return inner.model_copy(update={"originalDistrict": case.district, "reason": _INSIDE_CENTER_REASON})
+    if ((inner.status in ("NORMALIZED_MATCH", "SPLIT_ADDRESS") and inner.confidence >= 0.93)
+            or inner.reason in (_TYPO_REASON, _PREFIX_REASON)):
+        reason = _INSIDE_CENTER_REASON if inner.confidence >= 0.93 else f"{_INSIDE_CENTER_REASON} {inner.reason}"
+        return inner.model_copy(update={"originalDistrict": case.district, "reason": reason})
     return _REVIEW
+
+
+def _unique_prefix(index: _Index, keys: list[str], start: int, phrases: list[list[str]]) -> set | None:
+    """The one place whose name begins with all the written words ("حي الامن" -> "حي الامن الداخلي").
+
+    The words must cover at least half of the name, and a governorate or its center
+    never counts ("البصره" is not "البصرة القديمة"). Several places -> None.
+    """
+    words = keys[start:]
+    phrase = " ".join(words)
+    if not words or words in phrases or phrase in _CENTERS:
+        return None
+    names = {name for extra, _, name in index.extensions.get(phrase, ()) if extra <= len(words)}
+    return names if names and _same_place(names) else None
+
+
+def clean_details(text: str, state_names=()) -> str:
+    """AI address details without edge governorate or center names, or a bare label.
+
+    "ميسان" / "البصره قضاء" / "عمارة" carry no location the district does not already give.
+    """
+    phrases = sorted(_state_phrases(state_names) + [key.split() for key in _CENTERS], key=len, reverse=True)
+    text = _clean_remainder(text or "", phrases)
+    if all(key in GENERIC_LABELS or key == GOVERNORATE_LABEL for _, _, key in _tokens(text)):
+        return ""
+    return text
 
 
 def _fuzzy_confidence(score: float) -> float:
@@ -564,8 +601,7 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
         name = _choose(found, raw)
         if name:
             return _response(case, name, _details(case, name), confidence, "NORMALIZED_MATCH",
-                             "Unique spelling-normalized catalog match." if len(found) == 1 else
-                             "Closest spelling among duplicate catalog entries for one place.")
+                             _SPELLING_REASON if len(found) == 1 else _DUPLICATE_REASON)
         ambiguous = ambiguous or len(found) > 1
 
     phrases = _state_phrases(state_names)
@@ -584,7 +620,7 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
         result = _split(case, raw, tokens, end, name, phrases, confidence, reason, fuzzy)
         if inner is _REVIEW:
             result = result.model_copy(update={
-                "confidence": min(result.confidence, _CENTER_REVIEW),
+                "confidence": min(result.confidence, CENTER_REVIEW),
                 "reason": result.reason + " The text after the center may name a more specific district."})
         return result
 
@@ -607,6 +643,11 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
     if ambiguous:
         return unresolved(case, _AMBIGUOUS_REASON)
 
+    for start in starts:
+        names = _unique_prefix(index, keys, start, phrases)
+        if names and (name := _choose(names, text(start, len(keys)))):
+            return _response(case, name, _details(case, name), 0.9, "FUZZY_MATCH", _PREFIX_REASON)
+
     sounds = [sound_key(raw[start:end]) for start, end, _ in tokens]
     typo = _window_typo(index, sounds, keys, starts, phrases)
     if typo is AMBIGUOUS:
@@ -615,7 +656,7 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
         end, start, names = typo
         name = _choose(names, text(start, end))
         if name is not None:
-            return split(end, name, 0.9, "Catalog district matched despite spelling mistakes.", fuzzy=True)
+            return split(end, name, 0.9, _TYPO_REASON, fuzzy=True)
 
     whole = _whole_fuzzy(index, raw)
     if whole is not None and (name := _choose(whole[1], raw)):

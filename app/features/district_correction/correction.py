@@ -12,17 +12,14 @@ from starlette.concurrency import run_in_threadpool
 
 from .catalog import Catalog
 from .llm import LLMClient, LLMError
-from .matching import _strip_prefix, candidate_names, match_case, text_support, unresolved
+from .matching import (CENTER_REVIEW, CERTAIN_REASONS, _strip_prefix, candidate_names, clean_details,
+                       match_case, text_support, unresolved)
 from .models import CaseRequest, CaseResponse, CorrectionRequest, CorrectionResponse
 from .normalization import normalize, phrase_key
 
 _CHUNK = 20
 _CANDIDATES_PER_CASE = 30
 _FULL_LIST_LIMIT = 150
-_LARGE_REQUEST = 100
-# Matches at or above this confidence (exact, normalized, clean split, typo tier)
-# are trusted over a different AI pick; below it the AI decides.
-_AI_REVIEW = 0.9
 # A new AI pick must be written in the text (typos allowed); see text_support.
 _AI_SUPPORT = 0.78
 
@@ -98,7 +95,6 @@ class CorrectionService:
         llm_groups: dict[str, list[CaseRequest]] = defaultdict(list)
         matched = {}
         state_lists = {}
-        large_request = len(cases) > _LARGE_REQUEST
         for case in cases:
             code = case.stateCode.strip().upper()
             named = self.catalog.state_code_for(case.stateName) if case.stateName.strip() else None
@@ -133,16 +129,14 @@ class CorrectionService:
                     result = result.model_copy(update={"originalDistrict": case.district, "stateCode": code})
                 matched[key] = result
             results[case.excelSequence] = result
-            # Small requests retain the full AI verification behavior.  For a
-            # large Excel upload, deterministic normalized/split matches are
-            # already catalog-validated; send only unresolved/fuzzy cases to
-            # the cloud.  This removes most latency and token usage without
-            # weakening the fallback result.  Matches below review confidence
-            # (a center kept while the text names a possible inner district)
-            # also go to the AI.
+            # The rules settle only what involves no guess (the catalog name up to
+            # spelling, or with the governorate/label words around it). Splits, typos,
+            # centers and unresolved text go to the AI, whatever the request size; the
+            # rule result is its hint and the fallback when the AI is unavailable.
+            certain = result.status == "EXACT_MATCH" or (
+                result.status == "NORMALIZED_MATCH" and result.reason in CERTAIN_REASONS)
             literal = result.status != "UNRESOLVED" and result.correctDistrict == case.district.strip()
-            needs_ai = (result.status in ("UNRESOLVED", "FUZZY_MATCH") or result.confidence < _AI_REVIEW
-                        if large_request else not literal)
+            needs_ai = not (certain or literal)
             if needs_ai and case.district.strip() and self.llm.configured:
                 llm_groups[code].append(case)
         return results, llm_groups
@@ -236,13 +230,6 @@ class CorrectionService:
                 results[case.excelSequence] = self._fallback(
                     suggestion, case, "LLM result failed catalog validation.", "LLM_INVALID_RESPONSE")
                 continue
-            if (suggestion.status != "UNRESOLVED" and suggestion.correctDistrict != name and
-                    suggestion.confidence >= _AI_REVIEW):
-                # The rule tiers never guess between places, so a strong spelling match
-                # outranks a small model's different pick ("صبخة الرب" is "صبخة العرب").
-                results[case.excelSequence] = suggestion.model_copy(update={
-                    "reason": f"{suggestion.reason} AI suggested {name}; catalog spelling match kept."})
-                continue
             if (name != suggestion.correctDistrict and
                     text_support(f"{case.district} {case.address}", name) < _AI_SUPPORT):
                 # A small model fills gaps with plausible districts the text never names
@@ -258,13 +245,16 @@ class CorrectionService:
             if suggested_details is not None:
                 # An empty model field must not erase the customer's address.
                 # The deterministic splitter is stronger when both methods agree.
-                supplied = suggested_details.strip()
+                state = self.catalog.states.get(code, {})
+                supplied = clean_details(suggested_details, (state.get("name_ar"), state.get("name_en")))
                 if supplied:
                     details = supplied
                 elif suggestion.status != "UNRESOLVED" and suggestion.correctDistrict == name:
                     details = suggestion.addressDetails
-            # Two independent methods agreeing on the same Excel name is the strongest signal.
-            agreed = suggestion.status != "UNRESOLVED" and suggestion.correctDistrict == name
+            # Two independent methods agreeing on the same Excel name is the strongest signal,
+            # unless the rules themselves flagged it for review (a center kept on doubt).
+            agreed = (suggestion.status != "UNRESOLVED" and suggestion.correctDistrict == name
+                      and suggestion.confidence > CENTER_REVIEW)
             confidence = 0.97 if agreed else 0.9 if status == "SPLIT_ADDRESS" else 0.85
             results[case.excelSequence] = CaseResponse(
                 excelSequence=case.excelSequence, originalDistrict=case.district,
