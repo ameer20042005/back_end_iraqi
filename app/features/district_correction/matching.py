@@ -114,10 +114,12 @@ def _word_edits(typed: str, catalog: str) -> float | None:
         return 0
     if _numbers(typed) or _numbers(catalog):
         return None
-    if typed.startswith("ال") != catalog.startswith("ال"):
-        typed, catalog = (typed[2:], catalog) if typed.startswith("ال") else (typed, catalog[2:])
-        if typed == catalog:
-            return 0
+    # The article is not part of the word's length: "الرضوانيه" is a 7-letter word with
+    # a one-typo budget, not a 9-letter one that would reach "الرحمانية" with two.
+    typed = typed[2:] if typed.startswith("ال") else typed
+    catalog = catalog[2:] if catalog.startswith("ال") else catalog
+    if typed == catalog:
+        return 0
     longest = max(len(typed), len(catalog))
     budget = 0 if longest < 4 else 1 if longest < 8 else 2
     edits = _edits(typed, catalog, budget)
@@ -558,6 +560,9 @@ def clean_details(text: str, state_names=()) -> str:
     """
     phrases = sorted(_state_phrases(state_names) + [key.split() for key in _CENTERS], key=len, reverse=True)
     text = _clean_remainder(text or "", phrases)
+    # "النجف الاشرف حي الجامعة" leaves "الاشرف" behind once the center is gone.
+    while (tokens := _tokens(text)) and tokens[0][2] in _HONORIFICS:
+        text = text[tokens[0][1]:].strip(_EDGES)
     if all(key in GENERIC_LABELS or key == GOVERNORATE_LABEL for _, _, key in _tokens(text)):
         return ""
     return text

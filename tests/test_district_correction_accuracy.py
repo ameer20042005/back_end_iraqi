@@ -759,3 +759,17 @@ def test_misspelled_governorate_goes_to_the_ai(catalog):
     llm = FakeLLM(answer)
     row = one(catalog, "بغدد المنصور", "FUHOOD", "BGD", llm=llm)
     assert llm.calls == [[1]] and row.correctDistrict == "المنصور"
+
+
+def test_article_does_not_raise_the_typo_budget(catalog):
+    # "رضوانيه" is two letters away from "رحمانيه": over a 7-letter word's budget.
+    row = one(catalog, "الرضوانيه", "FUHOOD", "BGD")
+    assert row.correctDistrict != "الرحمانية"
+
+
+def test_honorific_is_dropped_from_ai_details(catalog):
+    def answer(cases):
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "حي الجامعة",
+                 "addressDetails": "الاشرف", "stateCode": "NJF", "status": "SPLIT_ADDRESS", "reason": "area"}]
+    row = one(catalog, "النجف الاشرف حي الجامعه", "FUHOOD", "NJF", llm=FakeLLM(answer))
+    assert (row.correctDistrict, row.addressDetails) == ("حي الجامعة", "")
