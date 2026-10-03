@@ -43,7 +43,7 @@ class Settings:
     # LLM_MODEL وLLM_BASE_URL (افتراضياً http://localhost:1234/v1). start.sh ما
     # يضبطهما أبداً، فتبقى القيم الثابتة على RunPod. `or` بدل قيمة getenv
     # الافتراضية حتى ما تصير القيمة فارغة لو صُدِّر المتغير فارغاً.
-    model_name: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "google/gemma-4-e4b")
+    model_name: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "google/gemma-4-E4B-it")
 
     # عنوان خادم vLLM OpenAI-متوافق — الباك اند عميل HTTP رفيع فقط (انظر
     # app/engine.py). محلياً بدون أي خادم يبقى ready=False وكل الميزات ترجع

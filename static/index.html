@@ -975,7 +975,7 @@
       case "/": return json({ status: "ok", service: "back_end_iraqi", docs: "/docs" });
       case "/gpu": return json({ torch: "2.8.0", cuda: true, vllm_ready: true, device_count: 1, device_name: "NVIDIA A40 (تجريبي)",
         cuda_version: "12.9", vram_total_gb: 44.43, vram_free_gb: 6.6 });
-      case "/metrics": return json({ mode: "vllm_openai_client", vllm_base_url: "http://localhost:1234/v1", model: "google/gemma-4-e4b",
+      case "/metrics": return json({ mode: "vllm_openai_client", vllm_base_url: "http://localhost:1234/v1", model: "google/gemma-4-E4B-it",
         vllm_ready: true, vllm_inflight: 0, requests_served: 42, errors: 1, request_latency_ms_p50: 1840.5, request_latency_ms_p95: 4210.2 });
       case "/sales/chat":
       case "/sales/chat/completions":
