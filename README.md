@@ -151,7 +151,7 @@ curl -F "audio=@order.wav" http://localhost:8000/orders/create
   التحويل العربي تلقائياً أول استخدام (أول طلب أبطأ بسبب التنزيل، بعدها من
   الكاش)، ويُحمَّل على الـ GPU بنصف الدقة إن توفّر مع تقطيع تلقائي كل 30 ثانية.
 
-**لا حاجة لتوكن Hugging Face:** كل المستودعات المستعملة (`ameer4wisam/gemma-iraqi-10k-merged`، موديلات Whisper وF5-TTS) عامة وغير gated، فتُنزَّل بلا مصادقة. لو بيئة الـ Pod فيها `HF_TOKEN` قديم يسبب خطأ 401، فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ [start.sh](start.sh).
+**لا حاجة لتوكن Hugging Face:** كل المستودعات المستعملة (`google/gemma-4-e4b`، موديلات Whisper وF5-TTS) عامة وغير gated، فتُنزَّل بلا مصادقة. لو بيئة الـ Pod فيها `HF_TOKEN` قديم يسبب خطأ 401، فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ [start.sh](start.sh).
 
 ## تحسين بيانات التدريب — نصائح من الاختبار الفعلي
 

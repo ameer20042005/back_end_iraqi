@@ -190,7 +190,7 @@ class LLMEngine:
             "model": settings.model_name,
             "messages": messages,
             "max_tokens": max_tokens,
-            "temperature": 0.0,  # حتمي دائماً — sampling = انهيار مخرجات (مجرَّب)
+            "temperature": 0.8,
             **normal_generation_options(),
         }
         if stream:

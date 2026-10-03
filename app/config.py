@@ -43,7 +43,7 @@ class Settings:
     # LLM_MODEL وLLM_BASE_URL (افتراضياً http://localhost:1234/v1). start.sh ما
     # يضبطهما أبداً، فتبقى القيم الثابتة على RunPod. `or` بدل قيمة getenv
     # الافتراضية حتى ما تصير القيمة فارغة لو صُدِّر المتغير فارغاً.
-    model_name: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "ameer4wisam/gemma-iraqi-10k-merged")
+    model_name: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "google/gemma-4-e4b")
 
     # عنوان خادم vLLM OpenAI-متوافق — الباك اند عميل HTTP رفيع فقط (انظر
     # app/engine.py). محلياً بدون أي خادم يبقى ready=False وكل الميزات ترجع
@@ -78,8 +78,11 @@ class Settings:
     # الرفع فوق هذا يشتري سياقاً غير مستعمَل بثمن التزامن وكاش البادئة معاً —
     # لهذا اخترنا توجيه مساحة الـ VRAM الإضافية (مقارنة بـ A40) للتزامن
     # (MAX_NUM_SEQS) لا لطول السياق.
-    max_model_len: int = 10000
+    max_model_len: int = 32768
     max_num_seqs: int = 90
+    # يقابل Evaluation Batch Size في LM Studio؛ vLLM يستخدمه كحد أقصى
+    # لعدد التوكنات المجدولة في الدفعة الواحدة.
+    max_num_batched_tokens: int = 2048
     vllm_port: int = 18001
     api_port: int = 8000
 
@@ -89,7 +92,7 @@ class Settings:
     # (منتج + كمية + سعر + اسم + هاتف + عنوان بجملة وحدة، انظر
     # SALES_SYSTEM_PROMPT) — أطول رد بالمحادثة، وقصّه يقطع بيانات العميل.
     # زيادتها فوق 256 تزيد الإسهاب والكلفة بلا فائدة تُذكر لمحادثة مبيعات.
-    max_new_tokens: int = 512
+    max_new_tokens: int = 8192
 
     # RAG (لهجة عراقية + مواقع) — استخراج الطلب (plane.md) وتصحيح الموقع
     # فقط؛ المبيعات تستدعي بيانات المنتجات عبر أدوات، لا حقناً تلقائياً.

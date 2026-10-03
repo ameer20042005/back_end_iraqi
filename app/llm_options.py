@@ -2,8 +2,12 @@
 
 
 def normal_generation_options() -> dict:
-    """Disable model-specific chain-of-thought modes where the server supports them."""
+    """Sampling profile matching the requested Gemma 4 runner settings."""
     return {
-        "reasoning_effort": "none",
-        "chat_template_kwargs": {"enable_thinking": False},
+        "top_p": 0.8,
+        "top_k": 64,
+        "min_p": 0.05,
+        "repetition_penalty": 1.1,
+        "reasoning_effort": "high",
+        "chat_template_kwargs": {"enable_thinking": True},
     }

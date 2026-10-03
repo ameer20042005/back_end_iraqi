@@ -118,7 +118,7 @@ from app.config import settings
 for value in (
     settings.model_name, settings.vllm_port, settings.api_port,
     settings.max_model_len, settings.gpu_memory_utilization,
-    settings.max_num_seqs,
+    settings.max_num_seqs, settings.max_num_batched_tokens,
 ):
     print(value)
 ')
@@ -128,7 +128,11 @@ API_PORT="${STATIC_CONFIG[2]}"
 MAX_MODEL_LEN="${STATIC_CONFIG[3]}"
 GPU_MEMORY_UTILIZATION="${STATIC_CONFIG[4]}"
 MAX_NUM_SEQS="${STATIC_CONFIG[5]}"
+MAX_NUM_BATCHED_TOKENS="${STATIC_CONFIG[6]}"
 VLLM_LOG="/tmp/vllm_boot.log"
+
+# يقابل CPU Thread Pool Size في LM Studio.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
 
 # الشرح: تنزيل الموديلات بدون أي توكن Hugging Face. كل المستودعات اللي
 # نستعملها عامة وغير gated، فما نحتاج مصادقة إطلاقاً. لكن huggingface_hub
@@ -239,11 +243,13 @@ _start_vllm() {
         --max-model-len "${MAX_MODEL_LEN}" \
         --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
         --max-num-seqs "${MAX_NUM_SEQS}" \
+        --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
         --async-scheduling \
         --enable-prefix-caching \
         --enable-auto-tool-choice \
         --tool-call-parser gemma4 \
-        --default-chat-template-kwargs '{"enable_thinking":false}' \
+        --reasoning-parser gemma4 \
+        --default-chat-template-kwargs '{"enable_thinking":true}' \
         --limit-mm-per-prompt '{"image": 1, "audio": 0}' \
         > "${VLLM_LOG}" 2>&1 &
     VLLM_LAST_PID=$!
