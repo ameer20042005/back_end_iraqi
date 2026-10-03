@@ -1,9 +1,8 @@
-"""Stateless request orchestration: literal matches are final, the AI decides the rest.
+"""Stateless request orchestration for catalog-safe district correction.
 
-Every case whose district is not written exactly as in the company Excel catalog is
-sent to the LLM, which reads the text for meaning and must answer with a name from
-that catalog. Spelling-based matching only assists: it suggests a candidate to the
-LLM, orders the candidate list, and is the fallback when the LLM is unavailable.
+Deterministic matching handles exact, normalized, typo and address-split forms.
+The LLM is used for ambiguous cases; small requests may also use it as a verifier,
+while large Excel uploads avoid redundant cloud calls for strong local matches.
 """
 
 import asyncio
@@ -20,11 +19,25 @@ from .normalization import normalize, phrase_key
 _CHUNK = 20
 _CANDIDATES_PER_CASE = 30
 _FULL_LIST_LIMIT = 150
+_LARGE_REQUEST = 100
+
+# Legacy/source-sheet governorate codes seen in imported Excel files.  The
+# catalog uses the canonical codes from governorates.xlsx; these aliases are
+# only applied when the raw code is unknown, so a real code/name conflict is
+# still rejected instead of silently guessing.
+_LEGACY_STATE_CODES = {
+    "AMA": "MYS",  # عمارة -> ميسان
+    "DWN": "QAD",  # ديوانية -> قادسية
+    "KOT": "WST",  # كوت -> واسط
+    "MOS": "NIN",  # موصل -> نينوى
+    "NAS": "DHI",  # ناصرية -> ذي قار
+    "SAM": "MTH",  # سماوة -> المثنى
+}
 
 
 class CorrectionService:
-    def __init__(self, catalog: Catalog, llm: LLMClient, max_llm_cases: int = 100,
-                 llm_concurrency: int = 2):
+    def __init__(self, catalog: Catalog, llm: LLMClient, max_llm_cases: int = 1000,
+                 llm_concurrency: int = 4):
         self.catalog = catalog
         self.llm = llm
         self.max_llm_cases = max_llm_cases
@@ -80,11 +93,21 @@ class CorrectionService:
         llm_groups: dict[str, list[CaseRequest]] = defaultdict(list)
         matched = {}
         state_lists = {}
+        large_request = len(cases) > _LARGE_REQUEST
         for case in cases:
             code = case.stateCode.strip().upper()
             named = self.catalog.state_code_for(case.stateName) if case.stateName.strip() else None
-            # stateCode is authoritative; a recognizable stateName must agree with it.
-            if code not in self.catalog.states or (named is not None and named != code):
+            # Accept old source-sheet codes when the canonical catalog code is
+            # unambiguous.  Keep rejecting a known code paired with a different
+            # known governorate name: that is a genuine data conflict.
+            if code not in self.catalog.states:
+                alias = _LEGACY_STATE_CODES.get(code)
+                if named is not None:
+                    code = named
+                elif alias in self.catalog.states:
+                    code = alias
+            if code not in self.catalog.states or (named is not None and named != code and
+                                                   case.stateCode.strip().upper() in self.catalog.states):
                 results[case.excelSequence] = unresolved(case, "Unknown or inconsistent state.", "UNKNOWN_STATE")
                 continue
             if code not in state_lists:
@@ -95,16 +118,24 @@ class CorrectionService:
                                                           "EMPTY_DISTRICT_CATALOG")
                 continue
             state = self.catalog.states.get(code, {})
+            effective_case = case if case.stateCode.strip().upper() == code else case.model_copy(update={"stateCode": code})
             key = (code, case.district, case.address)
             if key in matched:
                 result = matched[key].model_copy(update={"excelSequence": case.excelSequence})
             else:
-                result = match_case(case, allowed, (state.get("name_ar"), state.get("name_en")))
+                result = match_case(effective_case, allowed, (state.get("name_ar"), state.get("name_en")))
+                if effective_case is not case:
+                    result = result.model_copy(update={"originalDistrict": case.district, "stateCode": code})
                 matched[key] = result
             results[case.excelSequence] = result
-            # Only a district written exactly as in the Excel catalog skips the AI.
+            # Small requests retain the full AI verification behavior.  For a
+            # large Excel upload, deterministic normalized/split matches are
+            # already catalog-validated; send only unresolved/fuzzy cases to
+            # the cloud.  This removes most latency and token usage without
+            # weakening the fallback result.
             literal = result.status != "UNRESOLVED" and result.correctDistrict == case.district.strip()
-            if not literal and case.district.strip() and self.llm.configured:
+            needs_ai = result.status in ("UNRESOLVED", "FUZZY_MATCH") if large_request else not literal
+            if needs_ai and case.district.strip() and self.llm.configured:
                 llm_groups[code].append(case)
         return results, llm_groups
 

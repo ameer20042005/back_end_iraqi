@@ -131,8 +131,9 @@ class LLMClient:
             "model": self.settings.district_llm_model or self.settings.model_name,
             "temperature": 0,
             **normal_generation_options(),
-            # Keep enough room for structured answers with many cases.
-            "max_tokens": min(12000, 4096 + len(cases) * 200),
+            # Reasons are intentionally short; a compact output cap reduces
+            # cloud generation time while leaving room for every structured row.
+            "max_tokens": min(8192, max(2048, 700 + len(cases) * 120)),
             "messages": [{"role": "system", "content": SYSTEM_PROMPT},
                          {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             "response_format": response_format(allowed_names, cases),

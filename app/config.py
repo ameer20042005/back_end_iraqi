@@ -123,8 +123,8 @@ class Settings:
     district_llm_base_url: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_BASE_URL", ""))
     district_llm_api_key: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_API_KEY", ""))
     district_llm_model: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_MODEL", ""))
-    district_llm_max_cases: int = field(default_factory=lambda: int(os.getenv("DISTRICT_LLM_MAX_CASES", "100")))
-    district_llm_concurrency: int = field(default_factory=lambda: max(1, int(os.getenv("DISTRICT_LLM_CONCURRENCY", "2"))))
+    district_llm_max_cases: int = field(default_factory=lambda: int(os.getenv("DISTRICT_LLM_MAX_CASES", "1000")))
+    district_llm_concurrency: int = field(default_factory=lambda: max(1, int(os.getenv("DISTRICT_LLM_CONCURRENCY", "4"))))
     district_llm_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("DISTRICT_LLM_TIMEOUT_SECONDS", "15")))
 
     # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
