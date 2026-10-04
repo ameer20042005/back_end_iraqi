@@ -1,5 +1,6 @@
 """Deterministic exact, spelling, label/governorate-aware prefix and conservative fuzzy matching."""
 
+import html
 import re
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
@@ -7,12 +8,12 @@ from functools import lru_cache
 
 from .models import CaseRequest, CaseResponse
 from .normalization import (ADDRESS_WORDS, GENERIC_LABELS, GOVERNORATE_LABEL, PUNCTUATION, compact_key,
-                            loose_key, matching_key, normalize, phrase_key, sound_key, surface_key,
-                            without_label, word_key)
+                            loose_key, matching_key, normalize, ordinal_key, phrase_key, sound_key,
+                            surface_key, without_label, word_key)
 
 _TOKEN = re.compile("[^\\s" + re.escape(PUNCTUATION) + "]+")
 _NUMBER = re.compile(r"\d+")
-_EDGES = " \t\n" + PUNCTUATION
+_EDGES = " \t\nـ" + PUNCTUATION
 _FUZZY_ACCEPT = 0.89
 _FUZZY_MARGIN = 0.08
 _FUZZY_PREFILTER = _FUZZY_ACCEPT - _FUZZY_MARGIN
@@ -29,6 +30,9 @@ _CENTERS = frozenset(phrase_key(name) for name in (
     "الانبار", "بعقوبة", "ديالى", "تكريت", "صلاح الدين", "كركوك", "اربيل", "السليمانية", "دهوك"))
 # Honorifics written after a city name ("النجف الاشرف", "كربلاء المقدسة").
 _HONORIFICS = frozenset({word_key("الاشرف"), word_key("المقدسة")})
+# Baghdad's two banks, written after the governorate as context ("بغداد الرصافة البنوك").
+# Never a typo of a district: "الرصافة" is not "الرسالة".
+_SIDES = frozenset({word_key("الكرخ"), word_key("الرصافة")})
 _INSIDE_CENTER_REASON = "Specific catalog district written after the governorate center."
 _TYPO_REASON = "Catalog district matched despite spelling mistakes."
 _SPELLING_REASON = "Unique spelling-normalized catalog match."
@@ -167,6 +171,31 @@ def _same_place(names) -> bool:
     return len({_place_key(name) for name in names}) == 1
 
 
+@lru_cache(maxsize=10000)
+def _center_parts(name: str) -> tuple[str, ...]:
+    """The center/governorate phrases that make up `name`, or () when another word is in it."""
+    words = phrase_key(name).split()
+    parts, position = [], 0
+    while position < len(words):
+        size = next((size for size in (2, 1) if position + size <= len(words)
+                     and " ".join(words[position:position + size]) in _CENTERS), 0)
+        if not size:
+            return ()
+        parts.append(" ".join(words[position:position + size]))
+        position += size
+    return tuple(parts)
+
+
+def is_center(name: str, state_names=()) -> bool:
+    """A governorate or its center, alone or with this governorate's name ("الناصرية ذي قار").
+
+    "تكريت قادسية" is a Tikrit neighborhood: القادسية is another governorate, not this one.
+    """
+    parts = _center_parts(name)
+    return len(parts) == 1 or bool(parts) and any(
+        phrase_key(state) in parts for state in state_names or () if state)
+
+
 def _choose(names, text: str) -> str | None:
     """The single name, or the spelling closest to the text among duplicate catalog entries."""
     if len(names) == 1:
@@ -192,8 +221,11 @@ class _Index:
         self.by_compact = _group(names, compact_key)
         # Final alef read as taa marbuta ("عين كاوه" -> "عينكاوا"), tried after the stricter keys.
         self.by_loose = _group(names, _loose_compact)
+        self.by_ordinal = _group(names, lambda name: ordinal_key(phrase_key(name).split()))
         # Names without their own leading label: "اسكان موانئ" -> {"جمعية اسكان الموانئ"}.
         self.by_label_core: dict[str, set] = defaultdict(set)
+        # Two-part names in the other order: "حي الداخلية / اليرموك" <- "اليرموك الداخلية".
+        self.by_reversed: dict[str, set] = defaultdict(set)
         # Longer names by their leading words: "جامعه" -> [(1, "جامعه بصره", "جامعة البصرة"), ...].
         self.extensions: dict[str, list] = defaultdict(list)
         fuzzy: dict[int, dict[str, set]] = defaultdict(lambda: defaultdict(set))
@@ -202,6 +234,10 @@ class _Index:
             core = without_label(words)
             if core:
                 self.by_label_core[" ".join(core)].add(name)
+            parts = [part.split() for part in map(phrase_key, name.split("/")) if part]
+            if len(parts) == 2:
+                first, second = (without_label(part) or part for part in parts)
+                self.by_reversed[" ".join(second + first)].add(name)
             for key_words in filter(None, (words, core)):
                 fuzzy[len(key_words)][" ".join(key_words)].add(name)
                 for size in range(1, len(key_words)):
@@ -309,10 +345,10 @@ def _full_name(index: _Index, words: list[str], phrases: list[list[str]]) -> set
     """A catalog name spelled like these words, or a labeled name without its label."""
     phrase = " ".join(words)
     found = (index.by_phrase.get(phrase) or index.by_compact.get(phrase.replace(" ", ""))
-             or index.by_loose.get(_loose_compact(phrase)))
+             or index.by_loose.get(_loose_compact(phrase)) or index.by_ordinal.get(ordinal_key(words)))
     if found or words in phrases:  # a bare governorate name is not "حي <governorate>"
         return found
-    return index.by_label_core.get(phrase)
+    return index.by_label_core.get(phrase) or index.by_reversed.get(phrase)
 
 
 def _longest(index: _Index, keys: list[str], start: int, phrases: list[list[str]], label_dropped: bool):
@@ -397,18 +433,19 @@ def _window_fuzzy(index: _Index, keys: list[str], starts: list[int], phrases: li
 
 
 def _window_typo(index: _Index, sounds: list[str], keys: list[str], starts: list[int],
-                 phrases: list[list[str]]):
+                 phrases: list[list[str]], strict: frozenset = frozenset()):
     """Catalog name typed with small mistakes in its words ("ساةح سعد", "دور الظباط", "مسفى بيجي").
 
     Each word may differ by its typo budget (swapped, missing, extra or sound-alike letters).
     The name with the fewest edits wins; different places tied at the fewest edits are
-    AMBIGUOUS. Returns (end, start, names), AMBIGUOUS, or None.
+    AMBIGUOUS. Starts in `strict` accept no replaced letter ("حي الشركة" is not "الشرطة").
+    Returns (end, start, names), AMBIGUOUS, or None.
     """
     best = None
     for start in starts:
         found_here = None
         for length in range(min(len(sounds) - start, index.max_words), 0, -1):
-            if keys[start:start + length] in phrases:
+            if keys[start:start + length] in phrases or _SIDES.intersection(keys[start:start + length]):
                 continue
             window = sounds[start:start + length]
             if sum(map(len, window)) < 4:
@@ -422,7 +459,8 @@ def _window_typo(index: _Index, sounds: list[str], keys: list[str], starts: list
                         break
                     total += word
                 else:
-                    edits[name] = min(total, edits.get(name, total))
+                    if start not in strict or total < _REPLACED:
+                        edits[name] = min(total, edits.get(name, total))
             if edits:
                 fewest = min(edits.values())
                 names = {name for name, total in edits.items() if total == fewest}
@@ -439,9 +477,10 @@ def _resegment(raw: str, index: _Index, phrases: list[list[str]]) -> str:
     """Insert the missing space in glued words ("رواندزقرب" -> "رواندز قرب").
 
     A word is split only when it is unknown and both parts are known words: catalog
-    words, governorate words or common address words.
+    words, governorate words, labels ("قضاءالدور") or common address words.
     """
-    known = index.vocabulary | ADDRESS_WORDS | {word for phrase in phrases for word in phrase}
+    known = (index.vocabulary | ADDRESS_WORDS | GENERIC_LABELS | {GOVERNORATE_LABEL}
+             | {word for phrase in phrases for word in phrase})
     pieces, last = [], 0
     for match in _TOKEN.finditer(raw):
         token = match.group()
@@ -519,7 +558,7 @@ def _inside_center(case: CaseRequest, index: _Index, state_names, raw: str, toke
     only resembles a district (fuzzy or ambiguous), returns _REVIEW so the center is kept
     at review confidence. Returns None when the rest names no district.
     """
-    if phrase_key(name) not in _CENTERS:
+    if not is_center(name, state_names):
         return None
     rest = raw[tokens[end - 1][1]:]
     while (rest_tokens := _tokens(rest)) and rest_tokens[0][2] in _HONORIFICS:
@@ -529,7 +568,9 @@ def _inside_center(case: CaseRequest, index: _Index, state_names, raw: str, toke
         return None
     inner = _match_text(case.model_copy(update={"district": rest}), index, state_names)
     if inner.status == "UNRESOLVED":
-        return _REVIEW if inner.reason == _AMBIGUOUS_REASON else None
+        # "بغداد الرضوانيه": the rest begins several names ("الرضوانية الشرقية / ...", "الرضوانية الغربية / ...").
+        several = inner.reason == _AMBIGUOUS_REASON or index.extensions.get(phrase_key(rest))
+        return _REVIEW if several else None
     if inner.correctDistrict == name:
         return None
     if ((inner.status in ("NORMALIZED_MATCH", "SPLIT_ADDRESS") and inner.confidence >= 0.93)
@@ -578,6 +619,13 @@ def match_case(case: CaseRequest, allowed: list[dict], state_names=()) -> CaseRe
     raw = case.district.strip()
     if not raw:
         return unresolved(case, "District is empty.")
+    plain = case.model_copy(update={"district": html.unescape(case.district), "address": html.unescape(case.address)})
+    if plain != case:
+        # Exported JSON may keep HTML entities ("نينوى &apos;سنجار").
+        result = match_case(plain, allowed, state_names)
+        if result.status == "UNRESOLVED":
+            return unresolved(case, result.reason)
+        return result.model_copy(update={"originalDistrict": case.district})
 
     if raw in index.by_normalized.get(normalize(raw), ()):
         details = _strip_prefix(case.address, raw)
@@ -614,6 +662,9 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
     keys = [key for _, _, key in tokens]
     skipped = _governorate_length(keys, 0, phrases)
     starts = [0, skipped] if 0 < skipped < len(keys) else [0]
+    while skipped < len(keys) - 1 and keys[skipped] in _SIDES:
+        skipped += 1
+        starts.append(skipped)
 
     def text(start: int, end: int) -> str:
         return raw[tokens[start][0]:tokens[end - 1][1]]
@@ -654,7 +705,10 @@ def _match_text(case: CaseRequest, index: _Index, state_names) -> CaseResponse:
             return _response(case, name, _details(case, name), 0.9, "FUZZY_MATCH", _PREFIX_REASON)
 
     sounds = [sound_key(raw[start:end]) for start, end, _ in tokens]
-    typo = _window_typo(index, sounds, keys, starts, phrases)
+    # The typed label is not part of the misspelled name ("منطقه الداوددي" -> "الداودي").
+    after_label = frozenset(start + 1 for start in starts
+                            if start + 1 < len(keys) and keys[start] in GENERIC_LABELS) - set(starts)
+    typo = _window_typo(index, sounds, keys, starts + sorted(after_label), phrases, after_label)
     if typo is AMBIGUOUS:
         return unresolved(case, _AMBIGUOUS_REASON)
     if typo is not None:
@@ -712,6 +766,67 @@ def text_support(text: str, name: str) -> float:
                 best = max(best, _similarity(target, window), _similarity(compact, joined),
                            _similarity(sound_key(compact), sound_key(joined)))
     return best
+
+
+def without_governorate(text: str, state_names=()) -> str:
+    """The text without the governorate or its name at its edges ("بغداد - اليرموك" -> "اليرموك")."""
+    return _clean_remainder(html.unescape(text or ""), _state_phrases(state_names))
+
+
+def memory_key(text: str, state_names=()) -> str:
+    """Key of a confirmed correction: spelling-normalized words, governorate dropped.
+
+    "بغداد اليرموك مقابل جامع الشواف" and "اليرموك مقابيل جامع الشواف" differ, but
+    "بغداد / اليرموك مقابل جامع الشواف" and "اليرموك مقابل جامع الشوّاف" share one key.
+    """
+    return phrase_key(without_governorate(text, state_names))
+
+
+def remembered_details(case: CaseRequest, name: str, state_names=()) -> tuple[str, bool]:
+    """(address details, moved) for a confirmed district: the text without the district.
+
+    When the text does not write the district (a learned spelling such as "حاكماوه"), the
+    text itself is kept as details so no location is lost.
+    """
+    phrases = _state_phrases(state_names)
+    raw = html.unescape(case.district).strip()
+    plain = case.model_copy(update={"district": raw, "address": html.unescape(case.address)})
+    tokens = _tokens(raw)
+    keys = [key for _, _, key in tokens]
+    target = phrase_key(name).split()
+    for form in filter(None, (target, without_label(target))):
+        for start in range(len(keys) - len(form) + 1):
+            if keys[start:start + len(form)] != form:
+                continue
+            begin = start - 1 if start and keys[start - 1] in GENERIC_LABELS else start
+            parts = (_clean_remainder(raw[:tokens[begin][0]], phrases),
+                     _clean_remainder(raw[tokens[start + len(form) - 1][1]:], phrases))
+            remainder = " ".join(part for part in parts if part)
+            return _details(plain, name, remainder), bool(remainder)
+    remainder = _clean_remainder(raw, phrases)
+    return _details(plain, name, remainder), bool(remainder)
+
+
+def contradicts(text: str, name: str) -> bool:
+    """The text writes the start of `name`, then a different word where the rest should be.
+
+    "الدورة ابو دشير" is not "دورة أبو طيارة" and "بعقوبه التحرير" is not "بعقوبه التربيه",
+    although text_support scores both high. A name whose remaining words the text simply
+    leaves out ("الدورة الميكانيك" -> "دورة ميكانيك واسيا") or follows with an address word
+    ("قرب", "شارع") is not contradicted.
+    """
+    typed = [(key, sound_key(text[start:end])) for start, end, key in _tokens(text)]
+    parts = [part for part in _TOKEN.findall(name) if word_key(part)]
+    if len(parts) > 1 and word_key(parts[0]) in GENERIC_LABELS:
+        parts = parts[1:]
+    previous = None
+    for word in map(sound_key, parts):
+        found = [position for position, (_, sound) in enumerate(typed) if _word_edits(sound, word) is not None]
+        if not found:
+            following = None if previous is None or previous + 1 >= len(typed) else typed[previous + 1][0]
+            return following is not None and following not in ADDRESS_WORDS and following not in GENERIC_LABELS
+        previous = next((position for position in found if previous is None or position > previous), found[0])
+    return False
 
 
 def candidate_names(text: str, allowed: list[dict], limit: int = 20) -> list[str]:

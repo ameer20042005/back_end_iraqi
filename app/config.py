@@ -129,6 +129,23 @@ class Settings:
     district_llm_max_cases: int = field(default_factory=lambda: int(os.getenv("DISTRICT_LLM_MAX_CASES", "1000")))
     district_llm_concurrency: int = field(default_factory=lambda: max(1, int(os.getenv("DISTRICT_LLM_CONCURRENCY", "4"))))
     district_llm_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("DISTRICT_LLM_TIMEOUT_SECONDS", "60")))
+    # ذاكرة التصحيحات (تأكيد المراجع + التعلّم التلقائي): قاعدة منفصلة عن
+    # الكتالوج حتى لا تُمسح عند إعادة استيراد ملفات Excel.
+    district_alias_database_path: Path = field(default_factory=lambda: Path(os.getenv(
+        "DISTRICT_ALIAS_DATABASE_PATH", str(Path(__file__).resolve().parent / "features" / "district_correction" / "data" / "aliases.sqlite3"))))
+    # حفظ النتيجة تلقائياً عندما تتفق طريقتان مستقلتان (LLM + القواعد أو البحث الدلالي).
+    district_auto_learn: bool = field(default_factory=lambda: os.getenv("DISTRICT_AUTO_LEARN", "true").lower() not in ("0", "false", "no"))
+    # بحث دلالي اختياري عبر خادم Embeddings متوافق مع OpenAI (vLLM أو TEI).
+    # فارغ = معطّل. موديلات e5 تحتاج البادئتين "query: " و"passage: ".
+    district_embedding_base_url: str = field(default_factory=lambda: os.getenv("DISTRICT_EMBEDDING_BASE_URL", ""))
+    district_embedding_api_key: str = field(default_factory=lambda: os.getenv("DISTRICT_EMBEDDING_API_KEY", ""))
+    district_embedding_model: str = field(default_factory=lambda: os.getenv("DISTRICT_EMBEDDING_MODEL", ""))
+    district_embedding_query_prefix: str = field(default_factory=lambda: os.getenv("DISTRICT_EMBEDDING_QUERY_PREFIX", ""))
+    district_embedding_passage_prefix: str = field(default_factory=lambda: os.getenv("DISTRICT_EMBEDDING_PASSAGE_PREFIX", ""))
+    district_embedding_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("DISTRICT_EMBEDDING_TIMEOUT_SECONDS", "30")))
+    # تتخطى الحالة الـLLM فقط إذا كان أقرب اسم دلالياً هو نتيجة القواعد نفسها
+    # وبفارق لا يقل عن هذا الهامش عن الاسم التالي.
+    district_embedding_agree_margin: float = field(default_factory=lambda: float(os.getenv("DISTRICT_EMBEDDING_AGREE_MARGIN", "0.03")))
 
     # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
     # مفرَّغ عليه اللهجة العربية (نموذج transformers عادي، يعمل بعملية FastAPI

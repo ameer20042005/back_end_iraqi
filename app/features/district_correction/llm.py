@@ -21,6 +21,8 @@ How to read a case:
   contains a district that the text clearly names.
 - suggestedDistrict, when present, comes from spelling similarity. Verify it against the meaning of the
   whole text; replace it when another allowed district fits better; ignore it when it is wrong.
+- similarDistricts, when present, are the allowed districts closest in meaning from a semantic search.
+  Consider them, but choose one only when the text actually names it.
 - Iraqi addresses are written area first, then the street, building or landmark inside it. When the text
   names an area and then a street or landmark ("الكرادة شارع الرشيد، بناية 10"), the area is the district
   (الكرادة) and the rest goes to addressDetails, even if that street also appears in allowedDistricts.
@@ -115,15 +117,19 @@ class LLMClient:
                     (self.settings.district_llm_model or self.settings.model_name))
 
     async def resolve(self, company: str, state_code: str, cases: list[CaseRequest],
-                      allowed_names: list[str], hints: dict[int, str] | None = None) -> list[dict]:
+                      allowed_names: list[str], hints: dict[int, str] | None = None,
+                      similar: dict[int, list[str]] | None = None) -> list[dict]:
         hints = hints or {}
+        similar = similar or {}
         payload = {
             "companyName": company, "stateCode": state_code,
             "allowedDistricts": allowed_names,
             "cases": [{"excelSequence": case.excelSequence, "originalDistrict": case.district,
                        "district": case.district, "address": case.address,
                        "stateName": case.stateName, "stateCode": state_code,
-                       "suggestedDistrict": hints.get(case.excelSequence)}
+                       "suggestedDistrict": hints.get(case.excelSequence),
+                       **({"similarDistricts": similar[case.excelSequence]}
+                          if case.excelSequence in similar else {})}
                       for case in cases],
         }
         url = (self.settings.district_llm_base_url or self.settings.vllm_base_url).rstrip("/")

@@ -497,6 +497,8 @@
   .conf span { font-size: 11px; font-family: var(--mono); color: var(--text-dim); }
   .arrow { color: var(--text-faint); padding: 0 4px; }
   .reason { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
+  .review { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 220px; }
+  .review input { flex: 1; min-width: 140px; padding: 6px 8px; font-size: 12.5px; }
 
   /* ---------- Load test ---------- */
   .bars { display: flex; flex-direction: column; gap: 6px; }
@@ -1006,6 +1008,12 @@
         const b = body();
         if (!b.companyName || !Array.isArray(b.cases) || !b.cases.length) return json({ detail: "companyName و cases مطلوبة" }, 422);
         return json({ companyName: b.companyName, cases: b.cases.map(demoCorrectCase) });
+      }
+      case "/v1/district-correction/districts":
+        return json({ companyName: query.get("companyName"), stateCode: query.get("stateCode"), districts: DEMO_DISTRICTS[query.get("stateCode")] || [] });
+      case "/v1/district-correction/feedback": {
+        const b = body();
+        return json({ companyName: b.companyName, saved: (b.corrections || []).length, removed: 0, rejected: [] });
       }
       case "/voice_followup/ask":
         return audioResponse({ "X-Session-Id": "demo-ask-" + Date.now().toString(36),
@@ -1840,7 +1848,7 @@
         ((json && json.cases) || []).forEach((c) => { counts[c.status] = (counts[c.status] || 0) + 1; });
         setMeta(meta, statusPill(res.status), msPill(performance.now() - t0), demoPill(),
           Object.keys(counts).map((s) => pill((DISTRICT_STATUS[s] || [s])[0] + " · " + counts[s], (DISTRICT_STATUS[s] || [])[1])));
-        body.replaceChildren(res.ok && json ? districtResults(json) : errorBox(errorText(json, res.status)),
+        body.replaceChildren(res.ok && json ? districtResults(json, ep.key) : errorBox(errorText(json, res.status)),
           fold("الرد الكامل (JSON)", codeBlock(json)));
         curlBox.replaceChildren(curlFold({ method: "POST", path: ep.path, key: ep.key, json: payload }));
       } catch (e) {
@@ -1863,11 +1871,77 @@
     renderRows();
   }
 
-  function districtResults(json) {
-    return h("div", { class: "table-scroll" }, h("table", { class: "data" },
-      h("thead", {}, h("tr", {}, ["#", "المنطقة", "تفاصيل العنوان", "الحالة", "الثقة"].map((t) => h("th", { text: t })))),
+  // رموز رفض نقطة الذاكرة /feedback.
+  const REVIEW_ERRORS = {
+    UNKNOWN_DISTRICT: "الاسم ليس في كتالوج الشركة والمحافظة",
+    UNKNOWN_STATE: "محافظة غير معروفة",
+    EMPTY_TEXT: "النص اسم المحافظة فقط",
+    MISSING_DISTRICT: "اختر منطقة"
+  };
+  const REMEMBERED_REASONS = {
+    "Confirmed correction remembered for this company and governorate.": ["من الذاكرة · مؤكَّد", "ok"],
+    "Learned from an earlier answer two independent methods agreed on.": ["من الذاكرة · تلقائي", "info"]
+  };
+
+  // قوائم أسماء الكتالوج لكل محافظة، تُحمَّل عند أول تركيز على حقل المراجعة.
+  function districtLists(company, key) {
+    const box = h("div", { hidden: true });
+    const loaded = {};
+    const id = (state) => "dl-" + company + "-" + state;
+    return {
+      box, id,
+      async load(state) {
+        if (loaded[state]) return;
+        loaded[state] = true;
+        try {
+          const res = await api("/v1/district-correction/districts?companyName=" + encodeURIComponent(company) +
+            "&stateCode=" + encodeURIComponent(state), { headers: keyHeader(key) });
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data) { loaded[state] = false; return; }
+          box.appendChild(h("datalist", { id: id(state) }, (data.districts || []).map((n) => h("option", { value: n }))));
+        } catch (e) { loaded[state] = false; }
+      }
+    };
+  }
+
+  // تأكيد المنطقة الصحيحة لصف: يُحفظ في ذاكرة التصحيحات فيُحسم النص نفسه لاحقاً دون الموديل.
+  function districtReview(c, company, key, lists) {
+    const input = h("input", { type: "text", value: c.status === "UNRESOLVED" ? "" : (c.correctDistrict || ""),
+      placeholder: "اختر المنطقة الصحيحة", list: lists.id(c.stateCode), spellcheck: "false" });
+    input.addEventListener("focus", () => lists.load(c.stateCode));
+    const note = h("span", {});
+    const save = h("button", { type: "button", class: "btn small", text: "تأكيد", onclick: async () => {
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      save.disabled = true;
+      note.replaceChildren(pill("جاري الحفظ…", "info"));
+      try {
+        const res = await api("/v1/district-correction/feedback", {
+          method: "POST",
+          headers: Object.assign({ "Content-Type": "application/json" }, keyHeader(key)),
+          body: JSON.stringify({ companyName: company, corrections: [
+            { stateCode: c.stateCode, district: c.originalDistrict, correctDistrict: name }] })
+        });
+        const json = await res.json().catch(() => null);
+        const rejected = json && json.rejected && json.rejected[0];
+        note.replaceChildren(res.ok && json && json.saved ? pill("حُفظ", "ok")
+          : pill(rejected ? (REVIEW_ERRORS[rejected.code] || rejected.code) : errorText(json, res.status), "err"));
+      } catch (e) {
+        note.replaceChildren(pill("تعذّر الوصول للخادم", "err"));
+      }
+      save.disabled = false;
+    } });
+    return h("div", { class: "review" }, input, save, note);
+  }
+
+  function districtResults(json, key) {
+    const company = json.companyName || "";
+    const lists = districtLists(company, key);
+    return h("div", { class: "table-scroll" }, lists.box, h("table", { class: "data" },
+      h("thead", {}, h("tr", {}, ["#", "المنطقة", "تفاصيل العنوان", "الحالة", "الثقة", "مراجعة"].map((t) => h("th", { text: t })))),
       h("tbody", {}, (json.cases || []).map((c) => {
         const st = DISTRICT_STATUS[c.status] || [c.status, ""];
+        const remembered = REMEMBERED_REASONS[c.reason];
         const pct = Math.round((c.confidence || 0) * 100);
         return h("tr", {},
           h("td", { class: "num", text: String(c.excelSequence) }),
@@ -1876,9 +1950,11 @@
               h("b", { text: c.correctDistrict || "—" })),
             c.reason ? h("div", { class: "reason", text: c.reason }) : null),
           h("td", { text: c.addressDetails || "—" }),
-          h("td", {}, pill(st[0], st[1]), c.errorCode ? h("div", { class: "reason mono", text: c.errorCode }) : null),
+          h("td", {}, pill(st[0], st[1]), remembered ? h("div", { class: "reason" }, pill(remembered[0], remembered[1])) : null,
+            c.errorCode ? h("div", { class: "reason mono", text: c.errorCode }) : null),
           h("td", {}, h("div", { class: "conf" }, h("div", { class: "conf-track" }, h("div", { class: "conf-fill", style: "width:" + pct + "%" })),
-            h("span", { text: pct + "%" }))));
+            h("span", { text: pct + "%" }))),
+          h("td", {}, districtReview(c, company, key, lists)));
       }))));
   }
 

@@ -46,3 +46,32 @@ class CaseResponse(BaseModel):
 class CorrectionResponse(BaseModel):
     companyName: str
     cases: list[CaseResponse]
+
+
+class Confirmation(BaseModel):
+    """A district a reviewer confirmed for the customer's original text."""
+    model_config = ConfigDict(extra="forbid")
+
+    stateName: str = Field(default="", max_length=100)
+    stateCode: str = Field(min_length=1, max_length=20)
+    district: str = Field(min_length=1, max_length=300)
+    correctDistrict: str | None = Field(default=None, max_length=300)
+
+
+class FeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    companyName: str = Field(min_length=1)
+    corrections: list[Confirmation] = Field(min_length=1, max_length=10000)
+
+
+class FeedbackRejection(BaseModel):
+    index: int
+    code: Literal["UNKNOWN_STATE", "UNKNOWN_DISTRICT", "EMPTY_TEXT", "MISSING_DISTRICT"]
+
+
+class FeedbackResponse(BaseModel):
+    companyName: str
+    saved: int = 0
+    removed: int = 0
+    rejected: list[FeedbackRejection]

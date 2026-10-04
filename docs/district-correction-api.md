@@ -144,7 +144,62 @@ Content-Type: application/json
 3. خزّن `addressDetails` في حقل العنوان التفصيلي. عند `UNRESOLVED` اعرض الحالة للمراجعة ولا تُحوّل النص الخام إلى `cdi_id` بالتخمين.
 4. إذا ظهر `errorCode` على صف، عالج ذلك الصف؛ لا تفترض فشل الدفعة كلها.
 
-للتتبع يمكن إرسال `X-Request-ID` اختياري؛ يظهر في سجل الخدمة دون تسجيل عنوان العميل. نقطة التصحيح بلا حالة؛ يمكن تقسيم ملف كبير إلى دفعات حتى 10,000 حالة لكل طلب.
+للتتبع يمكن إرسال `X-Request-ID` اختياري؛ يظهر في سجل الخدمة دون تسجيل عنوان العميل. يمكن تقسيم ملف كبير إلى دفعات حتى 10,000 حالة لكل طلب.
+
+## ذاكرة التصحيحات
+
+تحفظ الذاكرة نص الزبون مع منطقته لكل شركة ومحافظة، فيُحسم النص نفسه في الطلبات اللاحقة دون LLM. مصدران يغذّيانها دون أي تعديل على Spring:
+
+1. **التعلّم التلقائي** (`DISTRICT_AUTO_LEARN`، مفعّل افتراضياً): عندما تتفق طريقتان مستقلتان على المنطقة في صف كان يحتاج الـLLM، أي LLM مع نتيجة القواعد، أو LLM مع أول اختيار للبحث الدلالي، أو القواعد مع البحث الدلالي. يُحسم التكرار بثقة `0.95` والسبب `Learned from an earlier answer two independent methods agreed on.`. اختيار LLM يخالف القواعد والبحث الدلالي معاً لا يُحفظ.
+2. **تأكيد المراجع** من صفحة الاختبار `/test` ← تصحيح المناطق: لكل صف في النتيجة عمود «مراجعة» بقائمة أسماء كتالوج الشركة والمحافظة وزر «تأكيد». يُحسم التكرار بثقة `0.98`. تأكيد المراجع يستبدل أي إجابة سابقة، والتعلّم التلقائي لا يستبدل تأكيد مراجع أبداً. الصفوف المحسومة من الذاكرة تظهر بشارة «من الذاكرة · مؤكَّد» أو «من الذاكرة · تلقائي».
+
+قائمة الأسماء في الصفحة تأتي من `GET /v1/district-correction/districts?companyName=FUHOOD&stateCode=BGD` (بنفس المفتاح). `/ready` يعرض `rememberedCorrections` بعدد كل مصدر و`autoLearn`.
+
+### `POST /v1/district-correction/feedback`
+
+تستخدمه صفحة الاختبار، ويمكن لأي عميل (Spring لاحقاً إن أُضيف) إرسال النص الأصلي والمنطقة المؤكدة بنفس الهيدر `X-API-Key`:
+
+```json
+{
+  "companyName": "FUHOOD",
+  "corrections": [
+    {"stateCode": "BGD", "district": "بغداد الدورة ابو دشير شارع الزيتون", "correctDistrict": "ابو دشير"},
+    {"stateCode": "ARB", "district": "اربيل حاكماوه", "correctDistrict": "حاجياوا"}
+  ]
+}
+```
+
+الرد: `{"companyName": "FUHOOD", "saved": 2, "removed": 0, "rejected": []}`. الصف المرفوض يظهر برقمه في المصفوفة ورمز `UNKNOWN_STATE` أو `UNKNOWN_DISTRICT` (الاسم ليس حرفياً في كتالوج الشركة والمحافظة) أو `EMPTY_TEXT` (النص اسم المحافظة فقط) أو `MISSING_DISTRICT`.
+
+بعدها أي طلب تصحيح للشركة والمحافظة نفسيهما بنفس النص (بغض النظر عن ة/ه وى/ي والهمزات وال التعريف والترقيم واسم المحافظة) يُحسم مباشرة دون LLM بثقة `0.98` والسبب `Confirmed correction remembered for this company and governorate.`؛ ما تبقى من النص بعد المنطقة يذهب إلى `addressDetails`. إرسال منطقة مختلفة لنفس النص يستبدل القديمة. للتراجع عن تأكيد خاطئ أرسل الجسم نفسه بـ `DELETE /v1/district-correction/feedback` (الحقل `correctDistrict` اختياري هنا) والرد يحمل `removed`.
+
+الذاكرة في `app/features/district_correction/data/aliases.sqlite3` (أو `DISTRICT_ALIAS_DATABASE_PATH`)، منفصلة عن الكتالوج فلا تُمسح عند إعادة استيراد Excel. إذا حُذف اسم من الكتالوج لاحقاً يُتجاهل تصحيحه المحفوظ. لإيقاف التعلّم التلقائي: `DISTRICT_AUTO_LEARN=false`.
+
+## البحث الدلالي (اختياري)
+
+طبقة داعمة تعمل فقط على الصفوف التي كانت ستذهب للـLLM: يحوّل موديل Embeddings أسماء الكتالوج ونص الزبون إلى متجهات ويرتّب الأسماء حسب المعنى.
+
+- إذا كان أقرب اسم دلالياً هو نتيجة القواعد نفسها، بفارق لا يقل عن `DISTRICT_EMBEDDING_AGREE_MARGIN` (الافتراضي `0.03`) عن الاسم التالي، تُحسم الحالة دون LLM ويُضاف للسبب `Semantic search agrees.`.
+- غير ذلك تُرسل الحالة للـLLM مع أقرب الأسماء ضمن قائمة المرشحين وفي الحقل `similarDistricts`، وتبقى شروط قبول اختياره كما هي.
+- عند تعذر الوصول لخادم الـEmbeddings تعمل الخدمة كما لو كانت الطبقة معطلة.
+
+التفعيل بأي خادم متوافق مع `/v1/embeddings` (vLLM أو Text Embeddings Inference):
+
+| المتغير | المعنى |
+|---|---|
+| `DISTRICT_EMBEDDING_BASE_URL` | مثل `http://127.0.0.1:8001`؛ فارغ = معطلة |
+| `DISTRICT_EMBEDDING_MODEL` | مثل `BAAI/bge-m3` أو `intfloat/multilingual-e5-base` |
+| `DISTRICT_EMBEDDING_API_KEY` | عند الحاجة |
+| `DISTRICT_EMBEDDING_QUERY_PREFIX` / `DISTRICT_EMBEDDING_PASSAGE_PREFIX` | موديلات e5 تحتاج `query: ` و`passage: `؛ bge-m3 بدونهما |
+| `DISTRICT_EMBEDDING_TIMEOUT_SECONDS` | الافتراضي 30 |
+| `DISTRICT_EMBEDDING_AGREE_MARGIN` | الافتراضي 0.03 |
+
+متجهات الكتالوج تُحسب مرة لكل شركة ومحافظة وتبقى في الذاكرة حتى إعادة التشغيل. قبل التفعيل، وعند تغيير الموديل، قِس أثر الهامش على ملف شحنات حقيقي وراجع الصفوف التي تُحسم:
+
+```powershell
+$env:DISTRICT_EMBEDDING_BASE_URL="http://127.0.0.1:8001"; $env:DISTRICT_EMBEDDING_MODEL="BAAI/bge-m3"
+.venv\Scripts\python.exe -m scripts.evaluate_district_semantic "JSON_to_Excel (1).xlsx" --show 40
+```
 
 ## الأخطاء
 

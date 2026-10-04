@@ -542,10 +542,51 @@ def test_large_requests_route_the_same_way(catalog):
 
 def test_ai_decides_an_uncertain_match(catalog):
     def answer(cases):
-        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "الناصرية",
-                 "addressDetails": "الشطره", "stateCode": "DHI", "status": "SPLIT_ADDRESS", "reason": "meaning"}]
-    row = one(catalog, "الناصريه الشطره", "FUHOOD", "DHI", llm=FakeLLM(answer))
-    assert (row.correctDistrict, row.status, row.confidence) == ("الناصرية", "SPLIT_ADDRESS", 0.9)
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district,
+                 "correctDistrict": "دورة ميكانيك واسيا", "addressDetails": "", "stateCode": "BGD",
+                 "status": "SPLIT_ADDRESS", "reason": "meaning"}]
+    row = one(catalog, "بغداد الدورة الميكانيك", "FUHOOD", "BGD", llm=FakeLLM(answer))
+    assert (row.correctDistrict, row.status, row.confidence) == ("دورة ميكانيك واسيا", "SPLIT_ADDRESS", 0.9)
+
+
+def test_ai_center_pick_does_not_replace_the_district_after_it(catalog):
+    def answer(cases):
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "السماوة",
+                 "addressDetails": "قضاء الخضر", "stateCode": "MTH", "status": "SPLIT_ADDRESS", "reason": "center"}]
+    row = one(catalog, "السماوة المثنئ قضاء الخضر مستشفى الخضر العام", "FUHOOD", "MTH", llm=FakeLLM(answer))
+    assert row.correctDistrict == "الخضر"
+
+
+# The AI pick shares its first words with the text, which then names another place.
+@pytest.mark.parametrize("state, district, pick, kept", [
+    ("BGD", "بغداد الدورة ابو دشير شارع الزيتون", "دورة أبو طيارة", "الدورة"),
+    ("DYL", "ديالى بعقوبه التحرير الشارع الحولي", "بعقوبه التربيه", "التحرير"),
+])
+def test_ai_pick_contradicted_by_the_text_is_rejected(catalog, state, district, pick, kept):
+    def answer(cases):
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": pick,
+                 "addressDetails": "", "stateCode": state, "status": "AI_MATCH", "reason": "guess"}]
+    row = one(catalog, district, "FUHOOD", state, llm=FakeLLM(answer))
+    assert row.correctDistrict == kept and "differs from the place written" in row.reason
+
+
+# Reported FUHOOD rows: compound centers, Baghdad's banks, glued labels and two-part names.
+@pytest.mark.parametrize("state, district, expected", [
+    ("DHI", "الناصرية ذي قار الشطره حي الباقر", "الشطرة"),
+    ("ANB", "الانبار الرمادي الشركه قرب اعدادية المتفوقين", "الشركة"),
+    ("BGD", "بغداد  الرصافة.. البنوك.. شارع المشاتل", "حي البنوك"),
+    ("BGD", "بغداد الكرخ منطقه الداوددي مقابيل جمعية الداوددي", "الداودي"),
+    ("SAH", "صلاح الدين/ قضاءالدور/ ناحية المجمع السكني", "الدور"),
+    ("BGD", "بغداد اليرموك / الداخلية", "حي الداخلية / اليرموك"),
+    ("BGD", "بغداد / اليرموك الداخليه فرع ثانوية حطين", "حي الداخلية / اليرموك"),
+    ("NIN", "الموصل حي الشركة", "موصل"),
+    ("NIN", "الموصل نينوى &apos;سنجار &apos;مزار شرفدين", "سنجار"),
+    ("KRK", "كركوك نور ستي الثانيه", "نور ستي2"),
+    ("DHI", "ناصرية _ المدينة _ قرب مدرسة ابن ماجد", "المدينة"),
+    ("SAH", "صلاح الدين تكريت القادسيه حي الجامعه", "تكريت قادسية"),
+])
+def test_reported_fuhood_rows(catalog, state, district, expected):
+    assert one(catalog, district, "FUHOOD", state).correctDistrict == expected
 
 
 def test_ai_agreeing_with_a_review_suggestion_is_not_boosted(catalog):

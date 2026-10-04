@@ -56,6 +56,17 @@ def word_key(word: str) -> str:
     return value
 
 
+# Ordinals written as words or digits name the same place ("نور ستي الثانيه" = "نور ستي2").
+# Only for exact lookups: the typo and fuzzy tiers keep the letters ("السالثة" -> "الثالثة").
+_ORDINALS = {"اول": "1", "اولي": "1", "ثاني": "2", "ثانيه": "2", "ثالث": "3", "ثالثه": "3",
+             "رابع": "4", "رابعه": "4", "خامس": "5", "خامسه": "5"}
+
+
+def ordinal_key(words: list[str]) -> str:
+    """Compact key of phrase-key words with ordinal words as digits."""
+    return "".join(_ORDINALS.get(word, word) for word in words)
+
+
 @lru_cache(maxsize=50000)
 def phrase_key(value: str) -> str:
     return " ".join(key for key in (word_key(word) for word in normalize(value).split()) if key)
