@@ -8,7 +8,6 @@ better shortlist for the LLM, never an answer on its own.
 import asyncio
 
 import httpx
-import numpy as np
 
 from app.config import Settings
 
@@ -19,10 +18,19 @@ class EmbeddingError(Exception):
     pass
 
 
+def _numpy():
+    """numpy only when semantic search runs: app startup neither waits for it nor needs it."""
+    try:
+        import numpy
+    except ImportError as exc:
+        raise EmbeddingError("NumpyMissing") from exc
+    return numpy
+
+
 class SemanticIndex:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._vectors: dict[tuple, tuple[list[str], np.ndarray]] = {}
+        self._vectors: dict[tuple, tuple] = {}  # key -> (names, unit vectors)
         self._locks: dict[tuple, asyncio.Lock] = {}
 
     @property
@@ -33,8 +41,9 @@ class SemanticIndex:
     def agree_margin(self) -> float:
         return self.settings.district_embedding_agree_margin
 
-    async def _embed(self, texts: list[str]) -> np.ndarray:
-        """Unit-length vectors, one row per text."""
+    async def _embed(self, texts: list[str]):
+        """Unit-length vectors (numpy array), one row per text."""
+        np = _numpy()
         url = self.settings.district_embedding_base_url.rstrip("/")
         if not url.endswith("/embeddings"):
             url += "/embeddings" if url.endswith("/v1") else "/v1/embeddings"
@@ -83,6 +92,6 @@ class SemanticIndex:
         scores = await self._embed([prefix + text for text in unique]) @ catalog.T
         ranked = {}
         for text, row in zip(unique, scores):
-            order = np.argsort(-row)[:limit]
+            order = (-row).argsort()[:limit]
             ranked[text] = [(names[i], float(row[i])) for i in order]
         return [ranked[text] for text in texts]

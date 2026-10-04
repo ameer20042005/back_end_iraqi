@@ -13,5 +13,8 @@ uvicorn[standard]==0.52.3
 python-multipart==0.0.32
 pydantic==2.13.4
 httpx==0.28.1
-# حساب التشابه الدلالي في تصحيح المناطق (app/features/district_correction/semantic.py)
-numpy==2.5.3
+# حساب التشابه الدلالي في تصحيح المناطق (app/features/district_correction/semantic.py).
+# استثناء مقصود من قاعدة (==): numpy تبعية مشتركة مع torch/vLLM على RunPod
+# (Python 3.10، أعلى نسخة متاحة 2.2.x)، وتثبيت نسخة بعينها يكسر pip install
+# بكل إقلاع أو يتعارض معهما. النطاق مُتحقَّق أصلاً هناك فلا يغيّر شيئاً.
+numpy>=1.26,<3
