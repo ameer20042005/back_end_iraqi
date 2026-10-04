@@ -1948,7 +1948,10 @@
           h("td", {},
             h("div", {}, h("span", { class: "hint", text: c.originalDistrict || "—" }), h("span", { class: "arrow", text: "←" }),
               h("b", { text: c.correctDistrict || "—" })),
-            c.reason ? h("div", { class: "reason", text: c.reason }) : null),
+            c.reason ? h("div", { class: "reason", text: c.reason }) : null,
+            // اختيار النموذج المدرَّب الذي يعمل بالتوازي (وضع الظل): للمقارنة فقط.
+            c.modelDistrict ? h("div", { class: "reason" }, "النموذج: ", pill(c.modelDistrict,
+              c.status !== "UNRESOLVED" && c.modelDistrict === c.correctDistrict ? "ok" : "warn")) : null),
           h("td", { text: c.addressDetails || "—" }),
           h("td", {}, pill(st[0], st[1]), remembered ? h("div", { class: "reason" }, pill(remembered[0], remembered[1])) : null,
             c.errorCode ? h("div", { class: "reason mono", text: c.errorCode }) : null),

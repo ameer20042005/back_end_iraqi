@@ -17,6 +17,7 @@ from app.config import settings
 from .correction import CorrectionService
 from .llm import LLMClient
 from .models import CorrectionRequest, CorrectionResponse, FeedbackRequest, FeedbackResponse
+from .reranker import ShadowLog, load_reranker
 from .semantic import SemanticIndex
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ def load_catalog(app) -> None:
     app.state.district_aliases = None
     # Catalog vectors are cached in this object for the life of the process.
     app.state.district_semantic = SemanticIndex(settings)
+    # Optional trained reranker: decides between the rules and the LLM, or only shadows the LLM.
+    app.state.district_reranker = load_reranker(settings.district_reranker_path)
+    app.state.district_shadow_log = ShadowLog(settings.district_reranker_log_path)
     try:
         if _catalog_is_stale(settings.district_source_dir, settings.district_database_path):
             import_catalog(settings.district_source_dir, settings.district_database_path)
@@ -58,7 +62,10 @@ def _service(request: Request) -> CorrectionService:
     return CorrectionService(catalog, LLMClient(settings), settings.district_llm_max_cases,
                              settings.district_llm_concurrency,
                              getattr(request.app.state, "district_aliases", None),
-                             getattr(request.app.state, "district_semantic", None), settings.district_auto_learn)
+                             getattr(request.app.state, "district_semantic", None), settings.district_auto_learn,
+                             getattr(request.app.state, "district_reranker", None),
+                             getattr(request.app.state, "district_shadow_log", None),
+                             settings.district_reranker_mode == "decide")
 
 
 @router.get("/ready")
@@ -80,7 +87,9 @@ def ready(request: Request):
     return {"status": "ready", "companies": catalog.companies(), "states": len(catalog.states),
             "rememberedCorrections": None if aliases is None else aliases.counts(),
             "autoLearn": settings.district_auto_learn,
-            "semanticSearch": bool(semantic and semantic.configured)}
+            "semanticSearch": bool(semantic and semantic.configured),
+            "reranker": getattr(getattr(request.app.state, "district_reranker", None), "name", None),
+            "rerankerMode": settings.district_reranker_mode}
 
 
 def _feedback(request_body: FeedbackRequest, request: Request, forget: bool) -> FeedbackResponse:

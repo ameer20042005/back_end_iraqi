@@ -1,0 +1,554 @@
+{"id": "FUHOOD_2#3", "district": "العامرية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_2#10", "district": "الحكيمية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_2#63", "district": "نور ستي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_2#69", "district": "حي الجهاد", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_2#80", "district": "تكريت قادسية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_3#53", "district": "طويريج", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_4#27", "district": "حي الجهاد", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_4#54", "district": "بيسان", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_5#48", "district": "حي الجهاد", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_5#83", "district": "كيار ستي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_8#41", "district": "الوشاش", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_9#1", "district": "حي النداء", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_9#75", "district": "المقدادية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_10#63", "district": "الطوبجي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_10#131", "district": "حي نركال", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_11#39", "district": "الحمزة الشرقي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_11#92", "district": "حي الامير", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_11#127", "district": "شعب", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_12#83", "district": "الحمزة الشرقي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_12#107", "district": "دوره / الطعمه", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_2#4", "district": "القاهرة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#12", "district": "الشركة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#21", "district": "شركة الرنا", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#105", "district": "شركة الرنا", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#24", "district": "السويب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#27", "district": "البلديات", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#29", "district": "الناصرية ذي قار", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#32", "district": "حي الحسين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#35", "district": "التحرير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#40", "district": "الخضر", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#46", "district": "الاعظمية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#49", "district": "السيدية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#50", "district": "المسيب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#55", "district": "الكاظمية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#62", "district": "كاردن ستي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#71", "district": "الدورة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#78", "district": "الكمالية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#86", "district": "شارع 60", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#96", "district": "حي الصحفيين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#98", "district": "الداودي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#102", "district": "الحولي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#111", "district": "الغدير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#120", "district": "حي البنوك", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#121", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "FUHOOD_5#78", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "FUHOOD_2#124", "district": "المدينة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#126", "district": "بوابة العراق", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#138", "district": "الغدير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#143", "district": "الاعلام", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#152", "district": "الدورة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#154", "district": "ام الخيل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#155", "district": "السعدون", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#159", "district": "السيدية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_2#162", "district": "ابو الخصيب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#4", "district": "الكرادة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#5", "district": "مدينة الامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#9", "district": "حي الحر", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_7#6", "district": "حي الحر", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#17", "district": "سامراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#18", "district": "حي الواسطي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#20", "district": "الدولعي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#22", "district": "الغزالية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#42", "district": "كرمة علي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#48", "district": "حي الجهاد", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_3#49", "district": "الغزالية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#166", "district": "الغزالية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#4", "district": "السماوة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#7", "district": "شط العرب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#13", "district": "الرميثة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#15", "district": "الدورة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#16", "district": "حي بابل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#18", "district": "القاهرة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#23", "district": "KRO", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#26", "district": "قضاء الحسينية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#32", "district": "هفلان", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#60", "district": "حي الجهاد", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#64", "district": "مدينة الصدر", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#71", "district": "المحمودية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#72", "district": "تقاطع درويش", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#77", "district": "الصليخ", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_4#78", "district": "الداودي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#2", "district": "البلديات", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#6", "district": "حي اور", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#14", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "FUHOOD_5#15", "district": "امباير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#18", "district": "بغداد الجديدة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#19", "district": "الزبير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#28", "district": "الكرادة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#30", "district": "حي الزهراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#50", "district": "ماموستيان", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#68", "district": "الصالحية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#76", "district": "المعقل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#82", "district": "العطيفية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#85", "district": "الطالبية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#51", "district": "الطالبية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#113", "district": "الكريعات", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#114", "district": "الجادرية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#18", "district": "الجادرية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#115", "district": "حي المهندسين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_5#121", "district": "الاسكندرية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#1", "district": "حي الكرامة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#8", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "FUHOOD_6#15", "district": "ام الخيل الرابعة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#17", "district": "المشتل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#22", "district": "القادسية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#23", "district": "السيدية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#37", "district": "رحمانية الجعيفر", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#39", "district": "الزعفرانية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#42", "district": "الامين الثانية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#53", "district": "كويه", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#56", "district": "حي الميثاق", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#60", "district": "الطهمازية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#64", "district": "تكريت", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#66", "district": "الشالجية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_6#68", "district": "البلديات", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#120", "district": "البلديات", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_7#3", "district": "الفلوجة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_7#8", "district": "مدينة الامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_7#17", "district": "ابو الخصيب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_7#24", "district": "الطويسة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_7#27", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "FUHOOD_7#29", "district": "بروشكي", "status": "FUZZY_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_7#51", "district": "حي الاندلس", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_7#52", "district": "حي الامير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_7#54", "district": "التاجي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_7#57", "district": "الجانب الايمن", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#1", "district": "ابو الخصيب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#3", "district": "الدولعي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#8", "district": "جميلة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#11", "district": "الغزالية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#13", "district": "حي البساتين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#15", "district": "شارع طريق بغداد", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#21", "district": "المنصور", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#31", "district": "زاخو", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#42", "district": "بوابة العراق", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#45", "district": "العشار", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#52", "district": "الزعفرانية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_8#53", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "FUHOOD_8#59", "district": "السماوة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#11", "district": "الاسكان", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#22", "district": "حي الصحة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#35", "district": "شقق الخضراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#38", "district": "الصليخ", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#39", "district": "العامرية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#45", "district": "المربد القديمة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#46", "district": "الدورة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#70", "district": "العامرية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_9#71", "district": "حي العامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#1", "district": "شارع فلسطين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#8", "district": "حي الصمود", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#19", "district": "حي الشرطة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#53", "district": "الخالدية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#54", "district": "شارع 80", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#65", "district": "الصويرة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#67", "district": "العبارة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#70", "district": "جبلة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#81", "district": "البياع", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#83", "district": "زيونة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#91", "district": "السيدية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#94", "district": "حي الجامعة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#95", "district": "القادسية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#98", "district": "حي الزوراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#115", "district": "ام الخيل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#120", "district": "حي الجامعة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#126", "district": "بسماية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#130", "district": "ام الخيل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#145", "district": "سامراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#152", "district": "مشيرفة", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_10#156", "district": "الخالص", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#163", "district": "الحلة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_10#176", "district": "الرمادي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#7", "district": "حي العسكري", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#28", "district": "القادسية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#30", "district": "المنصور", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#35", "district": "حي الجهاد", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#47", "district": "الانبار رمادي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#52", "district": "الانصار", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#57", "district": "حي الجهاد", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#60", "district": "القاهرة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#68", "district": "الكفاءات", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#95", "district": "حي العامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#108", "district": "مدينة الامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#110", "district": "نهر الحجية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#51", "district": "نهر الحجية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#115", "district": "حي اور", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#116", "district": "الكرادة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#122", "district": "حي العامل", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "FUHOOD_11#130", "district": "حي الجامعة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_11#132", "district": "الفلاح الاولى", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#6", "district": "الاعظمية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#10", "district": "هيوا سيتي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#16", "district": "تكريت", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#20", "district": "المثنى", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#29", "district": "الصابيات", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#30", "district": "الشرقاط", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#32", "district": "حي النقيب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#34", "district": "برطلة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#37", "district": "بسماية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#53", "district": "العامرية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#58", "district": "الاعلام", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#62", "district": "الانبار رمادي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#74", "district": "الزبير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#82", "district": "ابو الخصيب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#85", "district": "حي الجهاد", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#86", "district": "السيدية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#98", "district": "حي العامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#101", "district": "ام الخيل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#103", "district": "الاعظمية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "FUHOOD_12#106", "district": "سوق الشيوخ", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "KHAYAL_5#2", "district": "الجمهورية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#7", "district": "شارع المعمل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#9", "district": "حي الموظفين", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#12", "district": "شعب", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#13", "district": "سوق الشيوخ", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#14", "district": "حي العامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#20", "district": "مدينة الصدر", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#23", "district": "حي الاصلاح", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#28", "district": "مدينة الصدر", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#31", "district": "سوق الشيوخ", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#35", "district": "الفحامة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#37", "district": "المعامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#38", "district": "المقدادية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#41", "district": "حي النداء", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_6#37", "district": "الهندية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "KHAYAL_5#27", "district": "بغداد", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "KHAYAL_6#9", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "KHAYAL_6#10", "district": "التاجي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "KHAYAL_6#18", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "KHAYAL_6#34", "district": "فريحة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_3#18", "district": "عواشة", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_3#43", "district": "العلم", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_3#44", "district": "الحارثية", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_3#54", "district": "الطالبية", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_3#66", "district": "شارع حيفا", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_4#1", "district": "الطارمية", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_4#13", "district": "دانيا ستي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_4#42", "district": "ام الكبر والغزلان", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_4#46", "district": "القادسية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#4", "district": "الهندية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#7", "district": "الراشدية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#13", "district": "الفحامة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#14", "district": "واحد اذار", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#17", "district": "الراشدية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#18", "district": "العباسية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#33", "district": "المقدادية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#37", "district": "المفرق", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#47", "district": "الدولعي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#51", "district": "حي الامير", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#52", "district": "حي الجهاد", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#73", "district": "المنصورية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#84", "district": "حي العدل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#87", "district": "الحمزة الشرقي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#106", "district": "الراشدية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#109", "district": "حي الانتصار", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#111", "district": "حي الجهاد", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#137", "district": "حي العسكري", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#141", "district": "حي العسكري", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#162", "district": "كبيسة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#197", "district": "السفحة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#204", "district": "سفوان", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#208", "district": "الشعب", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#221", "district": "الصليخ", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#223", "district": "الحمزة الشرقي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#234", "district": "البلديات", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#237", "district": "الشامية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#258", "district": "اليوسفية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#259", "district": "حي طارق", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#274", "district": "باب الدرب", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#284", "district": "الحمزة الشرقي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#308", "district": "كولان", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#313", "district": "الحمزة الشرقي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#4", "district": "المقدادية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#5", "district": "القادسية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#13", "district": "افرو ستي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#19", "district": "حي الجهاد", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#25", "district": "الماجدية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#32", "district": "حي الاندلس", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#34", "district": "حي العامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#38", "district": "التاجيات", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#86", "district": "حي العامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#93", "district": "شارع فلسطين", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#99", "district": "حي العامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#107", "district": "الامين الثانية", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#108", "district": "الكرادة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_8#3", "district": "حي الامير", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_8#5", "district": "الكفاءات", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_8#32", "district": "جميلة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_8#33", "district": "الراشدية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_8#38", "district": "حي اور", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_8#41", "district": "بسماية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_8#56", "district": "حي الزهراء", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_8#68", "district": "البراضعية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_9#59", "district": "الفلوجة - حي الشهداء", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#2", "district": "حي الموظفين", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#16", "district": "العامرية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#21", "district": "الدورة - ميكانيك", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#26", "district": "القادسية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#27", "district": "الرمادي -  شارع المستودع", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#41", "district": "مناوي باشا", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#42", "district": "حي الخضراء", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#76", "district": "القادسية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#100", "district": "حي الصحة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#101", "district": "مجمع بوابة النجف", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#107", "district": "مدينة الامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#112", "district": "العامرية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#119", "district": "الحيانية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_10#129", "district": "مناوي باشا", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#5", "district": "الكرادة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#7", "district": "الماجدية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#16", "district": "الكوت", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#22", "district": "مدينة الامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#67", "district": "شارع فلسطين", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#73", "district": "شارع فلسطين", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#85", "district": "جميلة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#98", "district": "حي العامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#107", "district": "العامرية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#112", "district": "شارع فلسطين", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#113", "district": "حي الامين", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#117", "district": "العبيدي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#121", "district": "الشيباني", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#147", "district": "شارع 40", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#153", "district": "القادسية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#157", "district": "دلي عباس", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_12#7", "district": "المسيب", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_12#24", "district": "المعقل", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_12#27", "district": "حي الجهاد", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_12#33", "district": "العامرية", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_12#40", "district": "حي الشهداء", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_13#2", "district": "القادسية الاولى", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_13#57", "district": "الهندية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#46", "district": "حي النداء", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#54", "district": "الفلوجة - جغيفي الثانية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#57", "district": "بسماية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#73", "district": "حي النداء", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#93", "district": "مدينة الامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#117", "district": "واحد اذار", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#176", "district": "القادسية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#186", "district": "جميلة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#204", "district": "مناوي باشا", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#225", "district": "الغراف", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#227", "district": "شارع فلسطين", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#247", "district": "الشامية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#260", "district": "حي الامين", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#273", "district": "مجمع نجمه", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#291", "district": "بسماية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#299", "district": "شارع 40", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#307", "district": "حي المعالف", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#322", "district": "الحارثية", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#323", "district": "المسيب", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#324", "district": "حي الجامعة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#7", "district": "الحردانية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#47", "district": "حي القادسية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#50", "district": "شارع 40", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#52", "district": "الدورة - الوادي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#72", "district": "شفتة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#75", "district": "العبيدي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#93", "district": "مناوي باشا", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#96", "district": "المقدادية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#104", "district": "مدينة الامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#110", "district": "شارع فلسطين", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#8", "district": "الامين الثانية", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#15", "district": "المنصور - الداوودي", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#24", "district": "الدورة - الطعمة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#45", "district": "شارع 40", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#49", "district": "حي العامل", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#83", "district": "العامرية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#94", "district": "المنصور - الاميرات", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#122", "district": "الطوبجي", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#130", "district": "العامرية", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#136", "district": "الكرامة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#139", "district": "الوشاش", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#158", "district": "الدورة - الطعمة", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#160", "district": "سوق الشيوخ", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#174", "district": "حي الجهاد", "status": "EXACT_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#178", "district": "حي الجهاد", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_2#10", "district": "المشتل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#13", "district": "الغزالية - الهياكل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#22", "district": "الهورة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#25", "district": "حي السلام", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#31", "district": "الرميثة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#35", "district": "الشعب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#37", "district": "السيدية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#38", "district": "الزعفرانية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#52", "district": "الاعلام", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#56", "district": "قطاع 30", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#66", "district": "السيدية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#67", "district": "حي الاصلاح", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#72", "district": "البياع", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#73", "district": "حي اور", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_2#76", "district": "الدورة  - الشرطة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_3#12", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_3#35", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_3#47", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_3#62", "district": "مدينة الامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#312", "district": "مدينة الامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_4#12", "district": "حي التقية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_4#16", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_4#26", "district": "تسعين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_4#30", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_4#34", "district": "سامراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_5#12", "district": "زيونة", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#24", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#30", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#147", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#304", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#31", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#38", "district": "حي الموظفين", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#131", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#167", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#184", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_11#120", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_15#19", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#182", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#276", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#196", "district": "الحلة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_5#225", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_5#228", "district": "حي الشهداء", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#245", "district": "المشرح", "status": "NORMALIZED_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_5#277", "district": "سامراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_6#5", "district": "الفلوجة - حي الشهداء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_6#6", "district": "ناحية واسط", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_6#11", "district": "حي الخضراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_6#15", "district": "سامراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_6#18", "district": "سامراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_6#25", "district": "حي الحسين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_6#27", "district": "خالدية - صديقية", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_6#68", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_9#48", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_6#71", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_9#51", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_11#29", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_6#77", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_6#81", "district": "الرمادي - الشراع", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_7#1", "district": "كوت الحجاج", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_7#28", "district": "الاعلام", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#277", "district": "الاعلام", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_7#41", "district": "المدينة", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#4", "district": "المدينة", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_15#114", "district": "المدينة", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_16#129", "district": "المدينة", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#51", "district": "الغدير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_7#64", "district": "جكوك", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_7#68", "district": "المدائن", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_7#70", "district": "ابله", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_7#72", "district": "حي الامام", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_7#78", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_11#126", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_14#63", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_16#31", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_7#82", "district": "بوابة العراق", "status": "FUZZY_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#85", "district": "بغداد الجديدة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_7#91", "district": "حي السماح", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_7#98", "district": "العباسية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_8#12", "district": "بعقوبة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_8#17", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_8#29", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_16#151", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_8#36", "district": "مدينة الامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#104", "district": "مدينة الامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#111", "district": "مدينة الامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_8#47", "district": "حي الجزائر", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_8#53", "district": "شارع 40", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_8#59", "district": "المشتل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_9#6", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_9#36", "district": "سامراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_9#41", "district": "المعتصم", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_9#43", "district": "طوزخرماتو", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_10#22", "district": "بني سعد المعسكر", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_10#32", "district": "الكمالية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_10#34", "district": "ابو الخصيب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_10#40", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_10#46", "district": "حي العامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#21", "district": "حي العامل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_10#55", "district": "اليرموك", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_10#56", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_14#50", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_10#62", "district": "الصالحية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_10#99", "district": "القادسية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_10#126", "district": "نفق الشرطة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_10#130", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_16#50", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_11#1", "district": "التحسينية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#10", "district": "التحسينية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_11#40", "district": "العبيدي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_11#78", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_11#81", "district": "رأس دومير", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_11#138", "district": "الرميثة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_11#139", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_14#158", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_14#217", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_14#302", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_12#12", "district": "الحمزة الغربي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_12#13", "district": "سبع قصور", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_12#17", "district": "القرية الفرنسية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_12#32", "district": "جوار جرا", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_12#45", "district": "حي سومر", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_12#47", "district": "حي المعلمين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_12#51", "district": "الجنينة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_12#55", "district": "العمل الشعبي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_12#65", "district": "بعقوبه الفلاحه", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_13#66", "district": "دلي عباس", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#21", "district": "الحلة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#32", "district": "الزعفرانية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#34", "district": "حي النفط", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#182", "district": "حي النفط", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#40", "district": "القرنة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#71", "district": "الزعفرانية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#120", "district": "الغدير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#124", "district": "الطوبجي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#136", "district": "حي الرسالة الثالثة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#141", "district": "الاعظمية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#145", "district": "الاعلام", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#163", "district": "الفلوجة - شارع الثرثار", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#178", "district": "المعقل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#184", "district": "البكرلي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#193", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_14#199", "district": "الصويرة", "status": "AI_MATCH", "sentToLlm": null}
+{"id": "ALZAEEM_14#205", "district": "عواشة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#222", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_14#232", "district": "الغزالية - الهياكل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#246", "district": "الشعب", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#255", "district": "الاعظمية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#259", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_14#264", "district": "الكاظمية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#265", "district": "حي الامين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#267", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_14#279", "district": "بغداد الجديدة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#283", "district": "الاسكان", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_14#304", "district": "الجمعيات", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_15#9", "district": "حي حطين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_15#18", "district": "تكريت", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#90", "district": "تكريت", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_15#49", "district": "التنومة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_15#60", "district": "خانقين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_15#82", "district": "العلم", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_15#84", "district": "سامراء", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_15#97", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_15#106", "district": "الحكيمية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_15#107", "district": "الكرادة خارج", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_15#117", "district": "حي الامين", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#5", "district": "السيدية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#6", "district": "الدير", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#9", "district": "المشتل", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#23", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_16#43", "district": "مجمع الايادي", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#65", "district": "الشالجية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#68", "district": "جويبة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#100", "district": "كنطرة السلام", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#128", "district": "حي الجامعة", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#131", "district": "القادسية", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#145", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_16#153", "district": null, "status": "UNRESOLVED", "sentToLlm": null}
+{"id": "ALZAEEM_16#159", "district": "سيكانيان", "status": "SPLIT_ADDRESS", "sentToLlm": null}
+{"id": "ALZAEEM_16#185", "district": "مالطا", "status": "FUZZY_MATCH", "sentToLlm": null}

@@ -1,12 +1,13 @@
 """Stateless request orchestration for catalog-safe district correction.
 
 Deterministic matching handles exact, normalized, typo and address-split forms.
-The LLM is used for ambiguous cases; small requests may also use it as a verifier,
-while large Excel uploads avoid redundant cloud calls for strong local matches.
+The LLM is used for ambiguous cases. With a trained reranker in decide mode the order is
+rules, then the model, then the LLM only where the rules and the model disagree.
 """
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from collections import Counter, defaultdict
 
 from starlette.concurrency import run_in_threadpool
@@ -14,12 +15,13 @@ from starlette.concurrency import run_in_threadpool
 from .aliases import AUTO, REVIEWER, AliasStore
 from .catalog import Catalog
 from .llm import LLMClient, LLMError
-from .matching import (CENTER_REVIEW, CERTAIN_REASONS, _strip_prefix, candidate_names, clean_details,
-                       contradicts, is_center, match_case, memory_key, remembered_details, text_support,
-                       unresolved, without_governorate)
+from .matching import (CENTER_REVIEW, CERTAIN_REASONS, _strip_prefix, adds_unwritten, candidate_names,
+                       clean_details, contradicts, is_center, match_case, memory_key, named_as_facility,
+                       remembered_details, text_support, unresolved, without_district, without_governorate)
 from .models import (CaseRequest, CaseResponse, CorrectionRequest, CorrectionResponse, FeedbackRejection,
                      FeedbackRequest, FeedbackResponse)
 from .normalization import normalize, phrase_key
+from .reranker import DistrictReranker, ShadowLog
 from .semantic import EmbeddingError, SemanticIndex
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,9 @@ _MEMORY_REASON = "Confirmed correction remembered for this company and governora
 _LEARNED_REASON = "Learned from an earlier answer two independent methods agreed on."
 _REMEMBERED = {REVIEWER: (_MEMORY_REASON, 0.98), AUTO: (_LEARNED_REASON, 0.95)}
 _SEMANTIC_AGREES = " Semantic search agrees."
+_MODEL_AGREES = " The trained model agrees."
+_MODEL_REASON = "Picked by the trained model among the closest catalog names (score {:.2f})."
+_MODEL_UNSURE = " The trained model found no reliable district."
 _SIMILAR_PER_CASE = 10
 
 _CHUNK = 20
@@ -52,7 +57,9 @@ _LEGACY_STATE_CODES = {
 class CorrectionService:
     def __init__(self, catalog: Catalog, llm: LLMClient, max_llm_cases: int = 1000,
                  llm_concurrency: int = 4, aliases: AliasStore | None = None,
-                 semantic: SemanticIndex | None = None, auto_learn: bool = False):
+                 semantic: SemanticIndex | None = None, auto_learn: bool = False,
+                 reranker: DistrictReranker | None = None, shadow_log: ShadowLog | None = None,
+                 reranker_decides: bool = False):
         self.catalog = catalog
         self.llm = llm
         self.max_llm_cases = max_llm_cases
@@ -60,6 +67,9 @@ class CorrectionService:
         self.aliases = aliases
         self.semantic = semantic
         self.auto_learn = auto_learn and aliases is not None
+        self.reranker = reranker
+        self.shadow_log = shadow_log
+        self.reranker_decides = reranker_decides
 
     def _state_names(self, code: str) -> tuple:
         state = self.catalog.states.get(code, {})
@@ -121,6 +131,18 @@ class CorrectionService:
         learned: dict[int, tuple] = {}
         similar, semantic_agreed = await self._semantic_check(company, llm_groups, results, learned)
 
+        shadow = self._shadow_targets(request.cases, llm_groups, results) if self.reranker else {}
+        rules_picks = {sequence: None if results[sequence].status == "UNRESOLVED" else results[sequence].correctDistrict
+                       for sequence in shadow}
+        deciding = bool(shadow) and self.reranker_decides
+        model_picks, model_settled = {}, 0
+        if deciding:
+            # Rules, then the trained model, then the LLM as referee: the model settles the
+            # rows it agrees on with the rules and the rows the rules could not place; only
+            # the rows where the two disagree reach the LLM (best on held-out gold, training/).
+            model_picks = await run_in_threadpool(self._model_picks, company, shadow, rules_picks)
+            model_settled = self._model_decide(shadow, rules_picks, model_picks, results, llm_groups, learned)
+
         sent_to_llm = 0
         jobs = []
         for code, cases in llm_groups.items():
@@ -151,7 +173,14 @@ class CorrectionService:
                 await self._apply_llm(company, code, chunk, candidates, full_names, suggestions, results, similar,
                                       learned)
 
+        # In shadow mode the trained reranker reads the same uncertain cases in a worker thread
+        # while the LLM batches are awaited: in parallel, adding no latency, and never deciding.
+        model_task = (asyncio.ensure_future(run_in_threadpool(self._model_picks, company, shadow, rules_picks))
+                      if shadow and not deciding else None)
         await asyncio.gather(*(resolve_batch(job) for job in jobs))
+        if model_task:
+            model_picks = await model_task
+        model_agreed = self._record_shadow(company, shadow, rules_picks, model_picks, results)
         saved = await run_in_threadpool(self._learn, company, learned) if self.auto_learn and learned else 0
 
         ordered = [results[case.excelSequence] for case in request.cases]
@@ -161,8 +190,91 @@ class CorrectionService:
                    "fuzzy": counts["FUZZY_MATCH"], "ai": counts["AI_MATCH"], "sent_to_llm": sent_to_llm,
                    "remembered": sum(result.reason in (_MEMORY_REASON, _LEARNED_REASON) for result in ordered),
                    "learned": saved,
-                   "semantic_agreed": semantic_agreed, "unresolved": counts["UNRESOLVED"]}
+                   "semantic_agreed": semantic_agreed, "model_cases": len(model_picks),
+                   "model_settled": model_settled,
+                   "model_agreed": model_agreed, "unresolved": counts["UNRESOLVED"]}
         return CorrectionResponse(companyName=company, cases=ordered), metrics
+
+    def _shadow_targets(self, cases: list[CaseRequest], llm_groups: dict, results: dict) -> dict:
+        """{excelSequence: (state code, case)} for the cases the rules did not settle."""
+        targets = {case.excelSequence: (code, case) for code, group in llm_groups.items() for case in group}
+        for case in cases:
+            result = results[case.excelSequence]
+            if (case.excelSequence not in targets and result.status == "UNRESOLVED" and result.errorCode is None
+                    and result.stateCode in self.catalog.states and case.district.strip()):
+                targets[case.excelSequence] = (result.stateCode, case)
+        return targets
+
+    def _model_picks(self, company: str, targets: dict, rules_picks: dict) -> dict:
+        """{excelSequence: (name or None, score)}; empty when the model fails."""
+        picks = {}
+        try:
+            for sequence, (code, case) in targets.items():
+                picks[sequence] = self.reranker.pick(case.district, case.address,
+                                                     self.catalog.districts(company, code),
+                                                     self._state_names(code), rules_picks[sequence])
+        except Exception:
+            logger.exception("district_reranker_failed")
+            return {}
+        return picks
+
+    def _model_decide(self, targets: dict, rules_picks: dict, model_picks: dict, results: dict,
+                      llm_groups: dict, learned: dict) -> int:
+        """Settle what the model can and leave in llm_groups only the rows the LLM referees.
+
+        Rules and model agree -> the rules' answer, confirmed. The rules found a district and
+        the model another (or none) -> the LLM decides. The rules found nothing or only the
+        center -> the model's pick when it clears its threshold, else the rules' result stays:
+        an LLM guess there added more false districts than it found (training/evaluate.py).
+        Returns the number of rows settled without the LLM.
+        """
+        settled = set()
+        for sequence, (name, score) in model_picks.items():
+            code, case = targets[sequence]
+            result, rule = results[sequence], rules_picks[sequence]
+            state_names = self._state_names(code)
+            center = rule is not None and is_center(rule, state_names)
+            if name is not None and name == rule:
+                update = {"reason": result.reason + _MODEL_AGREES}
+                if not center:
+                    update["confidence"] = max(result.confidence, 0.95)
+                    learned[sequence] = (code, case, rule)
+                results[sequence] = result.model_copy(update=update)
+            elif rule is not None and not center:
+                continue
+            elif name is not None:
+                details, moved = remembered_details(case, name, state_names)
+                results[sequence] = CaseResponse(
+                    excelSequence=case.excelSequence, originalDistrict=case.district, correctDistrict=name,
+                    addressDetails=details, confidence=0.9, status="SPLIT_ADDRESS" if moved else "AI_MATCH",
+                    reason=_MODEL_REASON.format(score), stateCode=code)
+            else:
+                results[sequence] = result.model_copy(update={"reason": result.reason + _MODEL_UNSURE})
+            settled.add(sequence)
+        for code in list(llm_groups):
+            llm_groups[code] = [case for case in llm_groups[code] if case.excelSequence not in settled]
+            if not llm_groups[code]:
+                del llm_groups[code]
+        return len(settled)
+
+    def _record_shadow(self, company: str, targets: dict, rules_picks: dict, model_picks: dict,
+                       results: dict) -> int:
+        """Show the model's pick beside the answer and log both; returns how often they agree."""
+        agreed, records = 0, []
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        for sequence, (name, score) in model_picks.items():
+            result = results[sequence]
+            final = None if result.status == "UNRESOLVED" else result.correctDistrict
+            agreed += name == final
+            results[sequence] = result.model_copy(update={"modelDistrict": name})
+            code, case = targets[sequence]
+            records.append({"time": now, "company": company, "stateCode": code, "excelSequence": sequence,
+                            "district": case.district, "address": case.address, "rules": rules_picks[sequence],
+                            "final": final, "finalStatus": result.status, "model": name, "modelScore": score,
+                            "reranker": self.reranker.name})
+        if self.shadow_log is not None:
+            self.shadow_log.write(records)
+        return agreed
 
     async def _semantic_check(self, company: str, llm_groups: dict, results: dict,
                               learned: dict) -> tuple[dict, int]:
@@ -379,6 +491,18 @@ class CorrectionService:
                 results[case.excelSequence] = self._fallback(
                     suggestion, case, f"AI pick {name} differs from the place written in the text.", None)
                 continue
+            if (name != suggestion.correctDistrict and suggestion.status != "UNRESOLVED"
+                    and adds_unwritten(text, name, suggestion.correctDistrict)):
+                # A longer catalog name whose extra words are not in the text ("شارع فلسطين"
+                # -> "الادريسي / شارع فلسطين").
+                results[case.excelSequence] = self._fallback(
+                    suggestion, case, f"AI pick {name} adds words the text does not write.", None)
+                continue
+            if name != suggestion.correctDistrict and named_as_facility(text, name):
+                # "مقابل المركز الشرطه" names a police station, not "حي الشرطة".
+                results[case.excelSequence] = self._fallback(
+                    suggestion, case, f"AI pick {name} is only part of a landmark name in the text.", None)
+                continue
             state_names = self._state_names(code)
             if (name != suggestion.correctDistrict and suggestion.status != "UNRESOLVED"
                     and suggestion.confidence >= 0.93 and is_center(name, state_names)
@@ -396,7 +520,7 @@ class CorrectionService:
             if suggested_details is not None:
                 # An empty model field must not erase the customer's address.
                 # The deterministic splitter is stronger when both methods agree.
-                supplied = clean_details(suggested_details, state_names)
+                supplied = without_district(clean_details(suggested_details, state_names), name, state_names)
                 if supplied:
                     details = supplied
                 elif suggestion.status != "UNRESOLVED" and suggestion.correctDistrict == name:

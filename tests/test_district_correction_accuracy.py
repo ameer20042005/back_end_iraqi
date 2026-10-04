@@ -589,6 +589,26 @@ def test_reported_fuhood_rows(catalog, state, district, expected):
     assert one(catalog, district, "FUHOOD", state).correctDistrict == expected
 
 
+# ALZAEEM's catalog names areas as "parent - child" and often has no bare parent.
+@pytest.mark.parametrize("state, district, address, expected", [
+    ("DHI", "الناصريه / الشطره", "", "قضاء الشطرة"),
+    ("DHI", "اخرى", "ناصرية // ناحية الفضلية / قرب المستوصف النموذجي\r\n IQ-DQ-AR \r\nIraq", "الفضلية"),
+    ("BAS", "البصره / ابي الخصيب", "", "ابو الخصيب"),
+    ("BGD", "الدورة - حي الوادي", "", "الدورة - الوادي"),
+    ("BBL", "بابل _ حلة _ جمعية", "", "الجمعية"),
+    ("NJF", "النجف الاشرف / حي النفط", "", "حي النفط"),
+    ("SAH", "تكريت - القادسية - حي الشهداء", "", "القادسية"),
+])
+def test_reported_alzaeem_rows(catalog, state, district, address, expected):
+    assert one(catalog, district, "ALZAEEM", state, address).correctDistrict == expected
+
+
+@pytest.mark.parametrize("district", ["بغداد / الدوره", "بغداد / مدينه الصدر"])
+def test_parent_area_with_many_catalog_children_stays_unresolved(catalog, district):
+    assert one(catalog, district, "ALZAEEM", "BGD").status == "UNRESOLVED"
+
+
+
 def test_ai_agreeing_with_a_review_suggestion_is_not_boosted(catalog):
     def answer(cases):
         return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "بغداد",
@@ -652,10 +672,16 @@ def test_area_before_a_street_stays_the_district(catalog, state, district, expec
 
 def test_ai_agreeing_with_the_suggestion_raises_confidence(catalog):
     def answer(cases):
-        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "الشطرة",
-                 "addressDetails": "", "stateCode": "DHI", "status": "AI_MATCH", "reason": "same"}]
-    row = one(catalog, "الناصريه الشطره", "FUHOOD", "DHI", llm=FakeLLM(answer))
-    assert (row.correctDistrict, row.confidence) == ("الشطرة", 0.97)
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": "الكرادة",
+                 "addressDetails": "", "stateCode": "BGD", "status": "AI_MATCH", "reason": "same"}]
+    row = one(catalog, "الكرادة شارع الرشيد", "FUHOOD", "BGD", llm=FakeLLM(answer))
+    assert (row.correctDistrict, row.confidence) == ("الكرادة", 0.97)
+
+
+def test_center_before_the_district_is_context_and_needs_no_ai(catalog):
+    llm = FakeLLM([])
+    row = one(catalog, "الناصريه الشطره", "FUHOOD", "DHI", llm=llm)
+    assert (row.correctDistrict, row.status) == ("الشطرة", "NORMALIZED_MATCH") and llm.calls == []
 
 
 def test_ai_unresolved_falls_back_to_the_suggestion(catalog):
@@ -814,3 +840,61 @@ def test_honorific_is_dropped_from_ai_details(catalog):
                  "addressDetails": "الاشرف", "stateCode": "NJF", "status": "SPLIT_ADDRESS", "reason": "area"}]
     row = one(catalog, "النجف الاشرف حي الجامعه", "FUHOOD", "NJF", llm=FakeLLM(answer))
     assert (row.correctDistrict, row.addressDetails) == ("حي الجامعة", "")
+
+
+def _ai(pick, details="", status="SPLIT_ADDRESS"):
+    def answer(cases):
+        return [{"excelSequence": 1, "originalDistrict": cases[0].district, "correctDistrict": pick,
+                 "addressDetails": details, "stateCode": cases[0].stateCode, "status": status, "reason": "llm"}]
+    return FakeLLM(answer)
+
+
+def test_ai_longer_name_with_only_unwritten_words_is_rejected(catalog):
+    row = one(catalog, "بغداد شارع فلسطين تقاطع الصخرة", "FUHOOD", "BGD", llm=_ai("الادريسي / شارع فلسطين"))
+    assert row.correctDistrict == "شارع فلسطين" and "adds words" in row.reason
+
+
+def test_ai_pick_written_only_inside_a_landmark_is_rejected(catalog):
+    row = one(catalog, "البصره مقابيل المركز الشرطه قرب مستشفى العام البصره", "FUHOOD", "BAS",
+              llm=_ai("حي الشرطة"))
+    assert row.status == "UNRESOLVED" and "landmark" in row.reason
+
+
+@pytest.mark.parametrize("state, district, pick, details, expected", [
+    ("BGD", "بغداد حي الإعلام الشباب بالقرب من جامع الحبيب المصطفى", "الاعلام",
+     "حي الإعلام الشباب بالقرب من جامع الحبيب المصطفى", "الشباب بالقرب من جامع الحبيب المصطفى"),
+    ("BGD", "بغداد مجمع بوابة العراق / مقابل متنزه الزوراء عمارة 15", "بوابة العراق",
+     "مجمع بوابة العراق / مقابل متنزه الزوراء عمارة 15", "مقابل متنزه الزوراء عمارة 15"),
+    # A street named like the district stays.
+    ("BAS", "البصره شارع الجزائر قرب مستشفى الموسوي", "الجزائر",
+     "شارع الجزائر قرب مستشفى الموسوي", "شارع الجزائر قرب مستشفى الموسوي"),
+    # Another governorate's name at the end is part of a landmark here.
+    ("SAH", "صلاح الدين تكريت القادسيه شارع جليل القصاب خلف مركز شرطة القادسية", "تكريت قادسية",
+     "شارع جليل القصاب خلف مركز شرطة القادسية", "شارع جليل القصاب خلف مركز شرطة القادسية"),
+])
+def test_ai_details_drop_the_repeated_district_only(catalog, state, district, pick, details, expected):
+    assert one(catalog, district, "FUHOOD", state, llm=_ai(pick, details)).addressDetails == expected
+
+
+# A replaced letter in a short word: a slip only on a neighbouring key or the last letter.
+@pytest.mark.parametrize("company, state, district, expected", [
+    ("RIYAM", "ARB", "اربيل زاتكو ٩٤", "زانكو"),            # ت/ن neighbouring keys
+    ("RIYAM", "BGD", "بغداد زيزنه", "زيونة"),               # ز/و neighbouring keys
+    ("RIYAM", "DHI", "ذي قار الشكره", "الشطرة"),            # ك/ط neighbouring keys
+])
+def test_keyboard_slips_in_short_words_are_corrected(catalog, company, state, district, expected):
+    assert one(catalog, district, company, state).correctDistrict == expected
+
+
+@pytest.mark.parametrize("company, state, district, wrong", [
+    ("RIYAM", "QAD", "الديوانية شركة الفنجان شارع الاطارات", "حي الشرطة"),   # a facility word
+    ("RIYAM", "BAS", "البصرة - حي حطين قرب جمعية الفواطم", "حي الحسين"),    # ط/س far apart
+    ("RIYAM", "WST", "واسط - مزرعة الصويرة", "المزركة"),
+])
+def test_other_real_words_are_not_typo_corrected(catalog, company, state, district, wrong):
+    assert one(catalog, district, company, state).correctDistrict != wrong
+
+
+def test_center_before_words_shared_by_several_names_is_kept_for_review(catalog):
+    row = one(catalog, "بغداد - رصافة معلمين", "KHAYAL", "BGD")
+    assert row.correctDistrict == "بغداد" and row.confidence < 0.9

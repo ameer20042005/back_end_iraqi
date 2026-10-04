@@ -47,13 +47,17 @@ def matching_key(value: str) -> str:
     return value
 
 
+# "ابي الخصيب" / "ابا غريب" are grammatical forms of "ابو".
+_KUNYA = {"ابي": "ابو", "ابا": "ابو"}
+
+
 @lru_cache(maxsize=100000)
 def word_key(word: str) -> str:
-    """Spelling key of one word: ى/ي, ة/ه, hamza and the article are ignored."""
+    """Spelling key of one word: ى/ي, ة/ه, hamza, the article and the case of "ابو" are ignored."""
     value = normalize(word).replace("ى", "ي").replace("ة", "ه").replace("ء", "")
     if value.startswith("ال") and len(value) > 4:
         value = value[2:]
-    return value
+    return _KUNYA.get(value, value)
 
 
 # Ordinals written as words or digits name the same place ("نور ستي الثانيه" = "نور ستي2").

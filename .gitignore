@@ -6,5 +6,11 @@ __pycache__/
 *.safetensors
 .env
 app/features/district_correction/data/*.sqlite3
+app/features/district_correction/data/*.jsonl
 app/features/district_correction/data/*.tmp
 benchmark-results/
+
+# District model workspace: generated batches, errors and trained models
+training/data/batches/
+training/data/errors.jsonl
+training/models/

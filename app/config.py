@@ -146,6 +146,13 @@ class Settings:
     # تتخطى الحالة الـLLM فقط إذا كان أقرب اسم دلالياً هو نتيجة القواعد نفسها
     # وبفارق لا يقل عن هذا الهامش عن الاسم التالي.
     district_embedding_agree_margin: float = field(default_factory=lambda: float(os.getenv("DISTRICT_EMBEDDING_AGREE_MARGIN", "0.03")))
+    # نموذج Reranker المدرَّب في training/. فارغ = معطّل.
+    district_reranker_path: str = field(default_factory=lambda: os.getenv("DISTRICT_RERANKER_PATH", ""))
+    # decide: القواعد ثم النموذج ثم الـLLM حَكَماً فقط حين يختلف النموذج مع القواعد.
+    # shadow: النموذج يعمل بالتوازي مع الـLLM ويُظهر اختياره في modelDistrict دون أن يقرّر.
+    district_reranker_mode: str = field(default_factory=lambda: os.getenv("DISTRICT_RERANKER_MODE", "decide").strip().lower())
+    district_reranker_log_path: Path = field(default_factory=lambda: Path(os.getenv(
+        "DISTRICT_RERANKER_LOG_PATH", str(Path(__file__).resolve().parent / "features" / "district_correction" / "data" / "reranker_shadow.jsonl"))))
 
     # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
     # مفرَّغ عليه اللهجة العربية (نموذج transformers عادي، يعمل بعملية FastAPI

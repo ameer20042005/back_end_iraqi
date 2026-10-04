@@ -41,6 +41,8 @@ class CaseResponse(BaseModel):
     reason: str
     stateCode: str
     errorCode: str | None = None
+    # Shadow pick of the trained reranker; informational only, never the answer.
+    modelDistrict: str | None = None
 
 
 class CorrectionResponse(BaseModel):
