@@ -40,6 +40,15 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 
 السكربت يكتشف الموديل المحمَّل من `/v1/models` ويمرّر `LLM_BASE_URL` و`LLM_MODEL` لـ `app/config.py`. لوحة الاختبار على http://127.0.0.1:8000/test تعرض الرابط والموديل المستعملين فعلياً.
 
+> ⚠️ LM Studio يعرض بـ `/v1/models` **كل** الموديلات المنزَّلة، محمَّلة أم لا. إذا اكتشف السكربت موديلاً غير محمَّل يرد `/v1/chat/completions` بـ `AI_MODEL_NOT_LOADED`؛ حدّد الموديل صراحةً بـ `LLM_MODEL=<id>` (مثل `google/gemma-4-e4b`). `GET /health/llm` يكشف الحالة الحقيقية.
+
+متغيّرات بيئة إضافية للتشغيل المحلي:
+
+| المتغيّر | الافتراضي | الوصف |
+|---|---|---|
+| `LLM_REQUEST_TIMEOUT_SECONDS` | `120` | مهلة طلب توليد واحد؛ تجاوزها يرجع `AI_REQUEST_TIMEOUT` (504) |
+| `LLM_VISION` | `auto` | دعم الصور: `auto` يسأل LM Studio (`type=vlm`)، وإن تعذّر (vLLM) يُفترض الدعم؛ `true`/`false` يفرضان القيمة |
+
 ## الرفع على RunPod — Pod مباشر بصورة Ubuntu 22.04 خام
 
 > دليل تفصيلي كامل خطوة بخطوة (مع حل المشاكل الشائعة) في [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md). لا حاجة لبناء أي صورة Docker مخصصة ولا حتى صورة vLLM جاهزة — `start.sh` يبني كل شي من الصفر.
@@ -63,6 +72,7 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 | النقطة | الوصف | يحتاج مفتاح |
 |---|---|---|
 | `GET /health` | فحص الصحة | لا |
+| `GET /health/llm` | هل خادم النموذج متاح، والموديل محمَّل، ويدعم الصور؟ (503 إن لم يكن جاهزاً) | لا |
 | `GET /gpu` | معلومات GPU/CUDA وحالة محرك الموديل | لا |
 | `GET /metrics` | إحصاءات عميل vLLM (طلبات، أخطاء، أزمنة استجابة) | لا |
 | `POST /v1/chat/completions` | واجهة OpenAI/Spring AI بلا حالة — native function calling، والتنفيذ الفعلي للأدوات عند jbot | `openai_compat_api_key` |
@@ -75,6 +85,15 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 | `POST /voice_followup/respond` | يستقبل رد الزبون الصوتي، يحلّل السبب ويرسله لباك اند السستم، يرجع صوت شكر WAV | `voice_followup_api_key` |
 | `GET /docs` | واجهة Swagger التفاعلية | لا |
 | `GET /test` | لوحة اختبار API تفاعلية (HTML/CSS/JS ثابتة، بدون تبعيات) — خانات مفاتيح API معبّأة مسبقاً بالشريط الجانبي — انظر [RUNPOD_DEPLOY.md](RUNPOD_DEPLOY.md#لوحة-اختبار-api-test-console) |
+
+### `/v1/chat/completions` — سلوك مهم
+
+- **الصور**: أجزاء `image_url` في الرسائل تصل الموديل كما هي (كانت تُحوَّل لنص JSON). إذا كان الموديل لا يدعم الصور يُرفض الطلب **قبل** إرسالها بـ 422 `MODEL_DOES_NOT_SUPPORT_VISION`.
+- **فحص قبل التوليد**: خادم النموذج غير متاح ← 503 `LM_STUDIO_UNAVAILABLE`؛ الموديل غير محمَّل ← 503 `AI_MODEL_NOT_LOADED`؛ المهلة ← 504 `AI_REQUEST_TIMEOUT`. كل رد خطأ يحوي `error.code` ثابتاً يقرأه jbot آلياً.
+- **التفكير معطّل** (`reasoning_effort: "none"` في [llm_options.py](app/llm_options.py)): الرد ~1.5–3 ثوانٍ على LM Studio بدل 4–17.
+- **استرداد نية الأداة**: بلا تفكير يكتب الموديل أحياناً «نستدعي الدالة find_…» نصاً بدل استدعائها. إذا ذكر الرد اسم أداة مرسلة، أو — في محادثة فيها جدول مرفق — عبّر عن نية استعمال أداة أو سأل عن الأعمدة، يُعاد التوليد مرة واحدة بـ `tool_choice="required"`. لا يحدث هذا بعد نتيجة أداة (لا حلقات).
+- **رد فارغ**: إذا رجع الموديل رداً فارغاً يُعاد التوليد مرة واحدة (بـ `tool_choice="none"` بعد نتيجة أداة).
+- **وسائط الأداة** يجب أن تكون كائن JSON؛ اسم أداة غير مرسل أو وسائط مشوّهة لا تُمرَّر للعميل.
 
 جسم طلب المبيعات: model وmessages وtools، مع stream اختيارياً. الصور بصيغة image_url داخل الرسائل. [الأمثلة والعقود](docs/sales-openai-compatible.md).
 

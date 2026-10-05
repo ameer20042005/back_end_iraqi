@@ -10,7 +10,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
-from app.engine import LLMUpstreamError, llm_engine
+from app.engine import (
+    AI_MODEL_NOT_LOADED,
+    AI_REQUEST_TIMEOUT,
+    LM_STUDIO_UNAVAILABLE,
+    MODEL_DOES_NOT_SUPPORT_VISION,
+    LLMUpstreamError,
+    llm_engine,
+)
+from app.model_status import get_model_status
 from app.features.district_correction.router import load_catalog as load_district_catalog
 from app.features.district_correction.router import router as district_correction_router
 from app.features.order_intake.router import router as order_intake_router
@@ -75,12 +83,25 @@ app.add_middleware(
     ],
 )
 
+# حالة HTTP لكل رمز خطأ: 503/504 مؤقتة (يجوز للعميل إعادة المحاولة)،
+# و422 نهائية (الطلب نفسه غير قابل للخدمة بهذا الموديل).
+_UPSTREAM_STATUS_BY_CODE = {
+    LM_STUDIO_UNAVAILABLE: 503,
+    AI_MODEL_NOT_LOADED: 503,
+    AI_REQUEST_TIMEOUT: 504,
+    MODEL_DOES_NOT_SUPPORT_VISION: 422,
+}
+
+
 @app.exception_handler(LLMUpstreamError)
 async def llm_upstream_error_handler(request: Request, exc: LLMUpstreamError):
-    """يحوّل رفض vLLM إلى 502 يعرض السبب الحقيقي بدل 500 عارية."""
+    """يحوّل أخطاء خادم النموذج إلى رد برمز ثابت بدل 500 عارية.
+
+    ``error.code`` هو العقد الآلي مع jbot؛ ``detail`` يبقى للقراءة البشرية."""
     return JSONResponse(
-        status_code=502,
+        status_code=_UPSTREAM_STATUS_BY_CODE.get(exc.code, 502),
         content={
+            "error": {"code": exc.code, "message": exc.message, "type": "upstream_error"},
             "detail": f"خادم النموذج رفض الطلب: {exc.message}",
             "upstream_status": exc.upstream_status,
             "model": settings.model_name,
@@ -103,6 +124,17 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+@app.get("/health/llm")
+async def llm_health():
+    """هل خادم النموذج متاح والموديل محمَّل ويدعم الصور؟ — فحص قبل الاختبارات."""
+    status = await get_model_status(force=True)
+    healthy = status.reachable and status.loaded is not False
+    return JSONResponse(
+        status_code=200 if healthy else 503,
+        content={"status": "healthy" if healthy else "unhealthy", **status.as_dict()},
+    )
 
 
 @app.get("/metrics")

@@ -46,7 +46,17 @@ Message = Dict[str, object]
 PromptLike = Union[str, List[Message]]
 
 _READY_POLL_SECONDS = 10   # فترة إعادة فحص جاهزية خادم vLLM بالخلفية
-_REQUEST_TIMEOUT = 120.0   # مهلة طلب توليد واحد (ثوانٍ)
+
+# رموز أخطاء ثابتة يقرأها العميل (jbot) آلياً بدل تحليل نص الرسالة العربي.
+# كل رمز يقابل حالة HTTP محددة بـ app/main.py.
+LM_STUDIO_UNAVAILABLE = "LM_STUDIO_UNAVAILABLE"
+AI_MODEL_NOT_LOADED = "AI_MODEL_NOT_LOADED"
+AI_REQUEST_TIMEOUT = "AI_REQUEST_TIMEOUT"
+MODEL_DOES_NOT_SUPPORT_VISION = "MODEL_DOES_NOT_SUPPORT_VISION"
+AI_UPSTREAM_ERROR = "AI_UPSTREAM_ERROR"
+
+# عبارات يرجعها LM Studio/vLLM حين لا يوجد موديل محمَّل أو الاسم غير معروف.
+_MODEL_NOT_LOADED_HINTS = ("no models loaded", "model not found", "does not exist", "not loaded")
 
 
 class LLMUpstreamError(RuntimeError):
@@ -57,10 +67,16 @@ class LLMUpstreamError(RuntimeError):
     base بلا chat template. app/main.py يحوّله لرد 502 يعرض السبب.
     يرث RuntimeError حتى يبقى متوافقاً مع أي مستدعٍ يلتقط RuntimeError."""
 
-    def __init__(self, message: str, upstream_status: Optional[int] = None):
+    def __init__(
+        self,
+        message: str,
+        upstream_status: Optional[int] = None,
+        code: str = AI_UPSTREAM_ERROR,
+    ):
         super().__init__(message)
         self.message = message
         self.upstream_status = upstream_status
+        self.code = code
 
 
 def _upstream_error_message(resp: httpx.Response) -> str:
@@ -114,7 +130,9 @@ class LLMEngine:
         """يفتح عميل HTTP لخادم vLLM ويشغّل فاحص جاهزية بالخلفية — ما ننتظر
         vLLM هنا حتى لا نأخر إقلاع FastAPI (خادم vLLM يستغرق دقائق بتحميل
         الأوزان)؛ الفاحص يقلب ready إلى True أول ما يجهز."""
-        self._client = httpx.AsyncClient(base_url=self._base_url, timeout=_REQUEST_TIMEOUT)
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url, timeout=settings.llm_request_timeout_seconds,
+        )
         self._poller_task = asyncio.create_task(self._readiness_poller())
 
     async def shutdown(self) -> None:
@@ -253,7 +271,12 @@ class LLMEngine:
         )
 
         if not self._ready:
-            raise RuntimeError("لا يوجد خادم vLLM جاهز حالياً")
+            # LLMUpstreamError يرث RuntimeError، فأي مستدعٍ قديم يلتقط
+            # RuntimeError يبقى يعمل؛ والرمز يصل العميل كـ 503 مفهومة.
+            raise LLMUpstreamError(
+                f"خادم النموذج غير متاح حالياً على {self._base_url}",
+                code=LM_STUDIO_UNAVAILABLE,
+            )
         self._inflight += 1
         t0 = time.monotonic()
         try:
@@ -264,10 +287,24 @@ class LLMEngine:
                     "vLLM rejected the request (%s) for model %s: %s",
                     resp.status_code, settings.model_name, message,
                 )
-                raise LLMUpstreamError(message, upstream_status=resp.status_code)
+                code = (
+                    AI_MODEL_NOT_LOADED
+                    if any(hint in message.lower() for hint in _MODEL_NOT_LOADED_HINTS)
+                    else AI_UPSTREAM_ERROR
+                )
+                raise LLMUpstreamError(message, upstream_status=resp.status_code, code=code)
+        except httpx.TimeoutException as exc:
+            # يُفحص قبل HTTPError لأنه صنف فرعي منه: المهلة ليست "الخادم ساقط".
+            self.metrics["errors"] += 1
+            raise LLMUpstreamError(
+                f"انتهت مهلة خادم النموذج ({settings.llm_request_timeout_seconds:g} ثانية)",
+                code=AI_REQUEST_TIMEOUT,
+            ) from exc
         except httpx.HTTPError as exc:
             self.metrics["errors"] += 1
-            raise LLMUpstreamError(f"تعذّر الاتصال بخادم vLLM: {exc}") from exc
+            raise LLMUpstreamError(
+                f"تعذّر الاتصال بخادم vLLM: {exc}", code=LM_STUDIO_UNAVAILABLE,
+            ) from exc
         except Exception:
             self.metrics["errors"] += 1
             raise

@@ -37,8 +37,15 @@ class SmallCatalog:
         return self.by_company[company][code]
 
 
-def case(sequence, district="مكان مجهول", address="", code="BGD"):
-    return CaseRequest(excelSequence=sequence, stateCode=code, district=district, address=address)
+# Scheduling tests need cases the rules leave to the AI but whose AI answer passes the
+# safety checks. "مكان مجهول" no longer does: an AI pick the text never writes is
+# rejected ("AI pick الكرادة is not written in the text"). A doubled-letter typo of the
+# catalog name is a fuzzy rule match, which is still sent to the AI and accepted.
+_TYPED = {"BGD": "الكرراده", "BAS": "العششار"}
+
+
+def case(sequence, district=None, address="", code="BGD"):
+    return CaseRequest(excelSequence=sequence, stateCode=code, district=district or _TYPED[code], address=address)
 
 
 @pytest.mark.parametrize("concurrency", [1, 2, 3])
@@ -68,7 +75,10 @@ def test_batches_overlap_with_bound_and_keep_budget_order_and_scope(concurrency)
                          "stateCode": code, "status": "AI_MATCH"} for c in cases]
 
         llm = ControlledLLM()
-        cases = [case(i, code="BGD" if i < 45 else "BAS") for i in range(80)]
+        # Rows past the budget have no rule match, so the limit shows as their error code
+        # (a row with a rule match would keep it, without an error).
+        cases = [case(i, district="مكان مجهول" if i >= 65 else None, code="BGD" if i < 45 else "BAS")
+                 for i in range(80)]
         service = CorrectionService(SmallCatalog(), llm, max_llm_cases=65, llm_concurrency=concurrency)
         task = asyncio.create_task(service.correct(CorrectionRequest(companyName="X", cases=cases)))
         try:
@@ -99,13 +109,17 @@ def test_one_failed_parallel_batch_does_not_lose_other_results():
             return [{"excelSequence": c.excelSequence, "correctDistrict": names[0],
                      "status": "AI_MATCH"} for c in cases]
 
-    request = CorrectionRequest(companyName="X", cases=[case(i) for i in range(40)])
+    # The failing batch (first 20) has no rule match, so its rows carry the timeout code.
+    request = CorrectionRequest(companyName="X", cases=[case(i, district="مكان مجهول" if i < 20 else None)
+                                                        for i in range(40)])
     response, _ = asyncio.run(CorrectionService(SmallCatalog(), LLM()).correct(request))
     assert all(row.errorCode == "LLM_TIMEOUT" for row in response.cases[:20])
     assert all(row.status == "AI_MATCH" for row in response.cases[20:])
 
 
-@pytest.mark.parametrize("district", ["مكان مجهول", "الكراده"])
+# "الكراده" is settled by spelling normalization and never reaches the AI any more; the
+# typo "الكرراده" is a rule suggestion that does, so the fallback to it is exercised.
+@pytest.mark.parametrize("district", ["مكان مجهول", "الكرراده"])
 def test_duplicate_ai_answers_use_fallback_instead_of_first_answer(district):
     class LLM:
         configured = True
@@ -119,7 +133,7 @@ def test_duplicate_ai_answers_use_fallback_instead_of_first_answer(district):
     if district == "مكان مجهول":
         assert row.errorCode == "LLM_INVALID_RESPONSE" and row.correctDistrict == district
     else:
-        assert row.status == "NORMALIZED_MATCH" and row.errorCode is None
+        assert row.correctDistrict == "الكرادة" and row.status != "UNRESOLVED" and row.errorCode is None
     assert "multiple answers" in row.reason
 
 

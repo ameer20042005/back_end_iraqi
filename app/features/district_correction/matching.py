@@ -92,21 +92,38 @@ def _may_be_similar(first: str, second: str) -> bool:
 
 
 # Typing mistakes by how often they happen: a dropped or doubled letter is the most
-# common, then two neighbouring letters swapped, then one letter replaced by another.
+# common, then a stray extra letter, then two neighbouring letters swapped, then one
+# letter replaced by another.
 _MISSING_OR_EXTRA = 0.8
+# An extra letter that does not double its neighbour ("الحيرية" for "الحيرة") is rarer
+# than a dropped one ("الحيرية" for "الحيدرية"); at equal letter counts the dropped
+# reading wins instead of the two being an unresolvable tie.
+_STRAY_EXTRA = 0.85
 _SWAPPED = 0.9
 _REPLACED = 1.0
 
 
+def _extra_cost(word: str, position: int) -> float:
+    """Cost of `word[position]` being an extra letter: cheaper when it doubles a neighbour."""
+    letter = word[position]
+    doubled = (position > 0 and word[position - 1] == letter) or (
+        position + 1 < len(word) and word[position + 1] == letter)
+    return _MISSING_OR_EXTRA if doubled else _STRAY_EXTRA
+
+
 def _edits(first: str, second: str, limit: float) -> float:
-    """Weighted edit distance (missing/extra < swapped < replaced letter); stops above `limit`."""
+    """Weighted edit distance of typed `first` from catalog `second`; stops above `limit`.
+
+    Missing or doubled letter < stray extra letter < swapped < replaced letter.
+    """
     if abs(len(first) - len(second)) * _MISSING_OR_EXTRA > limit:
         return limit + 1
     before, previous = None, [j * _MISSING_OR_EXTRA for j in range(len(second) + 1)]
     for i in range(1, len(first) + 1):
-        current = [i * _MISSING_OR_EXTRA] + [0.0] * len(second)
+        extra = _extra_cost(first, i - 1)
+        current = [previous[0] + extra] + [0.0] * len(second)
         for j in range(1, len(second) + 1):
-            current[j] = min(previous[j] + _MISSING_OR_EXTRA, current[j - 1] + _MISSING_OR_EXTRA,
+            current[j] = min(previous[j] + extra, current[j - 1] + _MISSING_OR_EXTRA,
                              previous[j - 1] + (_REPLACED if first[i - 1] != second[j - 1] else 0.0))
             if i > 1 and j > 1 and first[i - 1] == second[j - 2] and first[i - 2] == second[j - 1]:
                 current[j] = min(current[j], before[j - 2] + _SWAPPED)
@@ -135,8 +152,29 @@ def _word_edits(typed: str, catalog: str) -> float | None:
         return 0
     longest = max(len(typed), len(catalog))
     budget = 0 if longest < 4 else 1 if longest < 8 else 2
+    if budget == 0:
+        return _short_slip(typed, catalog)
     edits = _edits(typed, catalog, budget)
     return edits if edits <= budget else None
+
+
+def _short_slip(typed: str, catalog: str) -> float | None:
+    """Edits of a 2-3 letter word typed with one dropped letter or two neighbours swapped.
+
+    "الرب" for "العرب", "السحن" for "الحسن", "الصن" for "النص". A replaced or extra letter
+    stays a different word at this length ("حسن"/"حسين", "حسن"/"حسب").
+    """
+    if len(typed) < 2:
+        return None
+    if len(catalog) == len(typed) + 1 and any(
+            catalog[:i] + catalog[i + 1:] == typed for i in range(len(catalog))):
+        return _MISSING_OR_EXTRA
+    if len(catalog) == len(typed):
+        changed = [i for i, (a, b) in enumerate(zip(typed, catalog)) if a != b]
+        if (len(changed) == 2 and changed[1] == changed[0] + 1
+                and typed[changed[0]] == catalog[changed[1]] and typed[changed[1]] == catalog[changed[0]]):
+            return _SWAPPED
+    return None
 
 
 def _tokens(text: str) -> list[tuple[int, int, str]]:
@@ -966,6 +1004,29 @@ def named_as_facility(text: str, name: str) -> bool:
     keys = [key for _, _, key in _tokens(text)]
     found = [start for start in range(len(keys) - len(core) + 1) if keys[start:start + len(core)] == core]
     return bool(found) and all(start and keys[start - 1] in _FACILITIES for start in found)
+
+
+def written_edits(text: str, name: str) -> float | None:
+    """Fewest typo edits with which the text writes `name` word by word, or None.
+
+    Its label is optional ("حي الجهاد" is written by "الجهاد"). Lets a closer spelling
+    found by the rules ("الحيرية" -> "الحيدرية", one dropped letter) win over an AI pick
+    the text writes only with a costlier typo ("الحيرة", one stray extra letter).
+    """
+    typed = [sound_key(key) for _, _, key in _tokens(text)]
+    full = [sound_key(word_key(part)) for part in _TOKEN.findall(name) if word_key(part)]
+    best = None
+    for form in filter(None, (full, _sound_words(name))):
+        for start in range(len(typed) - len(form) + 1):
+            total = 0.0
+            for sound, word in zip(typed[start:], form):
+                edits = _word_edits(sound, word)
+                if edits is None:
+                    break
+                total += edits
+            else:
+                best = total if best is None else min(best, total)
+    return best
 
 
 def contradicts(text: str, name: str) -> bool:

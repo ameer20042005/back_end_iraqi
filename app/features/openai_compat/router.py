@@ -16,10 +16,17 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.engine import llm_engine
+from app.engine import (
+    AI_MODEL_NOT_LOADED,
+    LM_STUDIO_UNAVAILABLE,
+    MODEL_DOES_NOT_SUPPORT_VISION,
+    LLMUpstreamError,
+    llm_engine,
+)
 from app.fallback import EXHAUSTED_FALLBACK
 from app.features.openai_compat.auth import require_openai_compat_api_key
 from app.features.openai_compat.prompts import OPENAI_COMPAT_SYSTEM_PROMPT
+from app.model_status import get_model_status
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +103,61 @@ def _content_as_text(content: Any) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
+def _image_url(item: Any) -> Optional[str]:
+    """رابط الصورة من جزء محتوى OpenAI ({"type": "image_url", ...}) أو None."""
+    if not isinstance(item, dict) or item.get("type") != "image_url":
+        return None
+    image_url = item.get("image_url")
+    url = image_url.get("url") if isinstance(image_url, dict) else image_url
+    return url if isinstance(url, str) and url else None
+
+
+def _content_for_model(content: Any) -> Any:
+    """يبقي محتوى الصور كقائمة أجزاء OpenAI، ويحوّل غيره إلى نص.
+
+    _content_as_text وحدها كانت تحوّل رسالة فيها صورة إلى JSON نصي ضخم
+    (base64 كامل كنص)، فيقرأ الموديل حروفاً بلا معنى بدل الصورة.
+    """
+    if not isinstance(content, list) or not any(_image_url(item) for item in content):
+        return _content_as_text(content)
+    parts: List[Dict[str, Any]] = []
+    for item in content:
+        url = _image_url(item)
+        if url:
+            parts.append({"type": "image_url", "image_url": {"url": url}})
+        elif isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+            parts.append({"type": "text", "text": item["text"]})
+    return parts
+
+
+def _contains_images(messages: List[ChatMessage]) -> bool:
+    return any(
+        isinstance(message.content, list) and any(_image_url(item) for item in message.content)
+        for message in messages
+    )
+
+
+async def _ensure_model_can_serve(messages: List[ChatMessage]) -> None:
+    """يرفض الطلب برمز واضح قبل التوليد بدل فشل مبهم من خادم النموذج."""
+    status = await get_model_status()
+    if not status.reachable:
+        raise LLMUpstreamError(
+            f"خادم النموذج غير متاح على {status.as_dict()['base_url']}",
+            code=LM_STUDIO_UNAVAILABLE,
+        )
+    if status.loaded is False:
+        raise LLMUpstreamError(
+            f"الموديل {status.model} غير محمَّل في خادم النموذج",
+            code=AI_MODEL_NOT_LOADED,
+        )
+    if _contains_images(messages) and not status.supports_vision:
+        raise LLMUpstreamError(
+            f"الموديل {status.model} لا يدعم قراءة الصور",
+            upstream_status=422,
+            code=MODEL_DOES_NOT_SUPPORT_VISION,
+        )
+
+
 def _native_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     """Prepend the owner prompt and preserve native OpenAI tool messages."""
     converted: List[Dict[str, Any]] = [
@@ -107,7 +169,7 @@ def _native_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     for message in messages:
         native = message.model_dump(exclude_none=True)
         if "content" in native:
-            native["content"] = _content_as_text(native["content"])
+            native["content"] = _content_for_model(native["content"])
         converted.append(native)
 
     return converted
@@ -203,8 +265,11 @@ def _normalized_tool_calls(raw_calls: Any, allowed_names: set[str]) -> Optional[
         if not isinstance(arguments, str):
             return None
         try:
-            json.loads(arguments)
+            parsed_arguments = json.loads(arguments)
         except json.JSONDecodeError:
+            return None
+        # مخطط كل أداة كائن JSON؛ مصفوفة أو نص أو رقم هنا مخرجات مشوّهة.
+        if not isinstance(parsed_arguments, dict):
             return None
 
         call_id = raw_call.get("id")
@@ -219,12 +284,79 @@ def _normalized_tool_calls(raw_calls: Any, allowed_names: set[str]) -> Optional[
     return normalized
 
 
+# عبارات «سأستعمل أداة» يكتبها الموديل بدل الاستدعاء دون أن يسمّيها:
+# «لازم أستدعي الأداة مال الكشف عن التكرارات... شنو رأيك نستعمل هاي الأداة؟»
+# أو سؤال عن الأعمدة رغم أنها اختيارية: «أحتاج أعرف أي الأعمدة تريدني أقارن بيها؟»
+_TOOL_INTENT_RE = re.compile(
+    r"الأداة|الاداة|أداة|اداة|الدالة|دالة|أستدعي|استدعي|نستدعي|استدعاء|الأعمدة|الاعمدة|أعمدة|اعمدة"
+    r"|\btool\b|\bfunction\b|\bcolumns?\b",
+    re.IGNORECASE,
+)
+# سطر المرفق الذي يضيفه jbot لرسالة المستخدم عند رفع جدول.
+_SPREADSHEET_MARKER = "[Attachment] spreadsheet"
+
+
+def _has_attached_spreadsheet(messages: List[ChatMessage]) -> bool:
+    return any(
+        message.role == "user" and _SPREADSHEET_MARKER in _content_as_text(message.content)
+        for message in messages
+    )
+
+
+def _is_empty_reply(data: Any) -> bool:
+    """رد بلا tool_calls وبلا نص بعد التنظيف — لا شيء يُرسل للعميل."""
+    choices = data.get("choices") if isinstance(data, dict) else None
+    first = choices[0] if isinstance(choices, list) and choices else None
+    message = first.get("message") if isinstance(first, dict) else None
+    if not isinstance(message, dict):
+        return False
+    content = message.get("content")
+    text = _clean_content(content) if isinstance(content, str) else ""
+    return not message.get("tool_calls") and not text
+
+
+def _described_tool_call(data: Any, tools: List[dict], req: ChatCompletionRequest) -> Optional[str]:
+    """سبب إعادة التوليد بإجبار استدعاء أداة، أو None.
+
+    الشروط المشتركة، كي لا يُجبَر استدعاء في غير موضعه:
+    - العميل أرسل أدوات ولم يطلب صراحةً عدم استعمالها (tool_choice != "none").
+    - آخر رسالة من المستخدم: بعد نتيجة أداة (role=tool) المطلوب جواب نصي،
+      وذِكر اسم الأداة فيه طبيعي («حسب find_...») — الإجبار هناك يصنع حلقة.
+    - الرد بلا tool_calls.
+
+    ثم إحدى حالتين:
+    1. النص يذكر اسم أداة مرسلة حرفياً (في أي محادثة).
+    2. في محادثة فيها جدول مرفق: النص يعبّر عن نية استعمال أداة («الأداة»،
+       «أستدعي»...) دون استدعائها. مقيّدة بالجداول عمداً: في أسئلة الشحن قد
+       يذكر الموديل الأداة وهو يطلب رقم الوصل بحق، والإجبار هناك يدفعه إلى
+       بحث بلا معيار. أدوات الجدول تكفيها attachmentId الموجودة في الرسالة.
+    """
+    if not tools or req.tool_choice == "none" or req.messages[-1].role != "user":
+        return None
+    choices = data.get("choices") if isinstance(data, dict) else None
+    first = choices[0] if isinstance(choices, list) and choices else None
+    message = first.get("message") if isinstance(first, dict) else None
+    if not isinstance(message, dict) or message.get("tool_calls"):
+        return None
+    content = message.get("content")
+    if not isinstance(content, str):
+        return None
+    for tool in tools:
+        name = tool["function"]["name"]
+        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", content):
+            return name
+    if _has_attached_spreadsheet(req.messages) and _TOOL_INTENT_RE.search(content):
+        return "spreadsheet tool (described without being called)"
+    return None
+
+
 @router.post("/chat/completions")
 async def chat_completions(
     req: ChatCompletionRequest,
     _api_key: str = Depends(require_openai_compat_api_key),
 ):
     """Run one native tool-aware generation and return an OpenAI response."""
+    await _ensure_model_can_serve(req.messages)
     tools = [tool.model_dump(exclude_none=True) for tool in (req.tools or [])]
     messages = _native_messages(req.messages)
     data = await llm_engine.create_chat_completion(
@@ -232,6 +364,33 @@ async def chat_completions(
         tools=tools,
         tool_choice=req.tool_choice,
     )
+
+    intended = _described_tool_call(data, tools, req)
+    if intended:
+        # الموديل بلا تفكير (reasoning_effort=none) يكتب أحياناً «نستدعي الدالة
+        # find_duplicate_spreadsheet_rows» نصاً بدل استدعائها، فلا تُنفَّذ
+        # الأداة ويصل المستخدم كلام بلا نتيجة. قياس فعلي على gemma-4-e4b:
+        # auto نجح 1/4، و required نجح 4/4. نعيد التوليد مرة واحدة بإجبار
+        # الاستدعاء فقط حين ذكر الموديل بنفسه أداة متاحة.
+        logger.info("الموديل وصف استدعاء %s نصاً؛ إعادة التوليد بـ tool_choice=required", intended)
+        data = await llm_engine.create_chat_completion(
+            messages,
+            tools=tools,
+            tool_choice="required",
+        )
+
+    if _is_empty_reply(data):
+        # بعد نتيجة أداة يرجع الموديل أحياناً توكناً واحداً فارغاً (content=""،
+        # completion_tokens=1) — قياس فعلي: 2 من 10 أسئلة. بدل أن يصل المستخدم
+        # رد EXHAUSTED_FALLBACK العام، نعيد التوليد مرة واحدة. بعد نتيجة أداة
+        # المطلوب نص، فنمنع استدعاءً جديداً بـ tool_choice=none.
+        retry_choice = "none" if req.messages[-1].role == "tool" else req.tool_choice
+        logger.info("رد فارغ من الموديل؛ إعادة التوليد مرة واحدة بـ tool_choice=%s", retry_choice)
+        data = await llm_engine.create_chat_completion(
+            messages,
+            tools=tools,
+            tool_choice=retry_choice,
+        )
 
     choices = data.get("choices") if isinstance(data, dict) else None
     choice = choices[0] if isinstance(choices, list) and choices else None

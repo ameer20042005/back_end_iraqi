@@ -51,6 +51,16 @@ class Settings:
     # يطابق vllm_port أدناه؛ غيّرهما معاً عند نقل الخادم إلى منفذ آخر.
     vllm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL") or "http://127.0.0.1:18001/v1")
 
+    # مهلة طلب توليد واحد بالثواني. الموديلات المحلية مع التفكير قد تأخذ
+    # دقيقة؛ تجاوزها يرجع AI_REQUEST_TIMEOUT (504) بدل تعليق الطلب.
+    llm_request_timeout_seconds: float = field(
+        default_factory=lambda: float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS") or "120"))
+
+    # دعم الصور بالموديل المحمَّل: auto = يُسأل LM Studio عن نوع الموديل
+    # (vlm)، وإن تعذّر (vLLM) يُفترض الدعم. true/false يفرضان القيمة.
+    # الصورة لا تُرسَل للموديل إلا إذا كانت النتيجة دعماً فعلياً.
+    llm_vision: str = field(default_factory=lambda: (os.getenv("LLM_VISION") or "auto").strip().lower())
+
     # لا يوجد توكن Hugging Face: كل مستودعات الموديلات هنا (Gemma المدموج،
     # Whisper، F5-TTS) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).
 

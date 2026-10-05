@@ -72,10 +72,17 @@ def test_there_are_100_cases_from_real_excel_names(catalog):
         assert item["district"] != item["expected"]
 
 
+# Who settles a case is a design choice that moved: glued names ("جسرالمثنى") are now
+# fixed by spelling normalization before the AI (NORMALIZED_MATCH), and typos the rules
+# read with certainty keep their status when the AI agrees or is overruled. What the
+# test guards is the answer: the Excel name, without an error.
+_SETTLED = ("AI_MATCH", "SPLIT_ADDRESS", "NORMALIZED_MATCH", "FUZZY_MATCH", "EXACT_MATCH")
+
+
 @pytest.mark.parametrize("index", range(len(CASES)), ids=IDS)
 def test_ai_returns_the_excel_district(ai_rows, index):
     item, row = CASES[index], ai_rows[index]
     assert row.errorCode is None, row.reason
     assert row.correctDistrict == item["expected"], row.reason
-    assert row.status in ("AI_MATCH", "SPLIT_ADDRESS")
+    assert row.status in _SETTLED, row.reason
     assert row.originalDistrict == item["district"]

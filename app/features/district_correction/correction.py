@@ -17,7 +17,8 @@ from .catalog import Catalog
 from .llm import LLMClient, LLMError
 from .matching import (CENTER_REVIEW, CERTAIN_REASONS, _strip_prefix, adds_unwritten, candidate_names,
                        clean_details, contradicts, is_center, match_case, memory_key, named_as_facility,
-                       remembered_details, text_support, unresolved, without_district, without_governorate)
+                       remembered_details, text_support, unresolved, without_district, without_governorate,
+                       written_edits)
 from .models import (CaseRequest, CaseResponse, CorrectionRequest, CorrectionResponse, FeedbackRejection,
                      FeedbackRequest, FeedbackResponse)
 from .normalization import normalize, phrase_key
@@ -498,6 +499,14 @@ class CorrectionService:
                 results[case.excelSequence] = self._fallback(
                     suggestion, case, f"AI pick {name} adds words the text does not write.", None)
                 continue
+            if name != suggestion.correctDistrict and suggestion.status != "UNRESOLVED":
+                rules_edits, ai_edits = written_edits(text, suggestion.correctDistrict), written_edits(text, name)
+                if rules_edits is not None and ai_edits is not None and rules_edits < ai_edits:
+                    # Both are typo readings of the text and the rules' is closer: "الحيرية"
+                    # misses one letter of "الحيدرية" but has a stray one for "الحيرة".
+                    results[case.excelSequence] = suggestion.model_copy(update={
+                        "reason": f"{suggestion.reason} AI pick {name} is spelled further from the text."})
+                    continue
             if name != suggestion.correctDistrict and named_as_facility(text, name):
                 # "مقابل المركز الشرطه" names a police station, not "حي الشرطة".
                 results[case.excelSequence] = self._fallback(
