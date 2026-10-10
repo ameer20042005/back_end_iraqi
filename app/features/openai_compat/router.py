@@ -24,6 +24,7 @@ from app.engine import (
 )
 from app.fallback import EXHAUSTED_FALLBACK
 from app.features.openai_compat.auth import require_openai_compat_api_key
+from app.features.openai_compat.completion import create_completion
 from app.features.openai_compat.prompts import OPENAI_COMPAT_SYSTEM_PROMPT
 from app.model_status import get_model_status
 
@@ -286,15 +287,11 @@ async def chat_completions(
     req: ChatCompletionRequest,
     _api_key: str = Depends(require_openai_compat_api_key),
 ):
-    """Run one native tool-aware generation and return an OpenAI response."""
+    """Run one native tool-aware generation (low reasoning, see completion.py) and return an OpenAI response."""
     await _ensure_model_can_serve(req.messages)
     tools = [tool.model_dump(exclude_none=True) for tool in (req.tools or [])]
     messages = _native_messages(req.messages)
-    data = await llm_engine.create_chat_completion(
-        messages,
-        tools=tools,
-        tool_choice=req.tool_choice,
-    )
+    data = await create_completion(llm_engine, messages, tools, req.tool_choice)
 
     intended = _described_tool_call(data, tools, req)
     if intended:
@@ -304,11 +301,7 @@ async def chat_completions(
         # auto نجح 1/4، و required نجح 4/4. نعيد التوليد مرة واحدة بإجبار
         # الاستدعاء فقط حين ذكر الموديل بنفسه أداة متاحة.
         logger.info("الموديل وصف استدعاء %s نصاً؛ إعادة التوليد بـ tool_choice=required", intended)
-        data = await llm_engine.create_chat_completion(
-            messages,
-            tools=tools,
-            tool_choice="required",
-        )
+        data = await create_completion(llm_engine, messages, tools, "required")
 
     if _is_empty_reply(data):
         # بعد نتيجة أداة يرجع الموديل أحياناً توكناً واحداً فارغاً (content=""،
@@ -317,11 +310,7 @@ async def chat_completions(
         # المطلوب نص، فنمنع استدعاءً جديداً بـ tool_choice=none.
         retry_choice = "none" if req.messages[-1].role == "tool" else req.tool_choice
         logger.info("رد فارغ من الموديل؛ إعادة التوليد مرة واحدة بـ tool_choice=%s", retry_choice)
-        data = await llm_engine.create_chat_completion(
-            messages,
-            tools=tools,
-            tool_choice=retry_choice,
-        )
+        data = await create_completion(llm_engine, messages, tools, retry_choice)
 
     choices = data.get("choices") if isinstance(data, dict) else None
     choice = choices[0] if isinstance(choices, list) and choices else None

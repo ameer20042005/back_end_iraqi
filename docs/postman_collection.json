@@ -1,31 +1,230 @@
 {
   "info": {
-    "name": "Iraqi Backend API — OpenAI, Order, Sales, Voice",
-    "description": "مجموعة Postman جاهزة للاستيراد المباشر لاختبار واجهة OpenAI المتوافقة وميزات order_intake وsales وvoice_followup وpostpone. استوردها في Postman (File > Import > اختر هذا الملف)، ثم شغّل الطلبات مباشرة — القيم (الرابط والمفاتيح) معبّأة مسبقاً كمتغيرات على مستوى الـ Collection.\n\n⚠️ تحذير أمني: هذا الملف يحتوي مفاتيح API حقيقية للخدمات القديمة. لا تشاركه أو ترفعه لمستودع عام.",
+    "name": "Iraqi Backend API — كل النقاط",
+    "description": "مجموعة Postman تغطي كل نقاط back_end_iraqi: النظام، الطلبات، المبيعات، وكيل المبيعات (Omnichannel ai_agent)، الصوت، تأجيل التسليم، واجهة jbot، وتصحيح المناطق. استوردها (File > Import) وغيّر baseUrl فقط.\n\n⚠️ تحذير أمني: هذا الملف يحتوي مفاتيح API حقيقية. لا تشاركه أو ترفعه لمستودع عام.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl", "value": "https://1spx1ivrqcvt1h-8000.proxy.runpod.net", "type": "string" },
-    { "key": "orders_api_key", "value": "sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c", "type": "string" },
-    { "key": "sales_api_key", "value": "sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2", "type": "string" },
-    { "key": "voice_api_key", "value": "sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b", "type": "string" },
-    { "key": "sales_session_id", "value": "", "type": "string" },
-    { "key": "voice_session_id", "value": "", "type": "string" },
-    { "key": "postpone_session_id", "value": "", "type": "string" }
+    {
+      "key": "baseUrl",
+      "value": "https://1spx1ivrqcvt1h-8000.proxy.runpod.net",
+      "type": "string"
+    },
+    {
+      "key": "orders_api_key",
+      "value": "sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c",
+      "type": "string"
+    },
+    {
+      "key": "sales_api_key",
+      "value": "sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2",
+      "type": "string"
+    },
+    {
+      "key": "voice_api_key",
+      "value": "sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b",
+      "type": "string"
+    },
+    {
+      "key": "voice_session_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "postpone_session_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "openai_compat_api_key",
+      "value": "sk-openai-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f",
+      "type": "string"
+    },
+    {
+      "key": "district_api_key",
+      "value": "sk-district-7ea5de0fb1b68f0283df460dea42b2df",
+      "type": "string"
+    },
+    {
+      "key": "product_image_data_uri",
+      "value": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAKAAeADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9U6KKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAoooo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5V24L/eafqjlxX8Cfoz6Iooor9IPiQooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA8Q/aB/wCQxpP/AFwb/wBCrymvVv2gf+QxpP8A1wb/ANCrymvz3Mv97n/XRH2WB/3eH9dT9nP+CWX/ACadYf8AYXvf/Qlr68r5D/4JZf8AJp1h/wBhe9/9CWvryvMO4KKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAK8O/bf/AOTTfid/2CX/APQ1r3GvDv23/wDk034nf9gl/wD0NaAPwYrvfgl/yPUX/XCT+VcFXe/BL/keov8ArhJ/Ku3Bf7zT9UcuK/gT9GfRFFFFfpB8SFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFAHiH7QP/IY0n/rg3/oVeU16t+0D/wAhjSf+uDf+hV5TX57mX+9z/roj7LA/7vD+up+zn/BLL/k06w/7C97/AOhLX15XyH/wSy/5NOsP+wve/wDoS19eV5h3BRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABXh37b//ACab8Tv+wS//AKGte414d+2//wAmm/E7/sEv/wChrQB+DFd78Ev+R6i/64Sfyrgq734Jf8j1F/1wk/lXbgv95p+qOXFfwJ+jPoiiiiv0g+JCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigDxD9oH/kMaT/ANcG/wDQq8pr1b9oH/kMaT/1wb/0KvKa/Pcy/wB7n/XRH2WB/wB3h/XU/Zz/AIJZf8mnWH/YXvf/AEJa+vK+Q/8Agll/yadYf9he9/8AQlr68rzDuCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACvDv23/APk034nf9gl//Q1r3GvDv23/APk034nf9gl//Q1oA/Biu9+CX/I9Rf8AXCT+VcFXe/BL/keov+uEn8q7cF/vNP1Ry4r+BP0Z9EUUUV+kHxIUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFF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h3BRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABXh37b/wDyab8Tv+wS/wD6Gte414d+2/8A8mm/E7/sEv8A+hrQB+DFd78Ev+R6i/64Sfyrgq734Jf8j1F/1wk/lXbgv95p+qOXFfwJ+jPoiiiiv0g+JCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigDxD9oH/kMaT/1wb/0KvKa9W/aB/wCQxpP/AFwb/wBCrymvz3Mv97n/AF0R9lgf93h/XU/Zz/gll/yadYf9he9/9CWvryvkP/gll/yadYf9he9/9CWvryvMO4KKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAK8O/bf/wCTTfid/wBgl/8A0Na9xrw79t//AJNN+J3/AGCX/wDQ1oA/Biu9+CX/ACPUX/XCT+VcFXe/BL/keov+uEn8q7cF/vNP1Ry4r+BP0Z9EUUUV+kHxIUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAeIftA/8hjSf+uDf+hV5TXq37QP/IY0n/rg3/oVeU1+e5l/vc/66I+ywP8Au8P66n7Of8Esv+TTrD/sL3v/AKEtfXlfIf8AwSy/5NOsP+wve/8AoS19eV5h3BRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABXh37b/APyab8Tv+wS//oa17jXh37b/APyab8Tv+wS//oa0AfgxXe/BL/keov8ArhJ/KuCrvfgl/wAj1F/1wk/lXbgv95p+qOXFfwJ+jPoiiiiv0g+JCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigDxD9oH/AJDGk/8AXBv/AEKvKa9W/aB/5DGk/wDXBv8A0KvKa/Pcy/3uf9dEfZYH/d4f11P2c/4JZf8AJp1h/wBhe9/9CWvryvkP/gll/wAmnWH/AGF73/0Ja+vK8w7gooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigArw79t/8A5NN+J3/YJf8A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j/hzv4x/6KFof/gHNX6pUUAflb/w538Y/wDRQtD/APAOaj/hzv4x/wCihaH/AOAc1fqlRQB+Vv8Aw538Y/8ARQtD/wDAOaj/AIc7+Mf+ihaH/wCAc1fqlRQB+Vv/AA538Y/9FC0P/wAA5qP+HO/jH/ooWh/+Ac1fqlRQB+Vv/Dnfxj/0ULQ//AOaj/hzv4x/6KFof/gHNX6pUUAflb/w538Y/wDRQtD/APAOaj/hzv4x/wCihaH/AOAc1fqlRQB+Vv8Aw538Y/8ARQtD/wDAOaj/AIc7+Mf+ihaH/wCAc1fqlRQB+Vv/AA538Y/9FC0P/wAA5qP+HO/jH/ooWh/+Ac1fqlRQB+Vv/Dnfxj/0ULQ//AOaj/hzv4x/6KFof/gHNX6pUUAflb/w538Y/wDRQtD/APAOaj/hzv4x/wCihaH/AOAc1fqlRQB+Vv8Aw538Y/8ARQtD/wDAOaj/AIc7+Mf+ihaH/wCAc1fqlRQB+Vv/AA538Y/9FC0P/wAA5qP+HO/jH/ooWh/+Ac1fqlRQB+Vv/Dnfxj/0ULQ//AOaj/hzv4x/6KFof/gHNX6pUUAflb/w538Y/wDRQtD/APAOaj/hzv4x/wCihaH/AOAc1fqlRQB+Vv8Aw538Y/8ARQtD/wDAOaj/AIc7+Mf+ihaH/wCAc1fqlRQB+Vv/AA538Y/9FC0P/wAA5qP+HO/jH/ooWh/+Ac1fqlRQB4r+yJ8BL/8AZu+Ddt4L1LVbbWLqK9nujdWsbIhEhBAw3ORivaqKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP/2Q==",
+      "type": "string"
+    }
   ],
   "item": [
     {
-      "name": "0) Health Check",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{baseUrl}}/health",
-          "host": ["{{baseUrl}}"],
-          "path": ["health"]
+      "name": "0) System — health & diagnostics",
+      "item": [
+        {
+          "name": "Root",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "معلومات الخدمة."
+          }
         },
-        "description": "فحص أن الخادم شغّال — بلا مفتاح API."
-      }
+        {
+          "name": "Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "فحص أن الخادم شغّال — بلا مفتاح."
+          }
+        },
+        {
+          "name": "LLM Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/llm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "llm"
+              ]
+            },
+            "description": "هل خادم النموذج متاح والموديل محمَّل؟ 503 إن لم يكن جاهزاً."
+          }
+        },
+        {
+          "name": "GPU",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/gpu",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gpu"
+              ]
+            },
+            "description": "معلومات GPU/CUDA وجاهزية vLLM."
+          }
+        },
+        {
+          "name": "Metrics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            },
+            "description": "إحصاءات عميل النموذج: الطلبات، الأخطاء، p50/p95."
+          }
+        },
+        {
+          "name": "Test Console",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "test"
+              ]
+            },
+            "description": "لوحة الاختبار التفاعلية (HTML)."
+          }
+        }
+      ]
     },
     {
       "name": "1) Orders — Create Order",
@@ -35,18 +234,30 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{orders_api_key}}" }
+              {
+                "key": "X-API-Key",
+                "value": "{{orders_api_key}}"
+              }
             ],
             "body": {
               "mode": "formdata",
               "formdata": [
-                { "key": "text", "value": "اريد اطلب غسالة اتوماتيك، اسمي احمد، رقمي 07701234567، بغداد الكرادة", "type": "text" }
+                {
+                  "key": "text",
+                  "value": "اريد اطلب غسالة اتوماتيك، اسمي احمد، رقمي 07701234567، بغداد الكرادة",
+                  "type": "text"
+                }
               ]
             },
             "url": {
               "raw": "{{baseUrl}}/orders/create",
-              "host": ["{{baseUrl}}"],
-              "path": ["orders", "create"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "create"
+              ]
             },
             "description": "إرسال حقل text فقط — لا ترسل audio أو image بنفس الطلب (400 لو أكثر من حقل)."
           }
@@ -56,18 +267,30 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{orders_api_key}}" }
+              {
+                "key": "X-API-Key",
+                "value": "{{orders_api_key}}"
+              }
             ],
             "body": {
               "mode": "formdata",
               "formdata": [
-                { "key": "audio", "type": "file", "src": "" }
+                {
+                  "key": "audio",
+                  "type": "file",
+                  "src": ""
+                }
               ]
             },
             "url": {
               "raw": "{{baseUrl}}/orders/create",
-              "host": ["{{baseUrl}}"],
-              "path": ["orders", "create"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "create"
+              ]
             },
             "description": "بعد استيراد المجموعة، اضغط على حقل audio > Select Files واختر ملف صوت (wav/mp3/m4a/ogg) من جهازك — Postman لا يقدر يعبّئ مسار ملف محلي تلقائياً عند الاستيراد."
           }
@@ -77,18 +300,30 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{orders_api_key}}" }
+              {
+                "key": "X-API-Key",
+                "value": "{{orders_api_key}}"
+              }
             ],
             "body": {
               "mode": "formdata",
               "formdata": [
-                { "key": "image", "type": "file", "src": "" }
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": ""
+                }
               ]
             },
             "url": {
               "raw": "{{baseUrl}}/orders/create",
-              "host": ["{{baseUrl}}"],
-              "path": ["orders", "create"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "create"
+              ]
             },
             "description": "اضغط على حقل image > Select Files واختر صورة (jpg/png). يحتاج بيئة GPU على الخادم، غير ذلك يرجع 501."
           }
@@ -96,21 +331,26 @@
       ]
     },
     {
-      "name": "2) Sales — Chat",
+      "name": "2) Sales — Chat Completions (OpenAI)",
+      "description": "مسار المبيعات بعقد OpenAI: العميل يرسل التاريخ والأدوات وينفذها؛ لا جلسات على الخادم. الصور بصيغة image_url داخل content.",
       "item": [
         {
-          "name": "Sales Chat — أول رسالة",
+          "name": "Sales — Tool Call",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// يحفظ session_id تلقائياً من الرد بمتغيّر الـ Collection حتى تستخدمه الرسائل التالية",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "const body = pm.response.json();",
-                  "if (body.session_id) {",
-                  "    pm.collectionVariables.set('sales_session_id', body.session_id);",
-                  "}"
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI', () => { pm.expect(body.object).to.eql('chat.completion'); pm.expect(choice).to.be.an('object'); });",
+                  "pm.test('يطلب أداة search_products', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('tool_calls');",
+                  "    pm.expect(choice.message.tool_calls[0].function.name).to.eql('search_products');",
+                  "    pm.expect(JSON.parse(choice.message.tool_calls[0].function.arguments)).to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -118,34 +358,55 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{sales_api_key}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-API-Key",
+                "value": "{{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"عندكم غسالات اتوماتيك؟\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"model\": \"sales\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"شنو عندكم غسالات؟\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search products visible to the authenticated store\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"category\": {\n              \"type\": \"string\"\n            },\n            \"in_stock_only\": {\n              \"type\": \"boolean\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
-              "raw": "{{baseUrl}}/sales/chat",
-              "host": ["{{baseUrl}}"],
-              "path": ["sales", "chat"]
+              "raw": "{{baseUrl}}/sales/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "chat",
+                "completions"
+              ]
             },
-            "description": "أول رسالة بلا session_id — الخادم ينشئ جلسة جديدة ويرجعها بالاستجابة. سكربت الـ Tests يحفظها تلقائياً بمتغيّر sales_session_id."
+            "description": "سؤال منتج: المتوقع tool_calls باسم search_products."
           }
         },
         {
-          "name": "Sales Chat — تكملة المحادثة",
+          "name": "Sales — Answer after Tool Result",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "const body = pm.response.json();",
-                  "if (body.session_id) {",
-                  "    pm.collectionVariables.set('sales_session_id', body.session_id);",
-                  "}"
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI', () => { pm.expect(body.object).to.eql('chat.completion'); pm.expect(choice).to.be.an('object'); });",
+                  "pm.test('رد نصي نهائي بلا أدوات', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('stop');",
+                  "    pm.expect(choice.message.content).to.be.a('string').and.not.empty;",
+                  "    pm.expect(choice.message).not.to.have.property('tool_calls');",
+                  "});"
                 ]
               }
             }
@@ -153,34 +414,55 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{sales_api_key}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-API-Key",
+                "value": "{{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"اريدها، اسمي سارة\",\n  \"session_id\": \"{{sales_session_id}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"model\": \"sales\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"شنو عندكم غسالات؟\"\n    },\n    {\n      \"role\": \"assistant\",\n      \"content\": null,\n      \"tool_calls\": [\n        {\n          \"id\": \"call_pm_sales_1\",\n          \"type\": \"function\",\n          \"function\": {\n            \"name\": \"search_products\",\n            \"arguments\": \"{\\\"query\\\":\\\"غسالة\\\"}\"\n          }\n        }\n      ]\n    },\n    {\n      \"role\": \"tool\",\n      \"tool_call_id\": \"call_pm_sales_1\",\n      \"content\": \"{\\\"found\\\":true,\\\"count\\\":1,\\\"results\\\":[{\\\"name\\\":\\\"غسالة اتوماتيك LG 9 كغم\\\",\\\"price\\\":525000,\\\"in_stock\\\":true}]}\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search products visible to the authenticated store\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"category\": {\n              \"type\": \"string\"\n            },\n            \"in_stock_only\": {\n              \"type\": \"boolean\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
-              "raw": "{{baseUrl}}/sales/chat",
-              "host": ["{{baseUrl}}"],
-              "path": ["sales", "chat"]
+              "raw": "{{baseUrl}}/sales/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "chat",
+                "completions"
+              ]
             },
-            "description": "شغّل الطلب اللي فوقه (أول رسالة) أولاً حتى يتعبّى sales_session_id تلقائياً."
+            "description": "الجولة الثانية بعد تنفيذ الأداة عند العميل: رد نصي."
           }
         },
         {
-          "name": "Sales Chat — صورة منتج (image_base64)",
+          "name": "Sales — Product Photo",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "const body = pm.response.json();",
-                  "if (body.session_id) {",
-                  "    pm.collectionVariables.set('sales_session_id', body.session_id);",
-                  "}"
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI', () => { pm.expect(body.object).to.eql('chat.completion'); pm.expect(choice).to.be.an('object'); });",
+                  "pm.test('يطلب أداة search_products', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('tool_calls');",
+                  "    pm.expect(choice.message.tool_calls[0].function.name).to.eql('search_products');",
+                  "    pm.expect(JSON.parse(choice.message.tool_calls[0].function.arguments)).to.be.an('object');",
+                  "});"
                 ]
               }
             }
@@ -188,48 +470,605 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{sales_api_key}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-API-Key",
+                "value": "{{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"شنو هذا المنتج، عدكم شي مثله؟\",\n  \"session_id\": \"{{sales_session_id}}\",\n  \"image_base64\": \"<الصق هنا base64 خام للصورة — بلا بادئة data:image/...;base64,>\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"model\": \"sales\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"عندكم هذا؟ وبكم؟\"\n        },\n        {\n          \"type\": \"image_url\",\n          \"image_url\": {\n            \"url\": \"{{product_image_data_uri}}\"\n          }\n        }\n      ]\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search products visible to the authenticated store\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"category\": {\n              \"type\": \"string\"\n            },\n            \"in_stock_only\": {\n              \"type\": \"boolean\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
-              "raw": "{{baseUrl}}/sales/chat",
-              "host": ["{{baseUrl}}"],
-              "path": ["sales", "chat"]
+              "raw": "{{baseUrl}}/sales/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "chat",
+                "completions"
+              ]
             },
-            "description": "الموديل يحلل الصورة ويطابقها مع الكتالوج المحقون — يذكر المنتج المطابق حرفياً، أو يعرض بديلاً مشابهاً، أو ينفي التوفّر صراحة. يحتاج Pillow + خادم vLLM جاهز (نفس متطلبات /orders/create بالصور) — بدونها 501. base64 غير صالح → 400، صورة تعذّرت قراءتها → 422."
+            "description": "صورة منتج بصيغة image_url (data URI): المتوقع أن يتعرف على المنتج ويبحث عنه. غيّر المتغير product_image_data_uri لتجربة صورة أخرى."
           }
         },
         {
-          "name": "Sales Chat — Streaming (SSE)",
+          "name": "Sales — Streaming (stream=true)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('OpenAI SSE ينتهي بـ [DONE]', () => {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/event-stream');",
+                  "    pm.expect(pm.response.text().trim().endsWith('data: [DONE]')).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{sales_api_key}}" },
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Accept", "value": "text/event-stream" }
+              {
+                "key": "X-API-Key",
+                "value": "{{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"message\": \"عندكم غسالات اتوماتيك؟\",\n  \"session_id\": \"{{sales_session_id}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"model\": \"sales\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"شنو عندكم غسالات؟\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search products visible to the authenticated store\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"category\": {\n              \"type\": \"string\"\n            },\n            \"in_stock_only\": {\n              \"type\": \"boolean\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\",\n  \"stream\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "نفس الطلب بصيغة OpenAI SSE (chat.completion.chunk) وينتهي بـ data: [DONE]."
+          }
+        },
+        {
+          "name": "Sales — /sales/chat/stream (اسم توافقي)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('OpenAI SSE ينتهي بـ [DONE]', () => {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/event-stream');",
+                  "    pm.expect(pm.response.text().trim().endsWith('data: [DONE]')).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"sales\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"هلا\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search products visible to the authenticated store\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"category\": {\n              \"type\": \"string\"\n            },\n            \"in_stock_only\": {\n              \"type\": \"boolean\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/sales/chat/stream",
-              "host": ["{{baseUrl}}"],
-              "path": ["sales", "chat", "stream"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "chat",
+                "stream"
+              ]
             },
-            "description": "الاستجابة text/event-stream — Postman يعرضها بتبويب Response كنص متدفّق (سطور data: {...}) لا JSON واحد."
+            "description": "الاسم القديم للبث؛ يرجع نفس SSE."
           }
         }
       ]
     },
     {
-      "name": "3) Voice Followup",
+      "name": "3) Sales Agent — Omnichannel ai_agent (/sales/agent)",
+      "description": "المسار الذي يستدعيه وكيل المبيعات الجافا (profile iraqi): IRAQI_BASE_URL={{baseUrl}}/sales/agent.\n\nشخصية البائع العراقي، رسالة system واحدة، تفكير منخفض، والصور (image_url) تمر كما هي. المصادقة Bearer أو X-API-Key بقيمة sales_api_key. النسخ الأقدم من الخادم ترجع 404.",
+      "item": [
+        {
+          "name": "Product question → search_products",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI', () => { pm.expect(body.object).to.eql('chat.completion'); pm.expect(choice).to.be.an('object'); });",
+                  "pm.test('يطلب أداة search_products', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('tool_calls');",
+                  "    pm.expect(choice.message.tool_calls[0].function.name).to.eql('search_products');",
+                  "    pm.expect(JSON.parse(choice.message.tool_calls[0].function.arguments)).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are the sales assistant of an online store. Everything about products, prices, stock and orders must come from tool results. Call the matching tool first when the answer depends on store data; reply without tools only to greetings, thanks and small talk.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"بكم الايفون 17 برو ماكس؟\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search the store catalog for the product the customer is asking about. Call it before discussing any product.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"brand\": {\n              \"type\": \"string\"\n            },\n            \"model\": {\n              \"type\": \"string\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_categories\",\n        \"description\": \"List all product categories of the store catalog.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_orders\",\n        \"description\": \"List the current customer's recent orders. The customer is identified automatically.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/agent/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "agent",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "سؤال منتج يبدأ بالبحث بلا سؤال الزبون عن تفاصيل أولاً."
+          }
+        },
+        {
+          "name": "Catalog question → get_categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI', () => { pm.expect(body.object).to.eql('chat.completion'); pm.expect(choice).to.be.an('object'); });",
+                  "pm.test('يطلب أداة get_categories', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('tool_calls');",
+                  "    pm.expect(choice.message.tool_calls[0].function.name).to.eql('get_categories');",
+                  "    pm.expect(JSON.parse(choice.message.tool_calls[0].function.arguments)).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are the sales assistant of an online store. Everything about products, prices, stock and orders must come from tool results. Call the matching tool first when the answer depends on store data; reply without tools only to greetings, thanks and small talk.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"شنو الاقسام اللي عندكم؟\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search the store catalog for the product the customer is asking about. Call it before discussing any product.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"brand\": {\n              \"type\": \"string\"\n            },\n            \"model\": {\n              \"type\": \"string\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_categories\",\n        \"description\": \"List all product categories of the store catalog.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_orders\",\n        \"description\": \"List the current customer's recent orders. The customer is identified automatically.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/agent/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "agent",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "سؤال عام عن المتجر."
+          }
+        },
+        {
+          "name": "Order status → get_orders",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI', () => { pm.expect(body.object).to.eql('chat.completion'); pm.expect(choice).to.be.an('object'); });",
+                  "pm.test('يطلب أداة get_orders', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('tool_calls');",
+                  "    pm.expect(choice.message.tool_calls[0].function.name).to.eql('get_orders');",
+                  "    pm.expect(JSON.parse(choice.message.tool_calls[0].function.arguments)).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are the sales assistant of an online store. Everything about products, prices, stock and orders must come from tool results. Call the matching tool first when the answer depends on store data; reply without tools only to greetings, thanks and small talk.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"طلبي متى يوصل؟\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search the store catalog for the product the customer is asking about. Call it before discussing any product.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"brand\": {\n              \"type\": \"string\"\n            },\n            \"model\": {\n              \"type\": \"string\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_categories\",\n        \"description\": \"List all product categories of the store catalog.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_orders\",\n        \"description\": \"List the current customer's recent orders. The customer is identified automatically.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/agent/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "agent",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "سؤال عن الطلب بلا طلب رقم الطلب أولاً."
+          }
+        },
+        {
+          "name": "Answer after tool result",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI', () => { pm.expect(body.object).to.eql('chat.completion'); pm.expect(choice).to.be.an('object'); });",
+                  "pm.test('رد نصي نهائي بلا أدوات', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('stop');",
+                  "    pm.expect(choice.message.content).to.be.a('string').and.not.empty;",
+                  "    pm.expect(choice.message).not.to.have.property('tool_calls');",
+                  "});",
+                  "pm.test('يذكر السعر الحقيقي', () => pm.expect(/1[,٬.]?950|950|تسعمية|مليون/.test(choice.message.content)).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are the sales assistant of an online store. Everything about products, prices, stock and orders must come from tool results. Call the matching tool first when the answer depends on store data; reply without tools only to greetings, thanks and small talk.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"بكم الايفون 17 برو ماكس؟\"\n    },\n    {\n      \"role\": \"assistant\",\n      \"content\": null,\n      \"tool_calls\": [\n        {\n          \"id\": \"call_pm_agent_1\",\n          \"type\": \"function\",\n          \"function\": {\n            \"name\": \"search_products\",\n            \"arguments\": \"{\\\"query\\\":\\\"ايفون 17 برو ماكس\\\"}\"\n          }\n        }\n      ]\n    },\n    {\n      \"role\": \"tool\",\n      \"tool_call_id\": \"call_pm_agent_1\",\n      \"content\": \"{\\\"matchStatus\\\":\\\"MATCHED\\\",\\\"candidates\\\":[{\\\"productId\\\":1,\\\"name\\\":\\\"iPhone 17 Pro Max\\\"}],\\\"availabilityOfBestMatch\\\":[{\\\"stockInfoId\\\":11,\\\"variantTitle\\\":\\\"256GB Black\\\",\\\"price\\\":1950000,\\\"stockQuantity\\\":7}]}\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search the store catalog for the product the customer is asking about. Call it before discussing any product.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"brand\": {\n              \"type\": \"string\"\n            },\n            \"model\": {\n              \"type\": \"string\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_categories\",\n        \"description\": \"List all product categories of the store catalog.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_orders\",\n        \"description\": \"List the current customer's recent orders. The customer is identified automatically.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/agent/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "agent",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "الجولة الثانية بعد تنفيذ الأداة عند ai_agent: رد عراقي بالسعر الحقيقي."
+          }
+        },
+        {
+          "name": "Product photo → search_products",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI', () => { pm.expect(body.object).to.eql('chat.completion'); pm.expect(choice).to.be.an('object'); });",
+                  "pm.test('يطلب أداة search_products', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('tool_calls');",
+                  "    pm.expect(choice.message.tool_calls[0].function.name).to.eql('search_products');",
+                  "    pm.expect(JSON.parse(choice.message.tool_calls[0].function.arguments)).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are the sales assistant of an online store. Everything about products, prices, stock and orders must come from tool results. Call the matching tool first when the answer depends on store data; reply without tools only to greetings, thanks and small talk.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"عندكم هذا؟ وبكم؟\"\n        },\n        {\n          \"type\": \"image_url\",\n          \"image_url\": {\n            \"url\": \"{{product_image_data_uri}}\"\n          }\n        }\n      ]\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search the store catalog for the product the customer is asking about. Call it before discussing any product.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"brand\": {\n              \"type\": \"string\"\n            },\n            \"model\": {\n              \"type\": \"string\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_categories\",\n        \"description\": \"List all product categories of the store catalog.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_orders\",\n        \"description\": \"List the current customer's recent orders. The customer is identified automatically.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/agent/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "agent",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "صورة iPhone 17 Pro Max بصيغة image_url: يتعرف عليه ويبحث عنه."
+          }
+        },
+        {
+          "name": "Greeting → no tool",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const choice = body.choices && body.choices[0];",
+                  "pm.test('عقد OpenAI', () => { pm.expect(body.object).to.eql('chat.completion'); pm.expect(choice).to.be.an('object'); });",
+                  "pm.test('رد نصي نهائي بلا أدوات', () => {",
+                  "    pm.expect(choice.finish_reason).to.eql('stop');",
+                  "    pm.expect(choice.message.content).to.be.a('string').and.not.empty;",
+                  "    pm.expect(choice.message).not.to.have.property('tool_calls');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are the sales assistant of an online store. Everything about products, prices, stock and orders must come from tool results. Call the matching tool first when the answer depends on store data; reply without tools only to greetings, thanks and small talk.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"مساء الخير\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search the store catalog for the product the customer is asking about. Call it before discussing any product.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"brand\": {\n              \"type\": \"string\"\n            },\n            \"model\": {\n              \"type\": \"string\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_categories\",\n        \"description\": \"List all product categories of the store catalog.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_orders\",\n        \"description\": \"List the current customer's recent orders. The customer is identified automatically.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/agent/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "agent",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "تحية بلا أدوات."
+          }
+        },
+        {
+          "name": "Streaming (stream=true)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('OpenAI SSE ينتهي بـ [DONE]', () => {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/event-stream');",
+                  "    pm.expect(pm.response.text().trim().endsWith('data: [DONE]')).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{sales_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are the sales assistant of an online store. Everything about products, prices, stock and orders must come from tool results. Call the matching tool first when the answer depends on store data; reply without tools only to greetings, thanks and small talk.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"هلا\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"search_products\",\n        \"description\": \"Search the store catalog for the product the customer is asking about. Call it before discussing any product.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"query\": {\n              \"type\": \"string\"\n            },\n            \"brand\": {\n              \"type\": \"string\"\n            },\n            \"model\": {\n              \"type\": \"string\"\n            }\n          },\n          \"required\": [\n            \"query\"\n          ]\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_categories\",\n        \"description\": \"List all product categories of the store catalog.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    },\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"get_orders\",\n        \"description\": \"List the current customer's recent orders. The customer is identified automatically.\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {}\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\",\n  \"stream\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/agent/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "agent",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "نفس الرد بصيغة OpenAI SSE."
+          }
+        },
+        {
+          "name": "Wrong key → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer wrong-key"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"هلا\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sales/agent/chat/completions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sales",
+                "agent",
+                "chat",
+                "completions"
+              ]
+            },
+            "description": "مفتاح خاطئ يُرفض قبل أي توليد."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4) Voice Followup",
       "item": [
         {
           "name": "Step 1 — Ask",
@@ -251,18 +1090,33 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{voice_api_key}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-API-Key",
+                "value": "{{voice_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"order_id\": \"ORD-000123456\",\n  \"status\": \"لم يتم التسليم\",\n  \"customer_name\": \"احمد\",\n  \"customer_phone\": \"07701234567\",\n  \"customer_city\": \"بغداد\",\n  \"customer_district\": \"الكرادة\",\n  \"items\": [{\"product_name\": \"غسالة اتوماتيك\", \"quantity\": 1}],\n  \"reason_hint\": null,\n  \"notes\": null\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/voice_followup/ask",
-              "host": ["{{baseUrl}}"],
-              "path": ["voice_followup", "ask"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "voice_followup",
+                "ask"
+              ]
             },
             "description": "الاستجابة ملف audio/wav خام — بتبويب Response اضغط Save Response > Save to a file لسماعه. الهيدر X-Session-Id يُحفظ تلقائياً بمتغيّر voice_session_id لاستخدامه بالخطوة 2."
           }
@@ -272,20 +1126,35 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{voice_api_key}}" }
+              {
+                "key": "X-API-Key",
+                "value": "{{voice_api_key}}"
+              }
             ],
             "body": {
               "mode": "formdata",
               "formdata": [
-                { "key": "audio", "type": "file", "src": "" }
+                {
+                  "key": "audio",
+                  "type": "file",
+                  "src": ""
+                }
               ]
             },
             "url": {
               "raw": "{{baseUrl}}/voice_followup/respond?session_id={{voice_session_id}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["voice_followup", "respond"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "voice_followup",
+                "respond"
+              ],
               "query": [
-                { "key": "session_id", "value": "{{voice_session_id}}" }
+                {
+                  "key": "session_id",
+                  "value": "{{voice_session_id}}"
+                }
               ]
             },
             "description": "شغّل Step 1 أولاً حتى يتعبّى voice_session_id تلقائياً. اضغط على حقل audio > Select Files واختر تسجيل رد الزبون الصوتي. الاستجابة ملف audio/wav + هيدرات X-Reason-Summary / X-Customer-Transcript / X-Query-Sent (Percent-encoded)."
@@ -294,7 +1163,7 @@
       ]
     },
     {
-      "name": "4) Voice Postpone — مكالمة تأجيل التسليم",
+      "name": "5) Voice Postpone — مكالمة تأجيل التسليم",
       "description": "مكالمة صوتية متعددة الأدوار بشخصية \"صباح\" لتأجيل تسليم شحنة.\n\nالتسلسل: شغّل Step 1 مرة وحدة، ثم كرّر Step 2 بنفس الجلسة لين X-Call-Status يرجع \"ended\".\n\nالمواعيد المقبولة: اليوم · باجر · بعد باجر · بعد N أيام (لين 14) · أسبوع/أسبوعين · اسم يوم بالأسبوع.",
       "item": [
         {
@@ -319,18 +1188,34 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{voice_api_key}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-API-Key",
+                "value": "{{voice_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"order_id\": \"ORD-000123456\",\n  \"status\": \"قيد التوصيل\",\n  \"items\": [\n    {\n      \"product_name\": \"غسالة اتوماتيك\",\n      \"quantity\": 1\n    }\n  ],\n  \"scheduled_date\": \"2026-09-05\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/voice_followup/postpone/start",
-              "host": ["{{baseUrl}}"],
-              "path": ["voice_followup", "postpone", "start"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "voice_followup",
+                "postpone",
+                "start"
+              ]
             },
             "description": "الاستجابة ملف audio/wav خام (جملة افتتاح صباح) — Save Response > Save to a file لسماعه. الهيدر X-Session-Id يُحفظ تلقائياً بمتغيّر postpone_session_id، ونص الجملة يُطبع بالكونسول مفكوك الترميز.\n\nملاحظة خصوصية: اسم الزبون وهاتفه ما ينمرّان للنموذج بهذا المسار حتى لو أرسلتهما — صباح ممنوعة من ذكر اسم المستلم."
           }
@@ -366,20 +1251,36 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-API-Key", "value": "{{voice_api_key}}" }
+              {
+                "key": "X-API-Key",
+                "value": "{{voice_api_key}}"
+              }
             ],
             "body": {
               "mode": "formdata",
               "formdata": [
-                { "key": "audio", "type": "file", "src": "" }
+                {
+                  "key": "audio",
+                  "type": "file",
+                  "src": ""
+                }
               ]
             },
             "url": {
               "raw": "{{baseUrl}}/voice_followup/postpone/respond?session_id={{postpone_session_id}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["voice_followup", "postpone", "respond"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "voice_followup",
+                "postpone",
+                "respond"
+              ],
               "query": [
-                { "key": "session_id", "value": "{{postpone_session_id}}" }
+                {
+                  "key": "session_id",
+                  "value": "{{postpone_session_id}}"
+                }
               ]
             },
             "description": "شغّل Step 1 أولاً. اضغط حقل audio > Select Files واختر تسجيل رد الزبون.\n\n⚠️ هذا الطلب يتكرر: أرسله مرة بعد مرة بنفس الجلسة لين X-Call-Status يرجع \"ended\".\n\nهيدرات الرد: X-Call-Status (continue/ended) · X-Chosen-Option (today / plus_N / weekday_D) · X-Postpone-Saved · X-Reply-Text وX-Customer-Transcript (Percent-encoded).\n\nسكوت الزبون ليس خطأ — يُعامَل كرد غامض: تعيد صباح السؤال مرة، ثم تقفل بأدب."
@@ -388,7 +1289,7 @@
       ]
     },
     {
-      "name": "5) OpenAI-compatible Chat Completions",
+      "name": "6) OpenAI-compatible — jbot shipments (/v1/chat/completions)",
       "description": "اختبارات عقد Spring AI/OpenAI للمسار الجديد. كل طلب يمثل جولة توليد واحدة، وتنفيذ الأدوات يبقى عند jbot.",
       "item": [
         {
@@ -427,17 +1328,34 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-API-Key",
+                "value": "{{openai_compat_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"وين وصلت شحنتي 12345؟\"}\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"searchShipments\",\n        \"description\": \"Find shipment by receipt number, phone, or criteria\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"receiptNumber\": {\"type\": \"string\"}\n          }\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/v1/chat/completions",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "chat", "completions"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "chat",
+                "completions"
+              ]
             },
             "description": "يتوقع finish_reason=tool_calls وarguments كنص JSON يحتوي receiptNumber=12345. يحتاج إعادة تشغيل start.sh حتى تعمل أعلام native function calling في vLLM."
           }
@@ -466,17 +1384,34 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-API-Key",
+                "value": "{{openai_compat_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"وين وصلت شحنتي 12345؟\"},\n    {\n      \"role\": \"assistant\",\n      \"content\": null,\n      \"tool_calls\": [\n        {\n          \"id\": \"call_postman_1\",\n          \"type\": \"function\",\n          \"function\": {\n            \"name\": \"searchShipments\",\n            \"arguments\": \"{\\\"receiptNumber\\\":\\\"12345\\\"}\"\n          }\n        }\n      ]\n    },\n    {\n      \"role\": \"tool\",\n      \"tool_call_id\": \"call_postman_1\",\n      \"content\": \"{\\\"stepName\\\":\\\"قيد التوصيل\\\",\\\"stateName\\\":\\\"بغداد\\\"}\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"searchShipments\",\n        \"description\": \"Find shipment by receipt number, phone, or criteria\",\n        \"parameters\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"receiptNumber\": {\"type\": \"string\"}\n          }\n        }\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/v1/chat/completions",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "chat", "completions"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "chat",
+                "completions"
+              ]
             },
             "description": "يحاكي الجولة الثانية التي يرسلها jbot بعد تنفيذ searchShipments. المتوقع finish_reason=stop ونص عربي مبني على نتيجة الأداة."
           }
@@ -504,19 +1439,265 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-API-Key",
+                "value": "{{openai_compat_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"model\": \"gemma-iraqi\",\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"شلونك\"}\n  ],\n  \"tools\": [\n    {\n      \"type\": \"function\",\n      \"function\": {\n        \"name\": \"searchShipments\",\n        \"description\": \"Find shipment by receipt number, phone, or criteria\",\n        \"parameters\": {\"type\": \"object\", \"properties\": {}}\n      }\n    }\n  ],\n  \"tool_choice\": \"auto\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/v1/chat/completions",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "chat", "completions"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "chat",
+                "completions"
+              ]
             },
             "description": "رسالة عامة لا تحتاج بيانات. المتوقع finish_reason=stop بلا tool_calls."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7) District Correction — تصحيح مناطق شركات التوصيل",
+      "description": "تفاصيل العقد في docs/district-correction-api.md. companyName من الكتالوج: ALZAEEM, FUHOOD, KHAYAL, RIYAM, TEST.",
+      "item": [
+        {
+          "name": "Ready",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/district-correction/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "district-correction",
+                "ready"
+              ]
+            },
+            "description": "جاهزية كتالوج المناطق — بلا مفتاح."
+          }
+        },
+        {
+          "name": "Districts of a governorate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{district_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/district-correction/districts?companyName=FUHOOD&stateCode=BGD&stateName=BAGHDAD",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "district-correction",
+                "districts"
+              ],
+              "query": [
+                {
+                  "key": "companyName",
+                  "value": "FUHOOD"
+                },
+                {
+                  "key": "stateCode",
+                  "value": "BGD"
+                },
+                {
+                  "key": "stateName",
+                  "value": "BAGHDAD"
+                }
+              ]
+            },
+            "description": "مناطق شركة ومحافظة."
+          }
+        },
+        {
+          "name": "Correct a batch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('نفس عدد الحالات وبالترتيب', () => pm.expect(pm.response.json().cases.length).to.eql(3));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{district_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyName\": \"FUHOOD\",\n  \"cases\": [\n    {\n      \"excelSequence\": 1,\n      \"stateName\": \"DHI_QAR\",\n      \"stateCode\": \"DHI\",\n      \"district\": \"شطره\",\n      \"address\": \"الشطرة قرب السوق العام\"\n    },\n    {\n      \"excelSequence\": 2,\n      \"stateName\": \"BAGHDAD\",\n      \"stateCode\": \"BGD\",\n      \"district\": \"الكرادة شارع الرشيد، بناية 10\",\n      \"address\": \"\"\n    },\n    {\n      \"excelSequence\": 3,\n      \"stateName\": \"BAGHDAD\",\n      \"stateCode\": \"BGD\",\n      \"district\": \"حي غير واضح\",\n      \"address\": \"قرب الجامع\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/district-correction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "district-correction"
+              ]
+            },
+            "description": "دفعة حالات لشركة واحدة؛ الرد بنفس الترتيب."
+          }
+        },
+        {
+          "name": "Confirm a correction (feedback)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{district_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyName\": \"TEST\",\n  \"corrections\": [\n    {\n      \"stateName\": \"BAGHDAD\",\n      \"stateCode\": \"BGD\",\n      \"district\": \"كراده خارج\",\n      \"correctDistrict\": \"الكرادة\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/district-correction/feedback",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "district-correction",
+                "feedback"
+              ]
+            },
+            "description": "تأكيد مراجع: النص نفسه يُحسم لاحقاً مباشرة. استخدم شركة TEST حتى لا تلوّث ذاكرة شركة حقيقية."
+          }
+        },
+        {
+          "name": "Undo a correction (feedback DELETE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{district_api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"companyName\": \"TEST\",\n  \"corrections\": [\n    {\n      \"stateName\": \"BAGHDAD\",\n      \"stateCode\": \"BGD\",\n      \"district\": \"كراده خارج\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/district-correction/feedback",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "district-correction",
+                "feedback"
+              ]
+            },
+            "description": "التراجع عن تأكيد خاطئ؛ correctDistrict اختياري هنا."
           }
         }
       ]

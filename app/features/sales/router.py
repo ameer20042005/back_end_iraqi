@@ -11,14 +11,17 @@ from pydantic import Field
 
 from app.engine import llm_engine
 from app.fallback import EXHAUSTED_FALLBACK
+from app.features.openai_compat.completion import create_completion
 from app.features.openai_compat.router import (
     ChatCompletionRequest,
     _base_response,
+    _ensure_model_can_serve,
     _clean_content,
     _final_response,
     _normalized_tool_calls,
     _usage,
 )
+from app.features.sales.agent import run_agent_turn
 from app.features.sales.auth import require_sales_api_key
 from app.features.sales.prompts import build_sales_prompt
 
@@ -77,12 +80,9 @@ async def sales_chat(
     """Run one native tool-aware generation and return an OpenAI response."""
     tools = [tool.model_dump(exclude_none=True) for tool in (req.tools or [])]
     messages = _native_messages(req.messages)
-    data = await llm_engine.create_chat_completion(
-        messages,
-        tools=tools,
-        tool_choice=req.tool_choice,
-        max_tokens=req.max_tokens,
-    )
+    # تفكير منخفض مثل بقية مسارات الأدوات (انظر openai_compat/completion.py): بدونه يسأل الموديل
+    # العميل عن تفاصيل بدل استدعاء search_products في نحو نصف الحالات.
+    data = await create_completion(llm_engine, messages, tools, req.tool_choice, req.max_tokens)
 
     choices = data.get("choices") if isinstance(data, dict) else None
     choice = choices[0] if isinstance(choices, list) and choices else None
@@ -119,3 +119,27 @@ async def sales_chat_stream(
 ):
     """Compatibility name; emits the same checked OpenAI SSE response."""
     return await sales_chat(req.model_copy(update={"stream": True}), _api_key)
+
+
+class SalesAgentChatRequest(SalesChatRequest):
+    max_completion_tokens: Optional[int] = Field(default=None, gt=0)
+
+
+@router.post("/agent/chat/completions")
+async def sales_agent_chat(
+    req: SalesAgentChatRequest,
+    _api_key: str = Depends(require_sales_api_key),
+):
+    """وكيل المبيعات Spring (ai_agent): توليد واحد بشخصية المبيعات، بلا حالة وبلا تنفيذ أدوات.
+
+    قاعدة Spring AI: ``...:8000/sales/agent`` (يضيف ``/chat/completions`` بنفسه). انظر app/features/sales/agent.py.
+    """
+    await _ensure_model_can_serve(req.messages)
+    response = await run_agent_turn(req, req.max_completion_tokens or req.max_tokens)
+    if req.stream:
+        return StreamingResponse(
+            _completion_events(response),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    return response
