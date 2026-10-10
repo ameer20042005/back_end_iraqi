@@ -14,7 +14,6 @@ from app.engine import (
     AI_MODEL_NOT_LOADED,
     AI_REQUEST_TIMEOUT,
     LM_STUDIO_UNAVAILABLE,
-    MODEL_DOES_NOT_SUPPORT_VISION,
     LLMUpstreamError,
     llm_engine,
 )
@@ -83,13 +82,11 @@ app.add_middleware(
     ],
 )
 
-# حالة HTTP لكل رمز خطأ: 503/504 مؤقتة (يجوز للعميل إعادة المحاولة)،
-# و422 نهائية (الطلب نفسه غير قابل للخدمة بهذا الموديل).
+# حالة HTTP لكل رمز خطأ: 503/504 مؤقتة (يجوز للعميل إعادة المحاولة).
 _UPSTREAM_STATUS_BY_CODE = {
     LM_STUDIO_UNAVAILABLE: 503,
     AI_MODEL_NOT_LOADED: 503,
     AI_REQUEST_TIMEOUT: 504,
-    MODEL_DOES_NOT_SUPPORT_VISION: 422,
 }
 
 
@@ -128,7 +125,7 @@ def health():
 
 @app.get("/health/llm")
 async def llm_health():
-    """هل خادم النموذج متاح والموديل محمَّل ويدعم الصور؟ — فحص قبل الاختبارات."""
+    """هل خادم النموذج متاح والموديل محمَّل؟ — فحص قبل الاختبارات."""
     status = await get_model_status(force=True)
     healthy = status.reachable and status.loaded is not False
     return JSONResponse(

@@ -159,7 +159,7 @@ def test_malformed_model_output_returns_text_fallback(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Vision, model availability and argument validation
+# Model availability and argument validation
 # ---------------------------------------------------------------------------
 
 import pytest
@@ -168,18 +168,15 @@ from app import engine as engine_module
 from app import model_status
 from app.engine import LLMUpstreamError
 
-_PNG_URI = "data:image/png;base64,iVBORw0KGgo="
-
-
 def _status(**overrides):
-    values = dict(model="m", reachable=True, loaded=True, vision=True, backend="lmstudio")
+    values = dict(model="m", reachable=True, loaded=True, backend="lmstudio")
     values.update(overrides)
     return model_status.ModelStatus(**values)
 
 
 @pytest.fixture(autouse=True)
 def _healthy_model(monkeypatch):
-    """Every test in this module starts with a reachable, loaded vision model."""
+    """Every test in this module starts with a reachable, loaded model."""
     async def healthy(force=False):
         return _status()
     monkeypatch.setattr(compat, "get_model_status", healthy)
@@ -189,48 +186,6 @@ def _use_status(monkeypatch, status):
     async def fixed(force=False):
         return status
     monkeypatch.setattr(compat, "get_model_status", fixed)
-
-
-def _image_message():
-    return {"role": "user", "content": [
-        {"type": "text", "text": "What is in the image?"},
-        {"type": "image_url", "image_url": {"url": _PNG_URI}},
-    ]}
-
-
-def test_image_parts_reach_the_model_unflattened(monkeypatch):
-    engine = _FakeEngine({"choices": [{"message": {"role": "assistant", "content": "A red circle."}}]})
-    monkeypatch.setattr(compat, "llm_engine", engine)
-
-    asyncio.run(compat.chat_completions(_request([_image_message()])))
-
-    user = engine.rendered[1]
-    assert user["content"] == [
-        {"type": "text", "text": "What is in the image?"},
-        {"type": "image_url", "image_url": {"url": _PNG_URI}},
-    ]
-
-
-def test_image_is_rejected_when_the_model_has_no_vision(monkeypatch):
-    engine = _FakeEngine({})
-    monkeypatch.setattr(compat, "llm_engine", engine)
-    _use_status(monkeypatch, _status(vision=False))
-
-    with pytest.raises(LLMUpstreamError) as info:
-        asyncio.run(compat.chat_completions(_request([_image_message()])))
-
-    assert info.value.code == "MODEL_DOES_NOT_SUPPORT_VISION"
-    assert engine.calls == []  # the image never left the service
-
-
-def test_text_only_request_ignores_missing_vision(monkeypatch):
-    engine = _FakeEngine({"choices": [{"message": {"role": "assistant", "content": "ok"}}]})
-    monkeypatch.setattr(compat, "llm_engine", engine)
-    _use_status(monkeypatch, _status(vision=False))
-
-    response = asyncio.run(compat.chat_completions(_request([{"role": "user", "content": "hi"}])))
-
-    assert response["choices"][0]["message"]["content"] == "ok"
 
 
 @pytest.mark.parametrize("status, code", [
@@ -304,7 +259,7 @@ def test_engine_reports_not_ready_server_as_unavailable():
     assert info.value.code == "LM_STUDIO_UNAVAILABLE"
 
 
-def test_model_status_reads_lmstudio_load_state_and_vision():
+def test_model_status_reads_lmstudio_load_state():
     import httpx
 
     def handler(request):
@@ -316,10 +271,10 @@ def test_model_status_reads_lmstudio_load_state_and_vision():
         ]})
 
     status = asyncio.run(model_status._probe("m", transport=httpx.MockTransport(handler)))
-    assert status.reachable and status.loaded is False and status.vision is True
+    assert status.reachable and status.loaded is False
 
     status = asyncio.run(model_status._probe("other", transport=httpx.MockTransport(handler)))
-    assert status.loaded is True and status.vision is False
+    assert status.loaded is True
 
 
 def test_model_status_falls_back_to_openai_model_list_for_vllm():
@@ -331,7 +286,7 @@ def test_model_status_falls_back_to_openai_model_list_for_vllm():
         return httpx.Response(404, json={"detail": "Not Found"})
 
     status = asyncio.run(model_status._probe("m", transport=httpx.MockTransport(handler)))
-    assert status.backend == "openai-compatible" and status.loaded is True and status.vision is None
+    assert status.backend == "openai-compatible" and status.loaded is True
 
 
 # ---------------------------------------------------------------------------
@@ -406,30 +361,6 @@ def test_no_regeneration_for_a_name_that_is_only_a_substring(monkeypatch):
     assert len(engine.calls) == 1
 
 
-def test_tool_intent_without_name_is_regenerated_when_a_spreadsheet_is_attached(monkeypatch):
-    engine = _SequenceEngine(
-        _text("لازم أستدعي الأداة مال التكرارات. شنو رأيك نستعملها؟"),
-        _tool_reply("searchShipments", "{}"),
-    )
-    monkeypatch.setattr(compat, "llm_engine", engine)
-
-    asyncio.run(compat.chat_completions(_request([{"role": "user", "content":
-        "Find duplicated rows.\n\n[Attachment] spreadsheet attachmentId=31 file=\"t.xlsx\""}],
-        [_shipment_tool()])))
-
-    assert [c["tool_choice"] for c in engine.calls] == ["auto", "required"]
-
-
-def test_tool_intent_without_spreadsheet_is_left_alone(monkeypatch):
-    engine = _SequenceEngine(_text("حتى أستعمل الأداة أحتاج رقم الوصل، تكدر تنطيني إياه؟"))
-    monkeypatch.setattr(compat, "llm_engine", engine)
-
-    asyncio.run(compat.chat_completions(_request(
-        [{"role": "user", "content": "وين شحنتي؟"}], [_shipment_tool()])))
-
-    assert len(engine.calls) == 1
-
-
 _TOOL_TURN = [
     {"role": "user", "content": "Which row has a missing Amount?"},
     {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function",
@@ -458,15 +389,3 @@ def test_empty_reply_is_retried_only_once(monkeypatch):
     assert response["choices"][0]["message"]["content"] == EXHAUSTED_FALLBACK
 
 
-def test_asking_which_columns_is_regenerated_when_a_spreadsheet_is_attached(monkeypatch):
-    engine = _SequenceEngine(
-        _text("أحتاج أعرف أي الأعمدة اللي تريدني أقارن بيها بالضبط؟"),
-        _tool_reply("searchShipments", "{}"),
-    )
-    monkeypatch.setattr(compat, "llm_engine", engine)
-
-    asyncio.run(compat.chat_completions(_request([{"role": "user", "content":
-        "Find duplicated rows.\n\n[Attachment] spreadsheet attachmentId=31 file=\"t.xlsx\""}],
-        [_shipment_tool()])))
-
-    assert [c["tool_choice"] for c in engine.calls] == ["auto", "required"]

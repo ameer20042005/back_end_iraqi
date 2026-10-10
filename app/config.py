@@ -56,11 +56,6 @@ class Settings:
     llm_request_timeout_seconds: float = field(
         default_factory=lambda: float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS") or "120"))
 
-    # دعم الصور بالموديل المحمَّل: auto = يُسأل LM Studio عن نوع الموديل
-    # (vlm)، وإن تعذّر (vLLM) يُفترض الدعم. true/false يفرضان القيمة.
-    # الصورة لا تُرسَل للموديل إلا إذا كانت النتيجة دعماً فعلياً.
-    llm_vision: str = field(default_factory=lambda: (os.getenv("LLM_VISION") or "auto").strip().lower())
-
     # لا يوجد توكن Hugging Face: كل مستودعات الموديلات هنا (Gemma المدموج،
     # Whisper، F5-TTS) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).
 

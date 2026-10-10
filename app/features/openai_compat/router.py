@@ -19,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.engine import (
     AI_MODEL_NOT_LOADED,
     LM_STUDIO_UNAVAILABLE,
-    MODEL_DOES_NOT_SUPPORT_VISION,
     LLMUpstreamError,
     llm_engine,
 )
@@ -103,40 +102,6 @@ def _content_as_text(content: Any) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-def _image_url(item: Any) -> Optional[str]:
-    """رابط الصورة من جزء محتوى OpenAI ({"type": "image_url", ...}) أو None."""
-    if not isinstance(item, dict) or item.get("type") != "image_url":
-        return None
-    image_url = item.get("image_url")
-    url = image_url.get("url") if isinstance(image_url, dict) else image_url
-    return url if isinstance(url, str) and url else None
-
-
-def _content_for_model(content: Any) -> Any:
-    """يبقي محتوى الصور كقائمة أجزاء OpenAI، ويحوّل غيره إلى نص.
-
-    _content_as_text وحدها كانت تحوّل رسالة فيها صورة إلى JSON نصي ضخم
-    (base64 كامل كنص)، فيقرأ الموديل حروفاً بلا معنى بدل الصورة.
-    """
-    if not isinstance(content, list) or not any(_image_url(item) for item in content):
-        return _content_as_text(content)
-    parts: List[Dict[str, Any]] = []
-    for item in content:
-        url = _image_url(item)
-        if url:
-            parts.append({"type": "image_url", "image_url": {"url": url}})
-        elif isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
-            parts.append({"type": "text", "text": item["text"]})
-    return parts
-
-
-def _contains_images(messages: List[ChatMessage]) -> bool:
-    return any(
-        isinstance(message.content, list) and any(_image_url(item) for item in message.content)
-        for message in messages
-    )
-
-
 async def _ensure_model_can_serve(messages: List[ChatMessage]) -> None:
     """يرفض الطلب برمز واضح قبل التوليد بدل فشل مبهم من خادم النموذج."""
     status = await get_model_status()
@@ -149,12 +114,6 @@ async def _ensure_model_can_serve(messages: List[ChatMessage]) -> None:
         raise LLMUpstreamError(
             f"الموديل {status.model} غير محمَّل في خادم النموذج",
             code=AI_MODEL_NOT_LOADED,
-        )
-    if _contains_images(messages) and not status.supports_vision:
-        raise LLMUpstreamError(
-            f"الموديل {status.model} لا يدعم قراءة الصور",
-            upstream_status=422,
-            code=MODEL_DOES_NOT_SUPPORT_VISION,
         )
 
 
@@ -169,7 +128,7 @@ def _native_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     for message in messages:
         native = message.model_dump(exclude_none=True)
         if "content" in native:
-            native["content"] = _content_for_model(native["content"])
+            native["content"] = _content_as_text(native["content"])
         converted.append(native)
 
     return converted
@@ -284,25 +243,6 @@ def _normalized_tool_calls(raw_calls: Any, allowed_names: set[str]) -> Optional[
     return normalized
 
 
-# عبارات «سأستعمل أداة» يكتبها الموديل بدل الاستدعاء دون أن يسمّيها:
-# «لازم أستدعي الأداة مال الكشف عن التكرارات... شنو رأيك نستعمل هاي الأداة؟»
-# أو سؤال عن الأعمدة رغم أنها اختيارية: «أحتاج أعرف أي الأعمدة تريدني أقارن بيها؟»
-_TOOL_INTENT_RE = re.compile(
-    r"الأداة|الاداة|أداة|اداة|الدالة|دالة|أستدعي|استدعي|نستدعي|استدعاء|الأعمدة|الاعمدة|أعمدة|اعمدة"
-    r"|\btool\b|\bfunction\b|\bcolumns?\b",
-    re.IGNORECASE,
-)
-# سطر المرفق الذي يضيفه jbot لرسالة المستخدم عند رفع جدول.
-_SPREADSHEET_MARKER = "[Attachment] spreadsheet"
-
-
-def _has_attached_spreadsheet(messages: List[ChatMessage]) -> bool:
-    return any(
-        message.role == "user" and _SPREADSHEET_MARKER in _content_as_text(message.content)
-        for message in messages
-    )
-
-
 def _is_empty_reply(data: Any) -> bool:
     """رد بلا tool_calls وبلا نص بعد التنظيف — لا شيء يُرسل للعميل."""
     choices = data.get("choices") if isinstance(data, dict) else None
@@ -316,20 +256,13 @@ def _is_empty_reply(data: Any) -> bool:
 
 
 def _described_tool_call(data: Any, tools: List[dict], req: ChatCompletionRequest) -> Optional[str]:
-    """سبب إعادة التوليد بإجبار استدعاء أداة، أو None.
+    """اسم الأداة التي ذكرها الموديل نصاً بدل استدعائها، أو None.
 
-    الشروط المشتركة، كي لا يُجبَر استدعاء في غير موضعه:
+    الشروط كلها لازمة، كي لا يُجبَر استدعاء في غير موضعه:
     - العميل أرسل أدوات ولم يطلب صراحةً عدم استعمالها (tool_choice != "none").
     - آخر رسالة من المستخدم: بعد نتيجة أداة (role=tool) المطلوب جواب نصي،
-      وذِكر اسم الأداة فيه طبيعي («حسب find_...») — الإجبار هناك يصنع حلقة.
-    - الرد بلا tool_calls.
-
-    ثم إحدى حالتين:
-    1. النص يذكر اسم أداة مرسلة حرفياً (في أي محادثة).
-    2. في محادثة فيها جدول مرفق: النص يعبّر عن نية استعمال أداة («الأداة»،
-       «أستدعي»...) دون استدعائها. مقيّدة بالجداول عمداً: في أسئلة الشحن قد
-       يذكر الموديل الأداة وهو يطلب رقم الوصل بحق، والإجبار هناك يدفعه إلى
-       بحث بلا معيار. أدوات الجدول تكفيها attachmentId الموجودة في الرسالة.
+      وذِكر اسم الأداة فيه طبيعي («حسب searchShipments») — الإجبار هناك يصنع حلقة.
+    - الرد بلا tool_calls، ونصّه يذكر اسم أداة من الأدوات المرسلة حرفياً.
     """
     if not tools or req.tool_choice == "none" or req.messages[-1].role != "user":
         return None
@@ -345,8 +278,6 @@ def _described_tool_call(data: Any, tools: List[dict], req: ChatCompletionReques
         name = tool["function"]["name"]
         if re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", content):
             return name
-    if _has_attached_spreadsheet(req.messages) and _TOOL_INTENT_RE.search(content):
-        return "spreadsheet tool (described without being called)"
     return None
 
 
@@ -368,7 +299,7 @@ async def chat_completions(
     intended = _described_tool_call(data, tools, req)
     if intended:
         # الموديل بلا تفكير (reasoning_effort=none) يكتب أحياناً «نستدعي الدالة
-        # find_duplicate_spreadsheet_rows» نصاً بدل استدعائها، فلا تُنفَّذ
+        # searchShipments» نصاً بدل استدعائها، فلا تُنفَّذ
         # الأداة ويصل المستخدم كلام بلا نتيجة. قياس فعلي على gemma-4-e4b:
         # auto نجح 1/4، و required نجح 4/4. نعيد التوليد مرة واحدة بإجبار
         # الاستدعاء فقط حين ذكر الموديل بنفسه أداة متاحة.

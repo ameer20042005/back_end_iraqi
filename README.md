@@ -47,7 +47,6 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 | المتغيّر | الافتراضي | الوصف |
 |---|---|---|
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `120` | مهلة طلب توليد واحد؛ تجاوزها يرجع `AI_REQUEST_TIMEOUT` (504) |
-| `LLM_VISION` | `auto` | دعم الصور: `auto` يسأل LM Studio (`type=vlm`)، وإن تعذّر (vLLM) يُفترض الدعم؛ `true`/`false` يفرضان القيمة |
 
 ## الرفع على RunPod — Pod مباشر بصورة Ubuntu 22.04 خام
 
@@ -72,7 +71,7 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 | النقطة | الوصف | يحتاج مفتاح |
 |---|---|---|
 | `GET /health` | فحص الصحة | لا |
-| `GET /health/llm` | هل خادم النموذج متاح، والموديل محمَّل، ويدعم الصور؟ (503 إن لم يكن جاهزاً) | لا |
+| `GET /health/llm` | هل خادم النموذج متاح، والموديل محمَّل؟ (503 إن لم يكن جاهزاً) | لا |
 | `GET /gpu` | معلومات GPU/CUDA وحالة محرك الموديل | لا |
 | `GET /metrics` | إحصاءات عميل vLLM (طلبات، أخطاء، أزمنة استجابة) | لا |
 | `POST /v1/chat/completions` | واجهة OpenAI/Spring AI بلا حالة — native function calling، والتنفيذ الفعلي للأدوات عند jbot | `openai_compat_api_key` |
@@ -88,10 +87,9 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 
 ### `/v1/chat/completions` — سلوك مهم
 
-- **الصور**: أجزاء `image_url` في الرسائل تصل الموديل كما هي (كانت تُحوَّل لنص JSON). إذا كان الموديل لا يدعم الصور يُرفض الطلب **قبل** إرسالها بـ 422 `MODEL_DOES_NOT_SUPPORT_VISION`.
 - **فحص قبل التوليد**: خادم النموذج غير متاح ← 503 `LM_STUDIO_UNAVAILABLE`؛ الموديل غير محمَّل ← 503 `AI_MODEL_NOT_LOADED`؛ المهلة ← 504 `AI_REQUEST_TIMEOUT`. كل رد خطأ يحوي `error.code` ثابتاً يقرأه jbot آلياً.
 - **التفكير معطّل** (`reasoning_effort: "none"` في [llm_options.py](app/llm_options.py)): الرد ~1.5–3 ثوانٍ على LM Studio بدل 4–17.
-- **استرداد نية الأداة**: بلا تفكير يكتب الموديل أحياناً «نستدعي الدالة find_…» نصاً بدل استدعائها. إذا ذكر الرد اسم أداة مرسلة، أو — في محادثة فيها جدول مرفق — عبّر عن نية استعمال أداة أو سأل عن الأعمدة، يُعاد التوليد مرة واحدة بـ `tool_choice="required"`. لا يحدث هذا بعد نتيجة أداة (لا حلقات).
+- **استرداد نية الأداة**: بلا تفكير يكتب الموديل أحياناً «نستدعي الدالة searchShipments» نصاً بدل استدعائها. إذا ذكر الرد اسم أداة مرسلة، يُعاد التوليد مرة واحدة بـ `tool_choice="required"`. لا يحدث هذا بعد نتيجة أداة (لا حلقات).
 - **رد فارغ**: إذا رجع الموديل رداً فارغاً يُعاد التوليد مرة واحدة (بـ `tool_choice="none"` بعد نتيجة أداة).
 - **وسائط الأداة** يجب أن تكون كائن JSON؛ اسم أداة غير مرسل أو وسائط مشوّهة لا تُمرَّر للعميل.
 
