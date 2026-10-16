@@ -21,13 +21,12 @@ class SpeechToTextModel:
 
 @dataclass(frozen=True)
 class TextToSpeechModel:
-    """ملفات موديل النطق العراقي ومرجعه، من مصدر إعداد واحد."""
+    """موديل النطق العربي ونسخته ولغته ومقطعه المرجعي، من مصدر إعداد واحد."""
 
     repository: str
     checkpoint: str
-    vocabulary: str
+    language: str
     reference_audio: str
-    reference_text: str
 
 
 @dataclass(frozen=True)
@@ -57,7 +56,7 @@ class Settings:
         default_factory=lambda: float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS") or "120"))
 
     # لا يوجد توكن Hugging Face: كل مستودعات الموديلات هنا (Gemma المدموج،
-    # Whisper، F5-TTS) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).
+    # Whisper، Chatterbox) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).
 
     # إعدادات خادم vLLM (يقرأها start.sh ويمررها كأعلام لـ `vllm serve`):
     # نسبة VRAM المحجوزة للموديل + KV cache.
@@ -165,14 +164,16 @@ class Settings:
     whisper_model_ar: str = "ayoubkirouane/whisper-small-ar"
     whisper_language_ar: str = "arabic"
 
-    # تحويل نص لصوت باللهجة العراقية (app/features/voice_followup/tts.py) —
-    # يخدم مسار المتابعة الصوتية للطلبات (سؤال الزبون سبب الرفض/الإلغاء
-    # صوتياً). موديل transformers منفصل عن Whisper، يعيش بعملية FastAPI نفسها.
-    tts_model_ar: str = "ameer4wisam/Habibi-TTS-IRQ"
-    tts_ckpt_ar: str = "Specialized/IRQ/model_100000.safetensors"
-    tts_vocab_ar: str = "Specialized/IRQ/vocab.txt"
-    tts_ref_audio_ar: str = "reference/IRQ.wav"
-    tts_ref_text_ar: str = "اا ما نقدر ناخذ وقت أكثر، ااا لأنه شروط كلش يحتاجلها وقت."
+    # تحويل نص لصوت (app/features/voice_followup/tts.py) — يخدم مسار المتابعة
+    # الصوتية للطلبات (سؤال الزبون سبب الرفض/الإلغاء صوتياً). موديل Chatterbox
+    # Multilingual (Resemble AI) يدعم العربية (ar) مع voice cloning من مقطع
+    # مرجعي، يعيش بعملية FastAPI نفسها منفصلاً عن Whisper.
+    tts_model_ar: str = "ResembleAI/chatterbox"
+    # نسخة نقطة تفتيش T3 متعددة اللغات: "v2" (الافتراضي بالمكتبة) أو "v3".
+    tts_ckpt_ar: str = "v3"
+    tts_language_ar: str = "ar"
+    # Chatterbox ما يحتاج نص المرجع، ويستعمل أول ~10 ثوانٍ من المقطع فقط.
+    tts_ref_audio_ar: str = "reference/mazen.mp3"
 
     def stt_model(self) -> SpeechToTextModel:
         """اختيار STT المركزي؛ ما تبقى شروط موديلات موزعة بالراوترات."""
@@ -183,9 +184,8 @@ class Settings:
         return TextToSpeechModel(
             self.tts_model_ar,
             self.tts_ckpt_ar,
-            self.tts_vocab_ar,
+            self.tts_language_ar,
             self.tts_ref_audio_ar,
-            self.tts_ref_text_ar,
         )
 
 

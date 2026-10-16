@@ -5,7 +5,7 @@ POST /voice_followup/respond.
 المسار كامل (انظر تصميم الميزة):
 1) باك اند السستم يرسل تفاصيل طلب (رقمه، حالته، الزبون، المنتجات) لـ /ask.
 2) نولّد سؤالاً عراقياً طبيعياً حسب الحالة (النموذج النصي) ونحوّله لصوت
-   (F5-TTS بصوت مرجعي — app/features/voice_followup/tts.py)، ونرجعه مع
+   (Chatterbox TTS بصوت مرجعي — app/features/voice_followup/tts.py)، ونرجعه مع
    session_id تُخزَّن بيه معطيات الطلب (app/features/voice_followup/
    session_store.py).
 3) باك اند السستم يشغّل الصوت للزبون، يسجّل رده، ويرسله لـ /respond مع
@@ -88,7 +88,7 @@ async def _analyze_customer_reply(order: VoiceFollowupOrderRequest, transcript: 
 def _synthesize_or_503(text: str) -> bytes:
     audio = tts.synthesize(text)
     if audio is None:
-        raise HTTPException(503, "تحويل النص لصوت غير متوفر محلياً (يحتاج f5-tts مثبَّتة).")
+        raise HTTPException(503, "تحويل النص لصوت غير متوفر محلياً (يحتاج chatterbox-tts مثبَّتة).")
     return audio
 
 

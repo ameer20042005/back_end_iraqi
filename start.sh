@@ -26,21 +26,32 @@
 #
 # MAX_NUM_SEQS / GPU_MEMORY_UTILIZATION محسوبتان على A40 48GB (~44.43GB
 # فعلياً حسب nvidia-smi على Pods RunPod) — النشر الفعلي الحالي، لا A100/H100.
-# ⚠️ هذا الكرت يتقاسمه vLLM مع Whisper وF5-TTS (يُحمَّلان داخل عملية FastAPI
+# ⚠️ هذا الكرت يتقاسمه vLLM مع Whisper وChatterbox TTS (يُحمَّلان داخل عملية FastAPI
 # نفسها، انظر app/features/voice_followup) على نفس الـGPU الواحد — فحجز نسبة
 # عالية جداً لـvLLM (كانت 0.90 سابقاً) يترك عملياً VRAM شبه صفر لهذول، وأي
 # طلب توليد فعلي (مو مجرد /health) ينهار المحرك بـCUDA OOM (لاحظناه بالضبط:
 # vram_free_gb: 0.95 تقريباً صفر رغم أن 0.90 يفترض يترك ~4.4GB).
-# الحساب: الأوزان (bf16, 12B) ~24.4GB. نحجز ~6GB هامش لـWhisper/F5-TTS +
+# الحساب: الأوزان (bf16, 12B) ~24.4GB. نحجز ~6GB هامش لـWhisper/Chatterbox +
 # overhead سياقات CUDA المتعددة بنفس الكرت + أمان إضافي → 0.85 من 44.43GB
 # (~37.8GB لـvLLM) يترك ~6.6GB فعلياً. الباقي لـKV cache: 37.8-24.4≈13.4GB.
 # بنفس MAX_MODEL_LEN=10000 (٠.375MB/توكن×10000≈3.7GB/طلب بالسياق الأقصى)،
 # نفس منطق تحجيم H100 (47.6GB KV cache→~350 عملياً بأحمال إنتاج فعلية، أغلبها
 # أقصر من الأقصى وتتقاسم صفحات الكاش): 13.4/47.6×350 ≈ 98، مقرَّبة لأسفل لـ90
-# لهامش أمان إضافي (تقدير حجز Whisper/F5-TTS تقريبي لا مقيس بالضبط).
+# لهامش أمان إضافي (تقدير حجز Whisper/Chatterbox تقريبي لا مقيس بالضبط).
 
 set -e
 cd "$(dirname "$0")"
+
+# torchaudio (تبعية Chatterbox TTS) لازم يطابق إصدار torch حرفياً، وvLLM ما
+# يجيبه. نثبّته بعد أي تثبيت/إعادة تثبيت لـ torch، بلا تبعيات حتى ما يسحب
+# torch ثاني فوق نسخة vLLM.
+_ensure_torchaudio() {
+    local torch_ver
+    torch_ver=$(python3 -c "import torch; print(torch.__version__.split('+')[0])" 2>/dev/null) || return 0
+    python3 -c "import torchaudio, torch; assert torchaudio.__version__.split('+')[0] == torch.__version__.split('+')[0]" 2>/dev/null && return 0
+    echo "==> Installing torchaudio==${torch_ver} to match torch (required by Chatterbox TTS)..."
+    python3 -m pip install --no-cache-dir -q --no-deps "torchaudio==${torch_ver}"         --extra-index-url https://download.pytorch.org/whl/cu129         || echo "⚠️ torchaudio==${torch_ver} install failed — text-to-speech will be unavailable"
+}
 
 # ── تجهيز نظام التشغيل من الصفر (Ubuntu 22.04 خام) ──────────────────────────
 # بدون صورة جاهزة فيها Python/pip أصلاً، لازم نثبّتهم قبل أي أمر pip/python3
@@ -64,20 +75,23 @@ if ! command -v python3 >/dev/null 2>&1 || ! python3 -m pip --version >/dev/null
     _apt_install_pinned python3         3.10.6-1~22.04
     _apt_install_pinned python3-pip     22.0.2+dfsg-1ubuntu0.7
     _apt_install_pinned python3-dev     3.10.6-1~22.04
-    # build-essential/git: بعض حزم requirements-gpu.txt (مثل encodec، تبعية
-    # f5-tts) تُوزَّع sdist بلا wheel جاهزة فتحتاج مترجم C وقت التثبيت.
+    # build-essential/git: بعض حزم requirements-gpu.txt (مثل spacy-pkuseg،
+    # تبعية chatterbox-tts) قد تُوزَّع sdist بلا wheel جاهزة فتحتاج مترجم C.
     _apt_install_pinned build-essential 12.9ubuntu3
     _apt_install_pinned git             1:2.34.1-1ubuntu1.17
 fi
 
 python3 -m pip install --no-cache-dir -q -r requirements.txt -r requirements-gpu.txt
+# Chatterbox TTS بلا تبعياته المثبَّتة (torch/transformers/numpy بإصدارات
+# تتعارض مع vLLM) — تبعياته الفعلية بـ requirements-gpu.txt، انظر هناك.
+python3 -m pip install --no-cache-dir -q --no-deps chatterbox-tts==0.1.7
 command -v ffmpeg >/dev/null 2>&1 || {
     echo "==> Installing ffmpeg (required for the speech-to-text feature)..."
     apt-get update -qq
     _apt_install_pinned ffmpeg 7:4.4.2-0ubuntu0.22.04.1
 }
 # libsndfile1 لازمة لـ soundfile (app/features/voice_followup/tts.py) — كتابة
-# مخرَج F5-TTS كملف WAV. ldconfig -p يتحقق من وجود مكتبة النظام نفسها (الحزمة
+# مخرَج Chatterbox كملف WAV. ldconfig -p يتحقق من وجود مكتبة النظام نفسها (الحزمة
 # pip منفصلة عن مكتبة C اللي تربطها)، لا حزمة python soundfile.
 ldconfig -p 2>/dev/null | grep -q libsndfile.so || {
     echo "==> Installing libsndfile1 (required for the text-to-speech feature)..."
@@ -106,6 +120,7 @@ if ! python3 -c "import vllm.entrypoints.openai.api_server" 2>/dev/null; then
         --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
         --extra-index-url https://download.pytorch.org/whl/cu129
 fi
+_ensure_torchaudio
 
 # 8001 مستخدَم أحياناً من خدمة نظام على قوالب RunPod العامة (لاحظنا nginx
 # داخلي ماسكه بالفعل على بعض الـ Pods) — 18001 منفذ داخلي (بين الحاويتين
@@ -141,7 +156,7 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
 # ويرسله مع كل طلب لو لقاه. الخطر: توكن قديم/ملغى ضابطه قالب RunPod يخلّي
 # الـHub يرد 401 حتى على مستودع عام. لذلك:
 #   · unset يمسح متغيرَي التوكن من بيئة هذا السكربت — وبالتالي من vLLM
-#     وuvicorn (Whisper/F5-TTS) لأنهم يرثون البيئة منه.
+#     وuvicorn (Whisper/Chatterbox) لأنهم يرثون البيئة منه.
 #   · HF_HUB_DISABLE_IMPLICIT_TOKEN=1 يمنع إرسال توكن ملف login المخزَّن
 #     ضمنياً مع طلبات القراءة/التنزيل.
 # unset HF_TOKEN HUGGING_FACE_HUB_TOKEN
@@ -279,6 +294,7 @@ if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
         python3 -m pip install -U --force-reinstall vllm torch torchvision --pre \
             --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
             --extra-index-url https://download.pytorch.org/whl/cu129
+        _ensure_torchaudio
     elif grep -qi "libcudart\|libcublas\|cannot open shared object file" "${VLLM_LOG}"; then
         echo "==> Cause: CUDA runtime library path is missing — fixing LD_LIBRARY_PATH..."
         _fix_cuda_lib_path

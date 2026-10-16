@@ -38,9 +38,24 @@ tokenizers==0.22.2
 # لـ data URI يصير بـ app/engine.py والاستدلال البصري عند خادم vLLM.
 Pillow==12.3.0
 
-# تحويل نص عراقي لصوت (app/features/voice_followup/tts.py) — موديل
-# ameer4wisam/Habibi-TTS-IRQ، نسخة عراقية من F5-TTS (voice cloning من مقطع
-# مرجعي). soundfile يكتب مخرَج الموديل (numpy array) كملف WAV.
-f5-tts==1.1.22
+# تحويل نص لصوت (app/features/voice_followup/tts.py) — موديل Chatterbox
+# Multilingual (ResembleAI/chatterbox، voice cloning من مقطع مرجعي).
+# soundfile يكتب مخرَج الموديل كملف WAV.
+#
+# ⚠️ الحزمة نفسها chatterbox-tts==0.1.7 **ما تنحط هنا**: تثبّت torch==2.6.0
+# وtransformers==5.2.0 وnumpy<2 بالضبط، فتتعارض مع transformers==5.14.1
+# أعلاه ومع torch اللي يجيبه vLLM. start.sh يثبّتها بـ --no-deps، والتبعيات
+# اللي تحتاجها فعلاً وقت التشغيل مثبَّتة أدناه (بنفس أرقام pyproject.toml
+# الخاص بيها لما تكون مثبَّتة هناك). torchaudio يثبّته start.sh مطابقاً
+# لإصدار torch حتى ما ينكسر الربط بين الاثنين.
 soundfile==0.14.0
 huggingface_hub==1.27.0
+librosa==0.11.0
+s3tokenizer==0.3.0
+diffusers==0.29.0
+resemble-perth==1.0.1
+conformer==0.3.2
+omegaconf==2.4.0
+pyloudnorm==0.2.0
+pykakasi==2.3.0
+spacy-pkuseg==1.0.1

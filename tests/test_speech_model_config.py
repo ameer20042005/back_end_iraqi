@@ -22,7 +22,7 @@ def test_environment_variables_do_not_override_static_settings(monkeypatch):
     settings = Settings()
 
     assert settings.stt_model().repository == "ayoubkirouane/whisper-small-ar"
-    assert settings.tts_model().repository == "ameer4wisam/Habibi-TTS-IRQ"
+    assert settings.tts_model().repository == "ResembleAI/chatterbox"
 
 
 def test_transcription_reuses_arabic_pipeline_and_generation_settings(monkeypatch):
@@ -57,39 +57,29 @@ def test_transcription_reuses_arabic_pipeline_and_generation_settings(monkeypatc
 def test_speech_uses_one_model_and_local_reference(monkeypatch):
     from app.features.voice_followup import tts
 
-    downloaded = []
     loaded = []
-
-    def download(**kwargs):
-        downloaded.append(kwargs)
-        return kwargs["filename"]
-
     instance = SimpleNamespace()
-    instance.vocoder = SimpleNamespace(float=lambda: "float32-vocoder")
 
-    def factory(**kwargs):
+    def from_pretrained(**kwargs):
         loaded.append(kwargs)
         return instance
 
-    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(hf_hub_download=download))
-    monkeypatch.setattr(tts, "F5TTS", factory, raising=False)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
+    monkeypatch.setattr(tts, "ChatterboxMultilingualTTS",
+                        SimpleNamespace(from_pretrained=from_pretrained), raising=False)
     monkeypatch.setattr(tts, "_instance", None)
     first = tts._get_instance()
     assert tts._get_instance() is first
-    assert len(loaded) == 1
-    assert downloaded == [
-        {"repo_id": tts.settings.tts_model_ar, "filename": tts.settings.tts_ckpt_ar},
-        {"repo_id": tts.settings.tts_model_ar, "filename": tts.settings.tts_vocab_ar},
-    ]
+    assert loaded == [{"device": "cpu", "t3_model": tts.settings.tts_ckpt_ar}]
     assert first[0] is instance
     assert first[1] == str(Path(tts.__file__).resolve().parent / tts.settings.tts_ref_audio_ar)
-    assert first[2] == tts.settings.tts_ref_text_ar
-    assert instance.vocoder == "float32-vocoder"
+    assert Path(first[1]).is_file()
+    assert first[2] == tts.settings.tts_language_ar == "ar"
 
 
 def test_speech_warmup_reports_failed_synthesis(monkeypatch):
     from app.features.voice_followup import tts
 
-    monkeypatch.setattr(tts, "_F5_TTS_AVAILABLE", True)
+    monkeypatch.setattr(tts, "_CHATTERBOX_AVAILABLE", True)
     monkeypatch.setattr(tts, "synthesize", lambda text: None)
     assert tts.warmup() is False
