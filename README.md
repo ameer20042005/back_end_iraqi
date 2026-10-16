@@ -1,7 +1,7 @@
 # back_end_iraqi — مزوّد الذكاء الاصطناعي (FastAPI + vLLM)
 
 باك اند FastAPI يقدّم خدمات الذكاء الاصطناعي باللهجة العراقية: وكيل مبيعات، واجهة
-OpenAI متوافقة، استخراج طلب من نص/صوت/صورة، متابعة صوتية، وتصحيح مناطق شركات
+OpenAI متوافقة، استخراج طلب من نص/صوت/صورة، مكالمات صوتية حية (LiveKit)، وتصحيح مناطق شركات
 التوصيل. لا يخزّن بيانات أعمال — البيانات عند باك اند السستم، وتنفيذ الأدوات عند العميل.
 
 يشتغل محلياً، وعلى RunPod بصورة `ubuntu:22.04` خام: `start.sh` يبني كل شي من
@@ -15,7 +15,7 @@ ffmpeg/libsndfile1، Whisper وChatterbox TTS).
 | وكيل مبيعات | `app/features/sales/` | `/sales/*` | [sales.md](docs/api/sales.md) |
 | واجهة OpenAI | `app/features/openai_compat/` | `/v1/chat/completions` | [openai-compat.md](docs/api/openai-compat.md) |
 | إنشاء طلب متعدد الوسائط | `app/features/order_intake/` | `/orders/create` | [orders.md](docs/api/orders.md) |
-| متابعة صوتية + مكالمة التأجيل | `app/features/voice_followup/` | `/voice_followup/*` | [voice-followup.md](docs/api/voice-followup.md) |
+| مكالمات صوتية حية (LiveKit) + مساعد الموظف | `app/features/voice_followup/` | `/voice_followup/*` | [voice-followup.md](docs/api/voice-followup.md) |
 | تصحيح مناطق شركات التوصيل | `app/features/district_correction/` | `/v1/district-correction*` | [district-correction.md](docs/api/district-correction.md) |
 
 المصادقة، الرابط الأساسي، نقاط الفحص (`/health`، `/gpu`، `/metrics`)، وملخص كل

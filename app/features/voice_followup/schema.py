@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
-"""صيغ مسار المتابعة الصوتية للطلبات: JSON طلب خام يجي من باك اند السستم
-(انظر docs/reference/jenni-stores-schema.md — الحقول هنا تطابق
-sells/sell_items منطقياً)، وصيغة الجلسة المحفوظة بين POST /ask وPOST /respond.
+"""صيغ المكالمات الصوتية: بيانات الطلب كما يرسلها باك اند البيانات (انظر
+docs/reference/jenni-stores-schema.md — الحقول تطابق sells/sell_items منطقياً)،
+وطلب بدء مكالمة ونتيجته.
 
-الفصل بين VoiceFollowupOrder (خام من باك اند السستم) وVoiceFollowupSession
-(ما نحفظه بالجلسة) نفس فلسفة OrderExtraction/OrderConfirmation بـ
-app/orders/schema.py: لا نعيد للزبون ولا نرسل لباك اند السستم إلا بيانات
-وصلت فعلياً من مصدر موثوق (JSON الطلب الأصلي)، لا نخترعها."""
+بيانات الطلب تمر للـ agent كـ metadata للغرفة، ولا نرسل لباك اند البيانات إلا
+ما وصل فعلياً من مصدر موثوق (هذا الطلب) أو ما قاله الزبون — لا نخترع شي."""
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -19,23 +17,43 @@ class VoiceFollowupItem(BaseModel):
 
 
 class VoiceFollowupOrderRequest(BaseModel):
-    """جسم POST /voice_followup/ask — تفاصيل الطلب كما يرسلها باك اند
-    السستم. `status` هي المحرّك الرئيسي لنوع السؤال (انظر prompts.py) —
-    قيمتها تُشتق من نظام السستم الحقيقي (catalog.sells.sell_status أو
-    مرادفاته العربية)، ولا تُقيَّد هنا بقائمة ثابتة من الحالات."""
+    """تفاصيل الطلب. `status` محرّك نوع السؤال بمكالمة المتابعة، بلا قائمة
+    ثابتة — قيمتها من نظام البيانات الحقيقي (sell_status أو مرادفاته العربية)."""
 
     order_id: str
-    status: str  # مثلاً: "ملغي"، "مرتجع"، "لم يتم التسليم"...
+    status: str  # مثلاً: "ملغي"، "مرتجع"، "لم يتم التسليم"، "قيد التوصيل"
     customer_name: Optional[str] = None
     customer_phone: Optional[str] = None
     customer_city: Optional[str] = None
     customer_district: Optional[str] = None
     customer_address: Optional[str] = None
     items: List[VoiceFollowupItem] = Field(default_factory=list)
-    reason_hint: Optional[str] = None  # سبب أوّلي إن كان معروفاً بالسستم (مثل "رفض الزبون الاستلام")
+    reason_hint: Optional[str] = None  # سبب أوّلي إن كان معروفاً بالنظام
     notes: Optional[str] = None
-    # موعد التسليم المجدوَل حالياً (ISO "YYYY-MM-DD") — تستعمله مكالمة تأجيل
-    # التسليم (شخصية "صباح"، انظر prompts.py::SABAH_SYSTEM_PROMPT) لتذكير
-    # الزبون بموعده الحالي قبل عرض خيارات التأجيل. اختياري ولا يؤثر على مسار
-    # سؤال سبب الحالة (ask/analyze) القديم.
+    # موعد التسليم المجدوَل حالياً (ISO "YYYY-MM-DD") — تذكّر بيه صباح الزبون
+    # قبل عرض التأجيل.
     scheduled_date: Optional[str] = None
+
+
+# followup: JENI تسأل عن سبب حالة الطلب (ملغي/مرتجع/لم يتم التسليم).
+# postpone: صباح تعرض تأجيل تسليم شحنة لسه ما انسلّمت.
+CallType = Literal["followup", "postpone"]
+
+
+class CallRequest(BaseModel):
+    """جسم POST /voice_followup/calls — وهو نفسه وسائط أداة start_call اللي
+    يرجعها مساعد الموظف النصي، فتطبيق سطح المكتب يمرّرها كما هي."""
+
+    call_type: CallType
+    order: VoiceFollowupOrderRequest
+
+
+class CallResponse(BaseModel):
+    room: str
+    livekit_url: str
+    # توكن دخول الغرفة لتطبيق سطح المكتب (مراقبة المكالمة أو تسلّمها من الموظف).
+    operator_token: str
+    dispatch_id: str
+    # "sip": الـ agent يتصل بالزبون بنفسه عبر SIP trunk.
+    # "bridge": التطبيق يدخل الغرفة بـ operator_token ويربط صوت مكالمة الواتساب.
+    dial_mode: Literal["sip", "bridge"]

@@ -8,7 +8,7 @@
 | [api/orders.md](api/orders.md) | `POST /orders/create` وصيغة `OrderConfirmation` وأمثلة Java |
 | [api/sales.md](api/sales.md) | المبيعات OpenAI-compatible (`/sales/*`) وأدواتها |
 | [api/openai-compat.md](api/openai-compat.md) | `/v1/chat/completions` لـ jbot وأدوات الشحن |
-| [api/voice-followup.md](api/voice-followup.md) | المتابعة الصوتية ومكالمة تأجيل التسليم ("صباح") |
+| [api/voice-followup.md](api/voice-followup.md) | المكالمات الصوتية الحية (LiveKit): مساعد الموظف، بدء المكالمة، جيني وصباح |
 | [api/district-correction.md](api/district-correction.md) | تصحيح مناطق شركات التوصيل والذاكرة والنموذج المدرَّب |
 | **postman/** | |
 | [postman/README.md](postman/README.md) | دليل اختبار الـ API على Postman |

@@ -25,7 +25,6 @@ from app.features.openai_compat.router import router as openai_compat_router
 from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
 from app.features.voice_followup.router import router as voice_followup_router
-from app.features.voice_followup.tts import warmup as warmup_tts
 from app.core.system_backend import close_client as close_system_backend_client
 
 try:
@@ -40,7 +39,6 @@ async def _warmup_audio_models() -> None:
     while not llm_engine.ready:
         await asyncio.sleep(5)
     await run_in_threadpool(warmup_transcriber)
-    await run_in_threadpool(warmup_tts)
 
 
 @asynccontextmanager
@@ -68,18 +66,6 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    # بدون هذا، JS بالمتصفح ما يقدر يقرأ هيدرات الرد المخصَّصة حتى لو نجح
-    # الطلب فعلياً (قيد CORS قياسي: فقط هيدرات "safelisted" مقروءة افتراضياً).
-    # مسار المتابعة الصوتية (app/features/voice_followup/router.py) يرجع
-    # session_id ونتيجة التحليل بهذي الهيدرات بدل جسم JSON (الجسم صوت خام) —
-    # static/index.html يقرأها مباشرة لعرض التجربة الصوتية الكاملة.
-    # X-Reply-Text/X-Call-Status/X-Chosen-Option/X-Postpone-Saved تخص مكالمة
-    # تأجيل التسليم (شخصية صباح، /postpone/start و/postpone/respond).
-    expose_headers=[
-        "X-Session-Id", "X-Question-Text",
-        "X-Reason-Summary", "X-Customer-Transcript", "X-Query-Sent",
-        "X-Reply-Text", "X-Call-Status", "X-Chosen-Option", "X-Postpone-Saved",
-    ],
 )
 
 # حالة HTTP لكل رمز خطأ: 503/504 مؤقتة (يجوز للعميل إعادة المحاولة).

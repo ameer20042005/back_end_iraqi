@@ -26,7 +26,7 @@ X-API-Key: <المفتاح>
 | واجهة OpenAI | `POST /v1/chat/completions` | `openai_compat_api_key` في `app/config.py` | `sk-openai-7a9c2e4f6b1d8a0c3e5f7b9d1a3c5e7f` |
 | المبيعات | `POST /sales/chat`, `POST /sales/chat/stream` | `sales_api_key` | `sk-sales-b3f7b6a1c94d4e8fa2e6c1d9f0b7a4e2` |
 | إنشاء الطلبات | `POST /orders/create` | `orders_api_key` | `sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c` |
-| المتابعة الصوتية | `POST /voice_followup/ask`, `POST /voice_followup/respond` | `voice_followup_api_key` | `sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b` |
+| المكالمات الصوتية | `POST /voice_followup/calls`, `POST /voice_followup/operator/chat/completions` | `voice_followup_api_key` | `sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b` |
 | تصحيح المناطق | `POST /v1/district-correction` | `district_api_key` | `sk-district-7ea5de0fb1b68f0283df460dea42b2df` |
 
 - **تصحيح المناطق**: `POST /v1/district-correction` يستخدم مفتاحاً مستقلاً `district_api_key`؛ [العقد الكامل وPostman](district-correction.md).
@@ -54,12 +54,11 @@ curl -X POST http://localhost:8000/orders/create \
   -H "X-API-Key: sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" \
   -F "text=أريد لابتوب لينوفو"
 
-# متابعة صوتية (يرجع ملف WAV، انظر تفصيل كامل بقسم المتابعة الصوتية أدناه)
-curl -X POST http://localhost:8000/voice_followup/ask \
+# بدء مكالمة صوتية حية (LiveKit) — انظر voice-followup.md
+curl -X POST http://localhost:8000/voice_followup/calls \
   -H "Content-Type: application/json" \
   -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
-  -d '{"order_id": "ORD-1001", "status": "ملغي"}' \
-  -o question.wav
+  -d '{"call_type": "followup", "order": {"order_id": "ORD-1001", "status": "ملغي", "customer_phone": "07701234567"}}'
 ```
 
 **أخطاء المصادقة:**
@@ -85,10 +84,10 @@ X-API-Key: <مفتاح الخدمة المستهدفة>
 | `POST /orders/create` | `multipart/form-data` ⚠️ **ليس JSON** | حتى لو المدخل نص فقط (`text`)، لازم يُرسل كحقل Form جوّا multipart — لأن نفس المسار يقبل بديلاً ملف صوت أو صورة |
 | `POST /sales/chat` | `application/json` ✅ | جسم JSON عادي بالكامل |
 | `POST /sales/chat/stream` | `application/json` ✅ | نفس جسم `/sales/chat` تماماً، فقط الاستجابة تختلف (تدفّق لا JSON واحد) |
-| `POST /voice_followup/ask` | `application/json` ✅ | جسم JSON عادي بالكامل (تفاصيل الطلب) |
-| `POST /voice_followup/respond` | `multipart/form-data` ⚠️ **ليس JSON** | لازم يحمل ملف صوت فعلي، و`session_id` يُرسل كـ query parameter بالرابط نفسه لا بالجسم |
+| `POST /voice_followup/operator/chat/completions` | `application/json` ✅ | عقد OpenAI (`model`, `messages`, `tools`) |
+| `POST /voice_followup/calls` | `application/json` ✅ | `call_type` + `order` (نفس وسائط أداة `start_call`) |
 
-**خلاصة للمطوّر:** مساري المبيعات (`/sales/chat`, `/sales/chat/stream`) ومسار بدء المتابعة الصوتية (`/voice_followup/ask`) هي الوحيدة اللي تستقبل **JSON خالص** بالجسم مع هيدر `Content-Type: application/json` + هيدر `X-API-Key`. أما مسار إنشاء الطلبات ومسار الرد على المتابعة الصوتية فيحتاجان **رفع ملف** (صوت/صورة)، فهذولا حصراً بصيغة `multipart/form-data` — هيدر `X-API-Key` نفسه موجود بكل الحالات بلا استثناء، بس الجسم يتغيّر.
+**خلاصة للمطوّر:** كل المسارات تستقبل **JSON خالص** مع `Content-Type: application/json`، إلا `/orders/create` اللي يحتاج **رفع ملف** (صوت/صورة) فيكون حصراً `multipart/form-data`. هيدر `X-API-Key` موجود بكل الحالات بلا استثناء.
 
 ## واجهة تفاعلية جاهزة
 
@@ -103,7 +102,7 @@ X-API-Key: <مفتاح الخدمة المستهدفة>
 | إنشاء الطلبات `/orders/create` | [orders.md](orders.md) |
 | المبيعات `/sales/*` | [sales.md](sales.md) |
 | واجهة OpenAI `/v1/chat/completions` | [openai-compat.md](openai-compat.md) |
-| المتابعة الصوتية `/voice_followup/*` | [voice-followup.md](voice-followup.md) |
+| المكالمات الصوتية الحية `/voice_followup/*` | [voice-followup.md](voice-followup.md) |
 | تصحيح المناطق `/v1/district-correction` | [district-correction.md](district-correction.md) |
 | مجموعة Postman | [../postman/README.md](../postman/README.md) |
 
@@ -152,10 +151,8 @@ X-API-Key: <مفتاح الخدمة المستهدفة>
 | إنشاء الطلبات | `POST /orders/create` | `multipart/form-data` (حقل واحد: `text` أو `audio` أو `image`) | `sk-orders-...` |
 | المبيعات (رد كامل) | `POST /sales/chat` | `application/json` (`model`, `messages`, `tools`) | `sk-sales-...` |
 | المبيعات (بث) | `POST /sales/chat/stream` | `application/json` (نفس أعلاه) | `sk-sales-...` |
-| المتابعة الصوتية — سؤال | `POST /voice_followup/ask` | `application/json` (تفاصيل الطلب) | `sk-voicefu-...` |
-| المتابعة الصوتية — رد | `POST /voice_followup/respond?session_id=...` | `multipart/form-data` (`audio`) | `sk-voicefu-...` |
-| مكالمة التأجيل — بدء | `POST /voice_followup/postpone/start` | `application/json` (تفاصيل الشحنة) | `sk-voicefu-...` |
-| مكالمة التأجيل — دور | `POST /voice_followup/postpone/respond?session_id=...` | `multipart/form-data` (`audio`) | `sk-voicefu-...` |
+| مساعد الموظف (اتصل بهؤلاء) | `POST /voice_followup/operator/chat/completions` | `application/json` (`model`, `messages`, `tools`) | `sk-voicefu-...` |
+| بدء مكالمة حية (LiveKit) | `POST /voice_followup/calls` | `application/json` (`call_type`, `order`) | `sk-voicefu-...` |
 
 ## ملاحظات نشر على RunPod
 

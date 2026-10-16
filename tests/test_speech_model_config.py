@@ -2,7 +2,6 @@
 """اختبارات مصدر إعدادات موديلات الصوت الموحّد."""
 
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 from app.config import Settings
@@ -52,34 +51,3 @@ def test_transcription_reuses_arabic_pipeline_and_generation_settings(monkeypatc
     assert loaded[0][1]["stride_length_s"] == (3, 2)
     assert all(kwargs["generate_kwargs"] == {"task": "transcribe", "language": "arabic"}
                for _, kwargs in calls)
-
-
-def test_speech_uses_one_model_and_local_reference(monkeypatch):
-    from app.features.voice_followup import tts
-
-    loaded = []
-    instance = SimpleNamespace()
-
-    def from_pretrained(**kwargs):
-        loaded.append(kwargs)
-        return instance
-
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
-    monkeypatch.setattr(tts, "ChatterboxMultilingualTTS",
-                        SimpleNamespace(from_pretrained=from_pretrained), raising=False)
-    monkeypatch.setattr(tts, "_instance", None)
-    first = tts._get_instance()
-    assert tts._get_instance() is first
-    assert loaded == [{"device": "cpu", "t3_model": tts.settings.tts_ckpt_ar}]
-    assert first[0] is instance
-    assert first[1] == str(Path(tts.__file__).resolve().parent / tts.settings.tts_ref_audio_ar)
-    assert Path(first[1]).is_file()
-    assert first[2] == tts.settings.tts_language_ar == "ar"
-
-
-def test_speech_warmup_reports_failed_synthesis(monkeypatch):
-    from app.features.voice_followup import tts
-
-    monkeypatch.setattr(tts, "_CHATTERBOX_AVAILABLE", True)
-    monkeypatch.setattr(tts, "synthesize", lambda text: None)
-    assert tts.warmup() is False

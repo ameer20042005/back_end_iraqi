@@ -962,7 +962,6 @@
     Object.keys(headers).forEach((k) => { enc[k] = /[^\x20-\x7e]/.test(headers[k]) ? encodeURIComponent(headers[k]) : headers[k]; });
     return new Response(toneWav(0.7, freq || 660), { status: 200, headers: Object.assign({ "Content-Type": "audio/wav" }, enc) });
   }
-  const demoPostponeTurns = {};
 
   async function mockFetch(fullPath, options) {
     options = options || {};
@@ -1015,29 +1014,27 @@
         const b = body();
         return json({ companyName: b.companyName, saved: (b.corrections || []).length, removed: 0, rejected: [] });
       }
-      case "/voice_followup/ask":
-        return audioResponse({ "X-Session-Id": "demo-ask-" + Date.now().toString(36),
-          "X-Question-Text": "هلا عيني، ويّاك صباح من المتجر. شفنا طلبك انلغى، تكدر تكلّينا شنو السبب حتى نحسّن خدمتنا؟" }, 620);
-      case "/voice_followup/respond":
-        return audioResponse({ "X-Reason-Summary": "الزبون ألغى الطلب لأن التوصيل تأخر يومين عن الموعد.",
-          "X-Customer-Transcript": "والله تأخر عليّ التوصيل يومين فلغيته", "X-Query-Sent": "true" }, 740);
-      case "/voice_followup/postpone/start": {
-        const sid = "demo-call-" + Date.now().toString(36);
-        demoPostponeTurns[sid] = 0;
-        return audioResponse({ "X-Session-Id": sid, "X-Call-Status": "continue",
-          "X-Reply-Text": "هلا بيك، ويّاك صباح. طلبك الغسالة جاهز للتسليم اليوم — يناسبك نوصلّه هسه لو تحب نأجّله؟" }, 620);
-      }
-      case "/voice_followup/postpone/respond": {
-        const sid = query.get("session_id");
-        if (!(sid in demoPostponeTurns)) return json({ detail: "جلسة مكالمة التأجيل غير موجودة أو انتهت صلاحيتها." }, 404);
-        demoPostponeTurns[sid] += 1;
-        if (demoPostponeTurns[sid] === 1) {
-          return audioResponse({ "X-Call-Status": "continue", "X-Chosen-Option": "", "X-Postpone-Saved": "",
-            "X-Customer-Transcript": "اليوم ما اكدر، أجّلوه", "X-Reply-Text": "ولا يهمك. يناسبك باجر لو بعد باجر؟" }, 700);
+      case "/voice_followup/operator/chat/completions": {
+        const b = body();
+        const last = (b.messages || [])[b.messages.length - 1] || {};
+        let completion;
+        if (last.role === "tool") {
+          completion = demoCompletion({ messages: [{ role: "user", content: "تم" }], tools: [] });
+          completion.choices[0].message = { role: "assistant", content: "بدأت مكالمة واحدة (بيانات تجريبية)." };
+        } else {
+          completion = demoCompletion({ messages: [{ role: "user", content: "تم" }], tools: [] });
+          completion.choices[0] = { index: 0, finish_reason: "tool_calls", message: { role: "assistant", content: null, tool_calls: [{
+            id: "call_demo_1", type: "function", function: { name: "start_call", arguments: JSON.stringify({
+              call_type: "followup", order: { order_id: "ORD-1042", status: "ملغي", customer_phone: "07701234567",
+                items: [{ product_name: "غسالة اتوماتيك", quantity: 1 }] } }) } }] } };
         }
-        delete demoPostponeTurns[sid];
-        return audioResponse({ "X-Call-Status": "ended", "X-Chosen-Option": "tomorrow", "X-Postpone-Saved": "true",
-          "X-Customer-Transcript": "خليها باجر", "X-Reply-Text": "تمام، ثبّتنا التسليم باجر إن شاء الله. بأمان الله." }, 760);
+        return b.stream ? new Response(sseFromCompletion(completion), { status: 200, headers: { "Content-Type": "text/event-stream" } }) : json(completion);
+      }
+      case "/voice_followup/calls": {
+        const b = body();
+        if (!b.call_type || !b.order) return json({ detail: "call_type و order مطلوبة" }, 422);
+        return json({ room: "call-" + b.call_type + "-" + b.order.order_id + "-demo", livekit_url: "wss://demo.livekit.cloud",
+          operator_token: "eyJ...demo", dispatch_id: "AD_demo", dial_mode: "bridge" });
       }
       default:
         return json({ detail: "مسار غير مدعوم بالوضع التجريبي: " + path }, 404);
@@ -1095,6 +1092,10 @@
 
   /* ================= سجل النقاط ================= */
 
+  const OPERATOR_TOOLS = [
+    { type: "function", function: { name: "search_orders", description: "Search orders by status, date or order id",
+      parameters: { type: "object", properties: { status: { type: "string" }, date: { type: "string" }, order_id: { type: "string" } } } } }
+  ];
   const ENDPOINTS = [
     { id: "overview", group: "عام", name: "نظرة عامة", method: "", path: "/health · /metrics · /gpu",
       title: "نظرة عامة على النظام",
@@ -1145,16 +1146,17 @@
       desc: "يستقبل صفوف Excel (المحافظة + المنطقة + العنوان) لشركة معيّنة ويرجع المنطقة الصحيحة من كتالوجها مع درجة الثقة. المطابقة الحرفية والتقريبية تتم محلياً، والحالات الغامضة تروح للموديل (نفس LLM_BASE_URL ما لم يُضبط DISTRICT_LLM_BASE_URL).",
       render: renderDistrict },
 
-    { id: "voiceFollowup", group: "الصوت", name: "سؤال سبب الحالة", method: "POST", path: "/voice_followup/ask → /respond", key: "voiceFollowup",
-      short: "سؤال صوتي للزبون عن سبب إلغاء/إرجاع الطلب، وتحليل رده الصوتي.",
-      title: "متابعة صوتية لسبب حالة الطلب",
-      desc: "خطوتان: /ask يستقبل تفاصيل الطلب ويرجع سؤالاً صوتياً (audio/wav)؛ /respond يستقبل صوت رد الزبون ويرجع صوت شكر بعد تحويله لنص وتلخيص السبب وإرساله لباك اند السستم. التفاصيل النصية تصل بالهيدرات.",
-      render: renderVoiceFollowup },
-    { id: "voicePostpone", group: "الصوت", name: "مكالمة التأجيل (صباح)", method: "POST", path: "/voice_followup/postpone/*", key: "voiceFollowup",
-      short: "مكالمة متعددة الأدوار تثبّت موعد تسليم جديد وتحفظه بنظام الطلبات.",
-      title: "مكالمة صباح — تأجيل التسليم",
-      desc: "مكالمة صوتية متعددة الأدوار: صباح تسأل الزبون يستلم اليوم لو يأجّل، وتنتهي بموعد مؤكَّد يُحفظ بنظام الطلبات. المواعيد المقبولة: اليوم، باجر، بعد باجر، بعد N أيام (لين ١٤)، أسبوع، أو اسم يوم. كرّر /respond بنفس session_id لين X-Call-Status يصير ended.",
-      render: renderVoicePostpone },
+    { id: "voiceOperator", group: "المكالمات", name: "مساعد الموظف", method: "POST", path: "/voice_followup/operator/chat/completions", key: "voiceFollowup",
+      defaultModel: "operator", defaultTools: OPERATOR_TOOLS,
+      short: "الموظف يكتب «اتصل بهؤلاء» ← يجلب البيانات بأدواتك ويرجع start_call لكل زبون.",
+      title: "مساعد موظف مركز الاتصال",
+      desc: "صيغة OpenAI بلا حالة. الخادم يضيف أداة start_call لأدواتك تلقائياً. نفّذ أدوات البيانات بنظامك وأعد نتيجتها كرسالة role: tool؛ أما start_call فنفّذها بإرسال وسائطها كما هي إلى /voice_followup/calls.",
+      render: renderChat },
+    { id: "voiceCall", group: "المكالمات", name: "بدء مكالمة", method: "POST", path: "/voice_followup/calls", key: "voiceFollowup",
+      short: "غرفة LiveKit + agent صوتي + توكن لتطبيق سطح المكتب.",
+      title: "بدء مكالمة صوتية حية (LiveKit)",
+      desc: "الجسم هو نفسه وسائط start_call. يرجع اسم الغرفة وتوكن دخولها. dial_mode = sip: الـ agent يتصل بالزبون بنفسه؛ bridge: تطبيق سطح المكتب يدخل الغرفة بالتوكن ويربط صوت مكالمة الواتساب.",
+      render: renderVoiceCall },
 
     { id: "loadTest", group: "الأداء", name: "اختبار الحمل", method: "POST", path: "/sales/chat/completions ×N", key: "sales",
       short: "طلبات متزامنة لقياس سلوك الخادم تحت الضغط.",
@@ -1361,7 +1363,7 @@
     const toolChoice = h("select", { class: "mono" }, ["auto", "none", "required"].map((v) => h("option", { value: v, text: v })));
     const maxTokens = h("input", { type: "number", min: "1", placeholder: "افتراضي الخادم" });
     const streamCheck = h("input", { type: "checkbox", checked: forceStream, disabled: forceStream });
-    const toolsEditor = h("textarea", { class: "code", spellcheck: "false", value: JSON.stringify(SALES_TOOLS, null, 2) });
+    const toolsEditor = h("textarea", { class: "code", spellcheck: "false", value: JSON.stringify(ep.defaultTools || SALES_TOOLS, null, 2) });
     const toolsCount = pill("", "outline");
     function countTools() {
       try {
@@ -1963,225 +1965,38 @@
 
   /* ================= المتابعة الصوتية ================= */
 
-  function renderVoiceFollowup(container, ep) {
-    let sessionId = null;
-    const orderInput = h("textarea", { class: "code", value: JSON.stringify({
-      order_id: "ORD-1042", status: "ملغي", customer_name: "أحمد كاظم", customer_phone: "07701234567",
-      customer_city: "بغداد", customer_district: "الكرادة", customer_address: "بغداد - الكرادة - قرب مطعم النخيل",
-      items: [{ product_name: "لابتوب لينوفو IdeaPad 15", quantity: 1 }, { product_name: "ماوس لوجيتك لاسلكي", quantity: 1 }],
-      reason_hint: "رفض الزبون استلام الطلب من المندوب", notes: ""
+  function renderVoiceCall(container, ep) {
+    const reqInput = h("textarea", { class: "code", value: JSON.stringify({
+      call_type: "followup",
+      order: { order_id: "ORD-1042", status: "ملغي", customer_phone: "07701234567",
+        items: [{ product_name: "غسالة اتوماتيك", quantity: 1 }], reason_hint: null, scheduled_date: null }
     }, null, 2) });
-    const askBtn = makeButton("أرسل /ask واستمع للسؤال");
-    const sessionPill = pill("", "mono outline hidden");
-    const askPanel = panel("بيانات الطلب", { step: "١" });
-    askPanel.append(field("JSON الطلب كما يرسله باك اند السستم — status تحدد نوع السؤال", orderInput),
-      h("div", { class: "actions" }, askBtn, sessionPill));
-
-    const askMeta = h("div", { class: "meta-row" });
-    const askBody = h("div", {}, emptyState("يتشغّل السؤال الصوتي تلقائياً بعد الإرسال."));
-    askPanel.append(askMeta, askBody);
-
-    const audio = makeAudioInput();
-    const respondBtn = makeButton("أرسل /respond");
-    const respondPanel = panel("رد الزبون الصوتي", { step: "٢", hidden: true });
-    const respondMeta = h("div", { class: "meta-row" });
-    const respondBody = h("div", {});
-    respondPanel.append(audio.node, h("div", { class: "actions" }, respondBtn), respondMeta, respondBody);
-    container.append(askPanel, respondPanel);
-
-    askBtn.addEventListener("click", async () => {
-      const order = parseJsonInput(orderInput.value, "بيانات الطلب");
-      if (order === undefined) return;
-      askBtn.setBusy(true);
-      setMeta(askMeta, pill("جاري توليد السؤال وتحويله لصوت…", "info"));
-      askBody.replaceChildren();
+    const sendBtn = makeButton("ابدأ المكالمة");
+    const meta = h("div", { class: "meta-row" });
+    const out = h("div", {}, emptyState("call_type: followup (سبب الحالة) أو postpone (تأجيل التسليم)."));
+    const p = panel("طلب المكالمة");
+    p.append(field("JSON (نفس وسائط start_call)", reqInput), h("div", { class: "actions" }, sendBtn), meta, out);
+    container.append(p);
+    sendBtn.addEventListener("click", async () => {
+      const req = parseJsonInput(reqInput.value, "طلب المكالمة");
+      if (req === undefined) return;
+      sendBtn.setBusy(true);
       const t0 = performance.now();
       try {
-        const res = await api("/voice_followup/ask", {
-          method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, keyHeader(ep.key)), body: JSON.stringify(order)
+        const res = await api("/voice_followup/calls", {
+          method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, keyHeader(ep.key)), body: JSON.stringify(req)
         });
-        const ms = performance.now() - t0;
-        if (!res.ok) {
-          const err = await res.json().catch(() => null);
-          setMeta(askMeta, statusPill(res.status), msPill(ms));
-          askBody.replaceChildren(errorBox(errorText(err, res.status)));
-        } else {
-          sessionId = res.headers.get("X-Session-Id");
-          const question = decodeHeader(res, "X-Question-Text");
-          const url = URL.createObjectURL(await res.blob());
-          setMeta(askMeta, statusPill(res.status), msPill(ms), demoPill());
-          sessionPill.textContent = "session: " + (sessionId || "—");
-          sessionPill.classList.remove("hidden");
-          askBody.replaceChildren(h("div", { class: "chat-log", style: "min-height:0" },
-            h("div", { class: "bubble assistant" }, h("div", { class: "who", text: "السؤال الصوتي" }), question || "(بدون نص بالهيدر)", audioPlayer(url, true))),
-            curlFold({ method: "POST", path: "/voice_followup/ask", key: ep.key, json: order, output: "question.wav" }));
-          respondPanel.classList.remove("hidden");
-          audio.reset();
-          setMeta(respondMeta);
-          respondBody.replaceChildren(sessionId ? emptyState("سجّل رد الزبون أو ارفع ملفاً، ثم أرسل.") :
-            errorBox("ما وصل X-Session-Id — تأكد إنه ضمن expose_headers بإعداد CORS."));
-        }
+        const data = await res.json().catch(() => null);
+        setMeta(meta, statusPill(res.status), msPill(performance.now() - t0), demoPill());
+        out.replaceChildren(res.ok ? codeBlock(data) : errorBox(errorText(data, res.status)),
+          curlFold({ method: "POST", path: "/voice_followup/calls", key: ep.key, json: req }));
       } catch (e) {
-        setMeta(askMeta, statusPill(0));
-        askBody.replaceChildren(errorBox("تعذّر الوصول للخادم: " + e.message));
+        setMeta(meta, statusPill(0));
+        out.replaceChildren(errorBox("تعذّر الوصول للخادم: " + e.message));
       }
-      askBtn.setBusy(false);
-    });
-
-    respondBtn.addEventListener("click", async () => {
-      if (!sessionId) { alert("أرسل /ask أولاً — الجلسة تُستهلك بعد رد واحد."); return; }
-      const file = audio.getFile();
-      if (!file) { alert("سجّل صوتاً أو اختر ملفاً أولاً."); return; }
-      respondBtn.setBusy(true);
-      setMeta(respondMeta, pill("صوت ← نص ← تلخيص السبب ← صوت شكر…", "info"));
-      respondBody.replaceChildren();
-      const form = new FormData();
-      form.append("audio", file, file.name || "reply.webm");
-      const path = "/voice_followup/respond?session_id=" + encodeURIComponent(sessionId);
-      const t0 = performance.now();
-      try {
-        const res = await api(path, { method: "POST", headers: keyHeader(ep.key), body: form });
-        const ms = performance.now() - t0;
-        if (!res.ok) {
-          const err = await res.json().catch(() => null);
-          setMeta(respondMeta, statusPill(res.status), msPill(ms));
-          respondBody.replaceChildren(errorBox(errorText(err, res.status)));
-        } else {
-          const sent = res.headers.get("X-Query-Sent") === "true";
-          const url = URL.createObjectURL(await res.blob());
-          setMeta(respondMeta, statusPill(res.status), msPill(ms), demoPill(),
-            pill(sent ? "انرسل لباك اند السستم" : "تعذّر الإرسال لباك اند السستم", sent ? "ok" : "warn"));
-          respondBody.replaceChildren(h("div", { class: "chat-log", style: "min-height:0" },
-            h("div", { class: "bubble user" }, h("div", { class: "who", text: "رد الزبون (Whisper)" }), decodeHeader(res, "X-Customer-Transcript") || "—"),
-            h("div", { class: "bubble assistant" }, h("div", { class: "who", text: "ملخّص السبب" }), decodeHeader(res, "X-Reason-Summary") || "—", audioPlayer(url, true))),
-            curlFold({ method: "POST", path: path, key: ep.key, form: [{ name: "audio", value: file.name || "reply.webm", file: true }], output: "thanks.wav" }));
-          sessionId = null;
-          sessionPill.classList.add("hidden");
-        }
-      } catch (e) {
-        setMeta(respondMeta, statusPill(0));
-        respondBody.replaceChildren(errorBox("تعذّر الوصول للخادم: " + e.message));
-      }
-      respondBtn.setBusy(false);
+      sendBtn.setBusy(false);
     });
   }
-
-  /* ================= مكالمة التأجيل ================= */
-
-  function renderVoicePostpone(container, ep) {
-    let sessionId = null;
-    let turn = 0;
-    const orderInput = h("textarea", { class: "code", value: JSON.stringify({
-      order_id: "ORD-1042", status: "قيد التوصيل", customer_name: "أحمد كاظم",
-      items: [{ product_name: "غسالة اتوماتيك", quantity: 1 }],
-      scheduled_date: new Date().toISOString().slice(0, 10)
-    }, null, 2) });
-    const startBtn = makeButton("ابدأ المكالمة");
-    const sessionPill = pill("", "mono outline hidden");
-    const startPanel = panel("بيانات الشحنة", { step: "١" });
-    startPanel.append(field("JSON الشحنة — scheduled_date هو الموعد الحالي (YYYY-MM-DD)", orderInput),
-      h("div", { class: "actions" }, startBtn, sessionPill));
-
-    const callPanel = panel("مجرى المكالمة");
-    const callMeta = h("div", { class: "meta-row" });
-    const callLog = h("div", { class: "chat-log" }, emptyState("ابدأ المكالمة لتسمع افتتاح صباح."));
-    callPanel.append(callMeta, callLog);
-
-    const audio = makeAudioInput();
-    const turnBtn = makeButton("أرسل رد الزبون");
-    const turnPanel = panel("رد الزبون — يتكرر كل دور", { step: "٢", hidden: true });
-    turnPanel.append(audio.node, h("div", { class: "actions" }, turnBtn));
-    container.append(startPanel, callPanel, turnPanel);
-
-    function add(cls, who, text, url) {
-      const b = h("div", { class: "bubble " + cls }, h("div", { class: "who", text: who }), text || "—", url ? audioPlayer(url, true) : null);
-      callLog.appendChild(b);
-      b.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }
-    const optionLabel = { today: "اليوم", tomorrow: "باجر", day_after: "بعد باجر" };
-
-    startBtn.addEventListener("click", async () => {
-      const order = parseJsonInput(orderInput.value, "بيانات الشحنة");
-      if (order === undefined) return;
-      startBtn.setBusy(true);
-      turn = 0;
-      setMeta(callMeta, pill("جاري توليد الافتتاح…", "info"));
-      callLog.replaceChildren();
-      const t0 = performance.now();
-      try {
-        const res = await api("/voice_followup/postpone/start", {
-          method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, keyHeader(ep.key)), body: JSON.stringify(order)
-        });
-        const ms = performance.now() - t0;
-        if (!res.ok) {
-          const err = await res.json().catch(() => null);
-          setMeta(callMeta, statusPill(res.status), msPill(ms));
-          callLog.replaceChildren(errorBox(errorText(err, res.status)));
-        } else {
-          sessionId = res.headers.get("X-Session-Id");
-          const url = URL.createObjectURL(await res.blob());
-          setMeta(callMeta, statusPill(res.status), msPill(ms), pill("المكالمة جارية", "info"), demoPill());
-          sessionPill.textContent = "session: " + (sessionId || "—");
-          sessionPill.classList.remove("hidden");
-          add("assistant", "صباح — الافتتاح", decodeHeader(res, "X-Reply-Text"), url);
-          turnPanel.classList.remove("hidden");
-          audio.reset();
-        }
-      } catch (e) {
-        setMeta(callMeta, statusPill(0));
-        callLog.replaceChildren(errorBox("تعذّر الوصول للخادم: " + e.message));
-      }
-      startBtn.setBusy(false);
-    });
-
-    turnBtn.addEventListener("click", async () => {
-      if (!sessionId) { alert("ابدأ المكالمة أولاً."); return; }
-      const file = audio.getFile();
-      if (!file) { alert("سجّل صوتاً أو اختر ملفاً أولاً."); return; }
-      turnBtn.setBusy(true);
-      turn += 1;
-      const form = new FormData();
-      form.append("audio", file, file.name || "reply.webm");
-      const t0 = performance.now();
-      try {
-        const res = await api("/voice_followup/postpone/respond?session_id=" + encodeURIComponent(sessionId),
-          { method: "POST", headers: keyHeader(ep.key), body: form });
-        const ms = performance.now() - t0;
-        if (!res.ok) {
-          const err = await res.json().catch(() => null);
-          setMeta(callMeta, statusPill(res.status), msPill(ms));
-          add("error", "خطأ بالدور " + turn, errorText(err, res.status));
-        } else {
-          const status = res.headers.get("X-Call-Status") || "";
-          const chosen = res.headers.get("X-Chosen-Option") || "";
-          const saved = res.headers.get("X-Postpone-Saved") || "";
-          const url = URL.createObjectURL(await res.blob());
-          const chosenText = chosen ? (optionLabel[chosen] || chosen) : "";
-          setMeta(callMeta, statusPill(res.status), msPill(ms), demoPill(),
-            pill(status === "ended" ? "انتهت المكالمة" : "المكالمة جارية", status === "ended" ? "outline" : "info"),
-            chosenText ? pill("الموعد: " + chosenText, "violet") : null,
-            saved ? pill(saved === "true" ? "انحفظ بنظام الطلبات" : "تعذّر الحفظ", saved === "true" ? "ok" : "warn") : null);
-          add("user", "الزبون — دور " + turn + " (Whisper)", decodeHeader(res, "X-Customer-Transcript") || "(سكوت أو كلام غير مفهوم)");
-          add("assistant", "صباح — دور " + turn, decodeHeader(res, "X-Reply-Text"), url);
-          audio.reset();
-          if (status === "ended") {
-            sessionId = null;
-            sessionPill.classList.add("hidden");
-            turnPanel.classList.add("hidden");
-            add("system", "انتهت المكالمة", chosenText
-              ? "الموعد المثبَّت: " + chosenText + (saved === "true" ? " — انحفظ بنظام الطلبات." : saved === "false" ? " — تعذّر حفظه." : "")
-              : "انتهت بلا تثبيت موعد.");
-          }
-        }
-      } catch (e) {
-        setMeta(callMeta, statusPill(0));
-        add("error", "خطأ", "تعذّر الوصول للخادم: " + e.message);
-      }
-      turnBtn.setBusy(false);
-    });
-  }
-
-  /* ================= اختبار الحمل ================= */
 
   function renderLoadTest(container, ep) {
     const msg = h("input", { type: "text", class: "prose", value: "هلو، شنو عندكم لابتوبات؟" });

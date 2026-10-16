@@ -4,14 +4,14 @@
 لحظي حقيقي عبر HTTP، مصادَق بمفتاح API، والنتيجة تُعالَج وتُرجَع للمتصل بلا
 احتفاظ بها هنا.
 
-الـ query المُرسَل يحمل بيانات الزبون كاملة (اسم/هاتف/موقع) من الطلب الأصلي
-اللي فتح الجلسة (POST /ask) + ملخّص السبب المستخرَج من رد الزبون الصوتي —
-كما طُلب: التوثيق يجمع مصدرين (JSON الطلب الأصلي + تحليل الرد) بجسم واحد.
+تستدعيه أدوات الـ agent بالمكالمة الحية (agent.py: save_reason وconfirm_postpone).
+الـ query المُرسَل يحمل بيانات الزبون كاملة من الطلب الأصلي (metadata المكالمة)
++ ما قاله الزبون — مصدران موثوقان بجسم واحد.
 
 TODO: مسار باك اند السستم الفعلي لاستقبال هذا الـ query غير معروف بعد —
 `/orders/{order_id}/feedback` أدناه أفضل تخمين موثَّق (يوازي POST /orders
 بـ app/orders/gateway.py). عدّل المسار فقط عند توفر التفاصيل الحقيقية؛ الواجهة
-(VoiceFollowupSubmitter) والمستدعي (router.py) لا يتغيّرون.
+(VoiceFollowupSubmitter) والمستدعي (agent.py) لا يتغيّرون.
 """
 
 from abc import ABC, abstractmethod
@@ -82,14 +82,14 @@ voice_followup_submitter: VoiceFollowupSubmitter = HttpVoiceFollowupSubmitter()
 # بوابة مكالمة "صباح" (تأجيل التسليم) — انظر prompts.py::SABAH_SYSTEM_PROMPT
 # ---------------------------------------------------------------------------
 #
-# تُستدعى فقط بعد ما الزبون يأكّد اختياره فعلياً (انظر router.py) — لا نرسل
+# تُستدعى فقط بعد ما الزبون يأكّد اختياره فعلياً (agent.py::confirm_postpone) — لا نرسل
 # شي لباك اند السستم قبل تأكيد صريح، حتى لا يُسجَّل تأجيل ما وافق عليه
 # الزبون نهائياً.
 #
 # TODO: مسار باك اند السستم الفعلي لاستقبال هذا التحديث غير معروف بعد —
 # `/orders/{order_id}/postpone` أدناه أفضل تخمين موثَّق (يوازي
 # `/orders/{order_id}/feedback` أعلاه). عدّل المسار فقط عند توفر التفاصيل
-# الحقيقية؛ الواجهة (VoicePostponeSubmitter) والمستدعي (router.py) لا يتغيّرون.
+# الحقيقية؛ الواجهة (VoicePostponeSubmitter) والمستدعي (agent.py) لا يتغيّرون.
 
 
 class VoicePostponeSubmitter(ABC):
@@ -98,7 +98,7 @@ class VoicePostponeSubmitter(ABC):
         self, order: VoiceFollowupOrderRequest, new_date: str, chosen_option: str, api_key: str,
     ) -> bool:
         """يرسل قرار التأجيل المؤكَّد لباك اند السستم. `new_date` تاريخ ISO
-        محسوب حتمياً (router.py::resolve_postpone_date) — لا نرسل الكلمة
+        محسوب حتمياً (postpone.py::resolve_postpone_date) — لا نرسل الكلمة
         العربية وحدها حتى يبقى باك اند السستم يستقبل تاريخاً صريحاً قابلاً
         للحفظ مباشرة بجدول الطلب. يرجع True لو نجح الإرسال."""
 

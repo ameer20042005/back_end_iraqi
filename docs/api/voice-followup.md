@@ -1,243 +1,169 @@
-# المتابعة الصوتية — `/voice_followup/*`
+# المكالمات الصوتية الحية — `/voice_followup/*` (LiveKit)
 
-## سؤال ورد (`/ask` و`/respond`)
+مكالمات صوتية حية مع الزبون عبر [LiveKit Agents](https://github.com/livekit/agents). الموظف يكتب بتطبيق سطح المكتب "اتصل بهؤلاء"، ومساعد نصي يجلب بياناتهم ويرجع للتطبيق أمر `start_call` لكل زبون. التطبيق ينفّذه فتبدأ مكالمة يديرها agent صوتي (جيني أو صباح).
 
-مسار موجَّه لباك اند السستم (مو للزبون مباشرة): باك اند السستم يزوّدنا تفاصيل طلب بحالة معيّنة (ملغي، مرتجع...)، نولّد سؤالاً صوتياً عراقياً طبيعياً ونرجعه، باك اند السستم يشغّله للزبون ويسجّل رده، يرسل التسجيل لينا، نحلّل السبب ونرسله لباك اند السستم، ونرجع صوت شكر جاهز للزبون. **جسم الرد بكلا النقطتين ملف صوت WAV خام (`audio/wav`) — التفاصيل النصية (السؤال، النص المفرَّغ، الملخّص) توصل حصراً بهيدرات HTTP**، حتى يبقى جسم الرد صالحاً للتشغيل المباشر بلا أي تفكيك JSON مسبق.
+## المعمارية
 
-الجلسة (`session_id`) تعيش بالذاكرة فقط بين `/ask` و`/respond` (بلا تخزين دائم)، صالحة **30 دقيقة** وتُستهلك مرة واحدة (`/respond` يحذفها فور القراءة، حتى لو نجح الطلب) — استدعاء ثانٍ بنفس `session_id` يرجع `404`.
+```text
+تطبيق سطح المكتب ──(1) نص الموظف──► POST /voice_followup/operator/chat/completions
+        ▲                                   │ tool_calls: search_orders… ثم start_call
+        │ (2) ينفّذ أدوات البيانات بنظامه    ▼
+        └──(3) start_call ──────────────► POST /voice_followup/calls
+                                            │ غرفة LiveKit + dispatch للـ agent
+                                            ▼
+   الزبون (WhatsApp/SIP) ◄──صوت──► LiveKit Server ◄──► Agent Worker (هذا الخادم، GPU)
+                                                        Whisper → vLLM → Chatterbox
+                                                        أدوات: save_reason / propose_postpone / confirm_postpone
+                                                                    │
+                                                                    ▼
+                                                        باك اند البيانات (feedback / postpone)
+```
 
-⚠️ **هيدرات الرد نصوص عربية مرمَّزة percent-encoding (RFC 5987)** لأن هيدرات HTTP لازم Latin-1 فقط — فكّها بجهتك بـ `decodeURIComponent(...)` (JS) أو `urllib.parse.unquote(...)` (Python) قبل الاستخدام.
+| الطرف | دوره |
+|---|---|
+| **هذا الخادم (مزوّد الذكاء)** | مساعد الموظف النصي، بدء المكالمات، والـ agent worker الصوتي (Whisper + النموذج + Chatterbox) |
+| **باك اند البيانات** | مصدر بيانات الطلبات، ويستقبل نتيجة المكالمة: `POST /orders/{id}/feedback` و`POST /orders/{id}/postpone` |
+| **تطبيق سطح المكتب** | واجهة الموظف: يرسل الأوامر، ينفّذ أدوات البيانات و`start_call`، ويدخل الغرفة للمراقبة أو لربط صوت الواتساب |
+| **خادم LiveKit** | ينقل الصوت (WebRTC/SIP). يحتاج IP عام ومنافذ UDP، فيعيش على LiveKit Cloud أو VPS، **مو على RunPod** |
 
-### `POST /voice_followup/ask`
+## الإعداد
 
-**جسم الطلب** (`Content-Type: application/json`):
+متغيرات بيئة (أسرار، فما تنحط بـ `app/config.py`):
+
+| المتغيّر | إلزامي | الوصف |
+|---|---|---|
+| `LIVEKIT_URL` | ✅ | مثل `wss://<project>.livekit.cloud` |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | ✅ | مفاتيح مشروع LiveKit |
+| `LIVEKIT_SIP_TRUNK_ID` | ❌ | SIP trunk صادر (WhatsApp Business Calling أو Twilio عبر LiveKit SIP). بدونه تعمل المكالمة بوضع `bridge` |
+| `VOICE_MAX_CALLS` | ❌ | أقصى مكالمات متزامنة لكل worker (افتراضياً `10`). بعدها LiveKit يوجّه المكالمة لـ worker ثاني أو تنتظر لحد ما تفرغ مكالمة |
+| `TTS_POOL_SIZE` | ❌ | عدد نسخ Chatterbox (افتراضياً `2`)، كل نسخة تنطق لمكالمة وحدة بالمرة. كل نسخة ~3GB VRAM تقريباً |
+
+`start.sh` يشغّل الـ agent worker تلقائياً لو المتغيرات الثلاثة الأولى موجودة (اللوق: `/tmp/agent.log`). يدوياً:
+
+```bash
+python -m app.features.voice_followup.agent download-files   # مرة وحدة (أوزان VAD)
+python -m app.features.voice_followup.agent start
+```
+
+بدون هذه المتغيرات، `POST /voice_followup/calls` يرجع `503` واضحة.
+
+## مساعد الموظف — `POST /voice_followup/operator/chat/completions`
+
+عقد OpenAI Chat Completions بلا حالة (نفس نمط `/sales/chat/completions`)، بمفتاح `voice_followup_api_key`. التطبيق يرسل التاريخ كاملاً بكل طلب مع **أدوات البيانات اللي ينفّذها هو** (مثل `search_orders`)، والخادم يضيف أداة `start_call` تلقائياً. إذا أرسل التطبيق أداة بنفس الاسم، تعريف الخادم يحل محلها.
+
+**الدورة:**
+
+1. الموظف يكتب: "اتصل بزبائن الطلبات الملغية اليوم".
+2. الرد `tool_calls: search_orders(...)`. التطبيق ينفّذه ويعيد النتيجة برسالة `role: "tool"`.
+3. الرد `tool_calls: start_call(...)` (واحد لكل طلب). التطبيق يرسل وسائط كل واحد **كما هي** إلى `POST /voice_followup/calls`، ثم يعيد نتيجته برسالة `role: "tool"`.
+4. الرد نص ملخّص للموظف (`finish_reason: "stop"`).
+
+```bash
+curl -X POST "$BASE/voice_followup/operator/chat/completions" \
+  -H "X-API-Key: $VOICE_KEY" -H "Content-Type: application/json" \
+  -d '{
+    "model": "operator",
+    "messages": [{"role": "user", "content": "اتصل بصاحب الطلب ORD-1042 واسأله ليش انلغى"}],
+    "tools": [{"type": "function", "function": {"name": "search_orders",
+      "description": "Search orders by status, date or order id",
+      "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}, "status": {"type": "string"}}}}}]
+  }'
+```
+
+`stream: true` يرجع نفس الرد بصيغة OpenAI SSE وينتهي بـ `data: [DONE]`.
+
+### أداة `start_call` (يعرّفها الخادم)
+
+| الوسيط | النوع | الوصف |
+|---|---|---|
+| `call_type` | `"followup"` \| `"postpone"` | `followup`: جيني تسأل عن سبب حالة الطلب. `postpone`: صباح تعرض تأجيل التسليم |
+| `order` | object | بيانات الطلب من نتيجة أداة البيانات (الجدول أدناه). `order_id` و`status` و`customer_phone` مطلوبة |
+
+## بدء مكالمة — `POST /voice_followup/calls`
+
+الجسم هو نفسه وسائط `start_call`:
+
 ```json
 {
-  "order_id": "ORD-1001",
-  "status": "ملغي",
-  "customer_name": "أحمد",
-  "customer_phone": "07701234567",
-  "customer_city": "بغداد",
-  "customer_district": "الكرادة",
-  "customer_address": "قرب مطعم كذا",
-  "items": [{"product_name": "لابتوب لينوفو IdeaPad 15", "quantity": 1}],
-  "reason_hint": "رفض الزبون الاستلام",
-  "notes": null
+  "call_type": "postpone",
+  "order": {
+    "order_id": "ORD-000123456",
+    "status": "قيد التوصيل",
+    "customer_phone": "07701234567",
+    "items": [{"product_name": "غسالة اتوماتيك", "quantity": 1}],
+    "scheduled_date": "2026-09-05"
+  }
 }
 ```
 
-| الحقل | النوع | إلزامي | الوصف |
+| حقل `order` | النوع | إلزامي | الوصف |
 |---|---|---|---|
-| `order_id` | string | نعم | معرّف الطلب بنظام السستم |
-| `status` | string | نعم | حالة الطلب الحالية بالعربي (مثلاً "ملغي"، "مرتجع"، "لم يتم التسليم") — هي المحرّك الرئيسي لنوع السؤال المولَّد، بلا قائمة ثابتة بجهتنا |
-| `customer_name` / `customer_phone` / `customer_city` / `customer_district` / `customer_address` | string \| null | لا | بيانات الزبون من الطلب الأصلي — تُعاد لاحقاً كما هي مع نتيجة `/respond`، لا تُستنتَج من رد الزبون الصوتي |
-| `items` | array of `{product_name, quantity}` | لا | عناصر الطلب (`quantity` افتراضياً `1`) |
-| `reason_hint` | string \| null | لا | سبب أوّلي معروف بالسستم إن وُجد — يُستخدم كسياق إضافي بالسؤال |
-| `notes` | string \| null | لا | ملاحظات إضافية |
+| `order_id` | string | ✅ | معرّف الطلب بنظام البيانات |
+| `status` | string | ✅ | حالة الطلب بالعربي كما بالنظام (ملغي، مرتجع، لم يتم التسليم، قيد التوصيل...) |
+| `customer_phone` | string \| null | ❌* | رقم الزبون — لازم لوضع `sip` |
+| `customer_name` / `customer_city` / `customer_district` / `customer_address` | string \| null | ❌ | تُعاد كما هي مع نتيجة المتابعة. **لا تدخل سياق نموذج المكالمة** (الاسم والرقم ما يُنطقان أبداً) |
+| `items` | array of `{product_name, quantity}` | ❌ | المنتجات؛ منها يذكر الـ agent الطلب ("الغسالة اللي طلبتها") |
+| `reason_hint` | string \| null | ❌ | سبب أوّلي معروف بالنظام (لمكالمة `followup`) |
+| `notes` | string \| null | ❌ | ملاحظات |
+| `scheduled_date` | string \| null | ❌ | موعد التسليم الحالي `YYYY-MM-DD` (لمكالمة `postpone`) |
 
-**استجابة 200** — جسم صوت WAV خام + هيدرات:
+**استجابة 200:**
 
-| الهيدر | الوصف |
-|---|---|
-| `X-Session-Id` | مرّره كما هو لـ `POST /voice_followup/respond` |
-| `X-Question-Text` | نص السؤال المولَّد (مرمَّز percent-encoding) — نفسه الذي حُوّل لصوت |
-
-```bash
-curl -X POST http://localhost:8000/voice_followup/ask \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
-  -d '{"order_id": "ORD-1001", "status": "ملغي", "customer_name": "أحمد"}' \
-  -o question.wav -D -
-```
-
-### `POST /voice_followup/respond`
-
-`multipart/form-data` + معامل استعلام `session_id` (من `/ask`).
-
-| المدخل | النوع | إلزامي | الوصف |
-|---|---|---|---|
-| `session_id` | query param | نعم | من هيدر `X-Session-Id` بردّ `/ask` |
-| `audio` | file (form) | نعم | تسجيل رد الزبون الصوتي — يتحول لنص عربي تلقائياً (نفس محرك Whisper المستخدَم بـ `/orders/create`) |
-
-**استجابة 200** — جسم صوت شكر WAV خام + هيدرات:
-
-| الهيدر | الوصف |
-|---|---|
-| `X-Reason-Summary` | ملخّص سبب الزبون كما فهمه الموديل (مرمَّز percent-encoding) |
-| `X-Customer-Transcript` | نص رد الزبون كاملاً بعد تحويل الصوت لنص (مرمَّز percent-encoding) |
-| `X-Query-Sent` | `"true"` لو انرسل الملخّص فعلاً لباك اند السستم، `"false"` لو فشل الإرسال (الصوت يرجع للزبون بكل الأحوال) |
-
-```bash
-curl -X POST "http://localhost:8000/voice_followup/respond?session_id=<من /ask>" \
-  -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
-  -F "audio=@customer_reply.wav" \
-  -o thanks.wav -D -
-```
-
-عند نجاح `/respond`، تُرسَل هذي الصيغة لباك اند السستم (`POST {SYSTEM_BACKEND_BASE_URL}/orders/{order_id}/feedback`، مسار مبدئي — TODO بالكود لحين توفر المسار الحقيقي):
 ```json
 {
-  "order_id": "ORD-1001",
-  "status": "ملغي",
-  "customer_name": "أحمد",
-  "customer_phone": "07701234567",
-  "customer_city": "بغداد",
-  "customer_district": "الكرادة",
-  "customer_address": "قرب مطعم كذا",
+  "room": "call-postpone-ORD-000123456-3f9a1c",
+  "livekit_url": "wss://project.livekit.cloud",
+  "operator_token": "eyJhbGciOi...",
+  "dispatch_id": "AD_xxxxx",
+  "dial_mode": "sip"
+}
+```
+
+| `dial_mode` | المعنى |
+|---|---|
+| `sip` | الـ agent يتصل بالزبون بنفسه عبر `LIVEKIT_SIP_TRUNK_ID` وينتظر الرد قبل ما يتكلم. التوكن للمراقبة أو لتسلّم المكالمة |
+| `bridge` | ماكو SIP: التطبيق يدخل الغرفة بـ `operator_token` (LiveKit SDK) وينشر صوت مكالمة الواتساب كمسار صوت. الـ agent يبدأ الكلام أول ما يدخل أول مشارك |
+
+الغرفة تنحذف تلقائياً إذا ما دخلها أحد خلال دقيقتين، وتنحذف عند انتهاء المكالمة (`end_call`).
+
+**أخطاء:**
+
+| كود | السبب |
+|---|---|
+| `401` | مفتاح `X-API-Key` غلط |
+| `422` | `call_type` غير `followup`/`postpone`، أو `order_id`/`status` ناقص |
+| `502` | خادم LiveKit رفض الطلب أو ما يستجيب |
+| `503` | `LIVEKIT_*` غير مضبوطة |
+
+## سلوك الـ agent بالمكالمة
+
+### جيني — `followup`
+
+تسأل عن سبب حالة الطلب بجمل قصيرة، وأول ما يوضح الزبون السبب تستدعي `save_reason`، فيُرسل لباك اند البيانات:
+
+```json
+POST {system_backend_base_url}/orders/{order_id}/feedback
+{
+  "order_id": "ORD-1001", "status": "ملغي",
+  "customer_name": "أحمد", "customer_phone": "07701234567",
+  "customer_city": "بغداد", "customer_district": "الكرادة", "customer_address": "قرب مطعم كذا",
   "items": [{"product_name": "لابتوب لينوفو IdeaPad 15", "quantity": 1}],
   "reason_summary": "الزبون يقول التوصيل تأخر وقرر يلغي الطلب",
   "customer_transcript": "لا ماريده الحين، تأخر علي كثير..."
 }
 ```
 
-**أخطاء محتملة:**
+`customer_transcript` هو كلام الزبون حرفياً كما نسخه Whisper، و`reason_summary` من كلامه هو حصراً.
 
-| كود | السبب | الرسالة |
-|---|---|---|
-| `404` | `session_id` غير موجود أو منتهي (استُهلك بطلب `/respond` سابق، أو لم يصدر من `/ask` أصلاً) | "الجلسة غير موجودة أو انتهت صلاحيتها — استدعِ /ask من جديد." |
-| `422` | ملف صوتي مو مفهوم/فاضي | "ما كدرنا نفهم أي كلام بالملف الصوتي." |
-| `503` (على `/ask` أو `/respond`) | تحويل النص لصوت (`chatterbox-tts`) أو الصوت لنص (`transformers`) غير مثبَّت محلياً | نص يوضح السبب |
+### صباح — `postpone`
 
-**ملاحظة**: بدون محرك vLLM جاهز (محلياً بدون GPU)، السؤال والتحليل يرجعان بنصوص احتياطية عامة ثابتة بدل توليد حقيقي — الميزة تبقى تشتغل بالكامل (توليد صوت فعلي، تحويل صوت لنص فعلي) إلا خطوة صياغة النص بالموديل.
+تعرض "اليوم / باجر / بعد باجر"، وتقبل أي موعد يحدده الزبون خلال **١٤ يوماً**. التثبيت يمر بأداتين يتحقق منهما الكود:
 
-#### كيف تُرسل صوت رد الزبون من Java
-فرق وحيد عن مثال `/orders/create` أعلاه: `session_id` يروح بالرابط (query parameter) لا بجسم الـ multipart، والاستجابة نفسها ملف صوت لازم تُحفظ + هيدراتها تُفكّ ترميزها (percent-encoded):
+1. `propose_postpone(choice)`: المفتاح من جدول مغلق (`today` / `plus_1..plus_14` / `weekday_0..6`). مفتاح خارجه يُرفض، ويرجع التسمية بصيغة الزبون ("باجر"، "يوم الخميس") والتاريخ.
+2. `confirm_postpone()`: فقط بعد اقتراح مسبق وتأكيد صريح من الزبون. التاريخ يُحسب بالكود (`postpone.py`):
 
-```java
-OkHttpClient client = new OkHttpClient();
-String apiKey = "sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b";
-String baseUrl = "https://1spx1ivrqcvt1h-8000.proxy.runpod.net";
-String sessionId = "8f1e2d3c-4b5a-6789-0abc-def123456789"; // من هيدر X-Session-Id بالخطوة 1
-
-File replyAudio = new File("customer_reply.ogg");
-RequestBody body = new MultipartBody.Builder()
-    .setType(MultipartBody.FORM)
-    .addFormDataPart("audio", replyAudio.getName(),
-        RequestBody.create(replyAudio, MediaType.parse("audio/ogg")))
-    .build();
-
-Request request = new Request.Builder()
-    .url(baseUrl + "/voice_followup/respond?session_id=" + sessionId)
-    .header("X-API-Key", apiKey)
-    .post(body)
-    .build();
-
-try (Response response = client.newCall(request).execute()) {
-    byte[] thanksWav = response.body().bytes();
-    Files.write(Path.of("thanks.wav"), thanksWav);
-
-    String reasonSummary = URLDecoder.decode(
-        response.header("X-Reason-Summary", ""), StandardCharsets.UTF_8);
-    String customerTranscript = URLDecoder.decode(
-        response.header("X-Customer-Transcript", ""), StandardCharsets.UTF_8);
-    boolean querySent = "true".equals(response.header("X-Query-Sent"));
-}
-```
-
-## مكالمة تأجيل التسليم — `voice_followup/postpone` (شخصية "صباح")
-
-> ✅ الخطوة 1 (`/postpone/start`): **`application/json`** — ⚠️ الخطوة 2 (`/postpone/respond`): **`multipart/form-data`** — كلتاهما بمفتاح المتابعة الصوتية نفسه
-
-### الوصف
-مكالمة صوتية صادرة بشخصية **"صباح"** لشحنة **لسه ما انسلّمت**: تسأل الزبون يريد التسليم اليوم لو يفضّل يأجّله، وتنتهي بموعد مؤكَّد يُرسَل لنظام الطلبات كتاريخ ISO صريح.
-
-الفرق الجوهري عن `/ask` و`/respond` أعلاه: هذه **مكالمة متعددة الأدوار** — `/postpone/respond` يُستدعى مراراً بنفس `session_id` حتى يرجع `X-Call-Status: ended`.
-
-**كل قرارات المكالمة تُحسب بالخادم حتمياً** (مطابقة نصية على رد الزبون): هل طابق موعداً؟ هل أكّد؟ هل نغلق؟ — والنموذج يُستدعى بعد الحسم ليصوغ الجملة بلهجة عراقية فقط. هذا يمنع أن يخترع النموذج تاريخاً، وخطأ التاريخ هنا له ثمن تشغيلي مباشر.
-
-### المواعيد المقبولة
-
-| ما يقوله الزبون | يُفهم كـ |
-|---|---|
-| اليوم · هسه · الحين | اليوم |
-| باجر · باچر · بكرة · غدًا | +1 يوم |
-| بعد باجر · بعد بكرة · بعد غد · يومين | +2 يوم |
-| **بعد N أيام** — رقمًا (`4` / `٤`) أو حروفًا ("أربع أيام") | +N يوم |
-| بعد أسبوع · بعد أسبوعين | +7 / +14 يوم |
-| **اسم يوم بالأسبوع** ("خليها الخميس") | أقرب خميس قادم |
-
-- **السقف: ١٤ يومًا** (`MAX_POSTPONE_DAYS`). أي موعد أبعد ("بعد شهر") يُرفض، فتعتذر صباح وتطلب موعدًا أقرب — ولا يُثبَّت شيء.
-- **صباح لا تقترح موعدًا من عندها** — تعرض القريب فقط (اليوم/باجر/بعد باجر)، والزبون حرّ يحدد غيره.
-- عند التأكيد ترجع **بصيغة الزبون نفسها**: من قال "الخميس" تسمع "خلّيها يوم الخميس؟" لا "بعد ٥ أيام".
-
-### الخطوة 1 — `POST /voice_followup/postpone/start`
-
-```
-POST /voice_followup/postpone/start
-Content-Type: application/json
-X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b
-```
-
-الجسم هو **نفس** `VoiceFollowupOrderRequest` المستعمل بـ `/ask` (انظر جدول الحقول بقسم `/ask` أعلاه). الحقول المفيدة هنا:
-
-| الحقل | إلزامي | ملاحظة |
-|---|---|---|
-| `order_id` | ✅ | **لا يُنطق بالمكالمة** — صباح تذكر الشحنة بالمنتج |
-| `status` | ✅ | حالة الشحنة كما بنظامكم |
-| `items` | ❌ | منها تبني صباح جملة "الغسالة اللي طلبتها" |
-| `scheduled_date` | ❌ | الموعد الحالي — تذكّر به الزبون قبل عرض التأجيل |
-
-> 🔒 `customer_name` و`customer_phone` **لا يُمرَّران للنموذج** بهذا المسار حتى لو أرسلتهما: صباح ممنوعة من ذكر اسم المستلم، وحذف الحقلين من سياق النموذج يمنع التسريب بدل الاعتماد على تعليمة نصية وحدها.
-
-#### مثال
-```bash
-curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/voice_followup/postpone/start" \
-  -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
-  -H "Content-Type: application/json" \
-  -o opening.wav -D headers_start.txt \
-  -d '{
-        "order_id": "ORD-000123456",
-        "status": "قيد التوصيل",
-        "items": [{"product_name": "غسالة اتوماتيك", "quantity": 1}],
-        "scheduled_date": "2026-09-05"
-      }'
-```
-
-#### شكل الاستجابة
-`200 OK` — **الجسم ملف صوت خام `audio/wav`**:
-
-| الهيدر | المحتوى |
-|---|---|
-| `X-Session-Id` | معرّف الجلسة — **احفظه** لكل أدوار الخطوة 2 |
-| `X-Reply-Text` | نص جملة الافتتاح (Percent-encoded) |
-| `X-Call-Status` | `continue` دائمًا بهذه الخطوة |
-
-### الخطوة 2 — `POST /voice_followup/postpone/respond` (تتكرر)
-
-```
-POST /voice_followup/postpone/respond?session_id=<من الخطوة 1>
-Content-Type: multipart/form-data
-X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b
-```
-
-| الحقل | النوع | إلزامي |
-|---|---|---|
-| `session_id` | query string | ✅ |
-| `audio` | file (wav/mp3/m4a) | ✅ |
-
-#### مثال
-```bash
-curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/voice_followup/postpone/respond?session_id=8f1e2d3c-..." \
-  -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
-  -F "audio=@customer_reply.wav" \
-  -o sabah_reply.wav -D headers_respond.txt
-```
-
-#### شكل الاستجابة
-`200 OK` — **الجسم صوت رد صباح `audio/wav`**:
-
-| الهيدر | المحتوى |
-|---|---|
-| `X-Call-Status` | `continue` = أرسل دورًا آخر · `ended` = انتهت المكالمة |
-| `X-Chosen-Option` | الموعد المختار: `today` / `plus_N` / `weekday_D` (فارغ ما لم يُختَر بعد) |
-| `X-Postpone-Saved` | `true`/`false` — هل وصل الموعد لنظام الطلبات (فارغ ما لم تنتهِ المكالمة بتأكيد) |
-| `X-Customer-Transcript` | نص رد الزبون (Percent-encoded) |
-| `X-Reply-Text` | نص رد صباح (Percent-encoded) |
-
-> ♻️ **حلقة الاستدعاء**: كرّر `/postpone/respond` بنفس `session_id` طالما `X-Call-Status: continue`. سكوت الزبون **ليس خطأ** — يُعامَل كرد غامض: تعيد صباح السؤال مرة، ثم تقفل بأدب.
-
-#### ما يصل لنظام الطلبات عند التأكيد
 ```json
+POST {system_backend_base_url}/orders/{order_id}/postpone
 {
   "order_id": "ORD-000123456",
   "new_scheduled_date": "2026-09-09",
@@ -245,12 +171,39 @@ curl -X POST "https://1spx1ivrqcvt1h-8000.proxy.runpod.net/voice_followup/postpo
   "reason": "تأجيل بطلب الزبون عبر مكالمة صباح"
 }
 ```
-`new_scheduled_date` تاريخ ISO محسوب بالخادم — لا تُرسَل الكلمة العربية وحدها، حتى يستقبل نظام الطلبات تاريخًا صالحًا للحفظ مباشرة.
 
-### أخطاء محتملة
-| الكود | السبب |
+| ما يقوله الزبون | المفتاح |
 |---|---|
-| `401` | مفتاح `X-API-Key` غلط |
-| `404` | `session_id` غير موجود أو انتهت صلاحيته (٣٠ دقيقة) — استدعِ `/postpone/start` من جديد |
-| `422` | جسم الخطوة 1 ناقص `order_id` أو `status` |
-| `503` | تحويل النص لصوت أو الصوت لنص غير متوفر (يحتاج بيئة GPU) |
+| اليوم · هسه · الحين | `today` |
+| باجر · بكرة | `plus_1` |
+| بعد باجر | `plus_2` |
+| بعد N أيام | `plus_N` |
+| بعد أسبوع / أسبوعين | `plus_7` / `plus_14` |
+| اسم يوم ("خليها الخميس") | `weekday_3`، أقرب خميس قادم |
+
+### مشترك
+
+- "رقم غلط" أو "هذا مو طلبي": اعتذار وإنهاء المكالمة بلا إرسال أي شي.
+- فشل الإرسال لباك اند البيانات: الـ agent يعتذر ويگول إن الفريق راح يتابع، وما يدّعي إن شي انحفظ.
+- إنهاء المكالمة بأداة `end_call` يحذف الغرفة، فيقطع الاتصال عن كل المشاركين بما فيهم مكالمة SIP.
+
+## التزامن (عدة مكالمات بنفس الوقت)
+
+الـ worker الواحد يشغّل لحد `VOICE_MAX_CALLS` مكالمة متزامنة (افتراضياً 10)، كلها خيوط بنفس العملية فالأوزان تُحمَّل مرة وحدة:
+
+| المرحلة | السلوك مع مكالمات متزامنة |
+|---|---|
+| النموذج (vLLM) | يخدمها كلها سوية (continuous batching)، ما تنتظر بعض |
+| النسخ (Whisper) | نسخة وحدة، المقاطع تمر واحد واحد. المقطع قصير (~0.3 ثانية) فالانتظار قليل |
+| النطق (Chatterbox) | مجمّع من `TTS_POOL_SIZE` نسخة. كل نسخة لمكالمة بالمرة، فإذا كل النسخ مشغولة الجملة تنتظر أول نسخة تفرغ |
+
+**النطق هو عنق الزجاجة:** مكتبة Chatterbox ما تقبل توليدين متوازيين على نفس النسخة، فعدد المكالمات اللي تحچي **بنفس اللحظة** بلا انتظار = `TTS_POOL_SIZE`. المكالمات ما تحچي كل الوقت (الزبون يحچي نص الوقت)، فـ 10 مكالمات ما تحتاج 10 نسخ، بس كل ما قلّت النسخ زادت الوقفة قبل الرد وقت الضغط. القرار الصحيح يحتاج قياس على كرت RunPod الفعلي:
+
+- **A40 مشترك مع vLLM** (~6GB متبقي): واقعياً `TTS_POOL_SIZE=1-2`.
+- **كرت أكبر** (A100 80GB / H100) أو **كرت ثاني للـ worker**: `TTS_POOL_SIZE=4-5` يغطي 10 مكالمات براحة.
+- عدة workers على عدة كروت: LiveKit يوزّع المكالمات بينها تلقائياً.
+
+## ملاحظات تشغيل
+
+- النموذج هو نفس خادم vLLM (`LLM_BASE_URL`) بلا تفكير، لأن زمن الرد بالمكالمة حساس.
+- الصوت المرجعي لـ Chatterbox: `app/features/voice_followup/reference/mazen.mp3` (أول ~10 ثوانٍ منه).

@@ -317,6 +317,21 @@ echo "==> vLLM is running (PID ${VLLM_PID}) on port ${VLLM_PORT}, still loading 
 # لو انطفت عملية vLLM ينطفي الـ container كامل (أوضح من خدمة نص ميتة جزئياً)
 trap 'kill "${VLLM_PID}" 2>/dev/null || true' EXIT
 
+# الـ agent worker للمكالمات الحية (LiveKit) — عملية منفصلة تتصل بخادم LiveKit
+# (LiveKit Cloud أو VPS، مو على الـ Pod لأنه يحتاج UDP). يشتغل فقط لو
+# LIVEKIT_URL/LIVEKIT_API_KEY/LIVEKIT_API_SECRET مضبوطة بالبيئة.
+AGENT_LOG=/tmp/agent.log
+if [ -n "${LIVEKIT_URL:-}" ] && [ -n "${LIVEKIT_API_KEY:-}" ] && [ -n "${LIVEKIT_API_SECRET:-}" ]; then
+    pkill -f "app.features.voice_followup.agent" 2>/dev/null || true
+    python3 -m app.features.voice_followup.agent download-files >> "${AGENT_LOG}" 2>&1 || true
+    echo "==> Starting LiveKit agent worker (log: ${AGENT_LOG})..."
+    nohup python3 -m app.features.voice_followup.agent start >> "${AGENT_LOG}" 2>&1 &
+    AGENT_PID=$!
+    trap 'kill "${VLLM_PID}" "${AGENT_PID}" 2>/dev/null || true' EXIT
+else
+    echo "==> LIVEKIT_* not set — live voice calls disabled (agent worker not started)"
+fi
+
 echo "==> Starting FastAPI on port ${API_PORT}..."
 echo "    (features run immediately in fallback mode; the readiness check in app/core/engine.py"
 echo "     switches them to model mode automatically once vLLM finishes loading weights)"

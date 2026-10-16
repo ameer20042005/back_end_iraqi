@@ -59,3 +59,9 @@ omegaconf==2.4.0
 pyloudnorm==0.2.0
 pykakasi==2.3.0
 spacy-pkuseg==1.0.1
+
+# الـ agent worker للمكالمات الحية (app/features/voice_followup/agent.py):
+# LiveKit Agents + plugin OpenAI (يتصل بخادم vLLM نفسه) + Silero VAD.
+livekit-agents==1.8.8
+livekit-plugins-openai==1.8.8
+livekit-plugins-silero==1.8.8

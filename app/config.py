@@ -164,16 +164,35 @@ class Settings:
     whisper_model_ar: str = "ayoubkirouane/whisper-small-ar"
     whisper_language_ar: str = "arabic"
 
-    # تحويل نص لصوت (app/features/voice_followup/tts.py) — يخدم مسار المتابعة
-    # الصوتية للطلبات (سؤال الزبون سبب الرفض/الإلغاء صوتياً). موديل Chatterbox
-    # Multilingual (Resemble AI) يدعم العربية (ar) مع voice cloning من مقطع
-    # مرجعي، يعيش بعملية FastAPI نفسها منفصلاً عن Whisper.
+    # تحويل نص لصوت (app/features/voice_followup/tts.py) — صوت الـ agent
+    # بالمكالمات الحية. موديل Chatterbox Multilingual (Resemble AI) يدعم
+    # العربية (ar) مع voice cloning من مقطع مرجعي، يعيش بعملية الـ agent worker.
     tts_model_ar: str = "ResembleAI/chatterbox"
     # نسخة نقطة تفتيش T3 متعددة اللغات: "v2" (الافتراضي بالمكتبة) أو "v3".
     tts_ckpt_ar: str = "v3"
     tts_language_ar: str = "ar"
     # Chatterbox ما يحتاج نص المرجع، ويستعمل أول ~10 ثوانٍ من المقطع فقط.
     tts_ref_audio_ar: str = "reference/mazen.mp3"
+    # عدد نسخ Chatterbox بالـ worker: كل نسخة تنطق لمكالمة وحدة بالمرة (المكتبة
+    # مو آمنة للاستدعاء المتوازي على نفس النسخة)، فالنسخ الأكثر = مكالمات
+    # متزامنة تنتظر أقل، مقابل ~3GB VRAM تقريباً لكل نسخة. تُحمَّل عند الحاجة.
+    tts_pool_size: int = field(default_factory=lambda: max(1, int(os.getenv("TTS_POOL_SIZE") or "2")))
+    # أقصى مكالمات متزامنة لكل worker؛ بعدها LiveKit يوجّه المكالمة لـ worker
+    # ثاني أو ينتظر لحد ما تفرغ مكالمة.
+    voice_max_concurrent_calls: int = field(default_factory=lambda: max(1, int(os.getenv("VOICE_MAX_CALLS") or "10")))
+
+    # LiveKit — المكالمات الصوتية الحية (app/features/voice_followup/agent.py
+    # يشغّل الـ agent worker، وcalls.py ينشئ الغرف ويرسل الـ agent إليها).
+    # خادم LiveKit يحتاج IP عام ومنافذ UDP، فيعيش خارج RunPod (LiveKit Cloud
+    # أو VPS). القيم من البيئة لأنها أسرار؛ فارغة = الميزة معطّلة.
+    livekit_url: str = field(default_factory=lambda: os.getenv("LIVEKIT_URL", ""))
+    livekit_api_key: str = field(default_factory=lambda: os.getenv("LIVEKIT_API_KEY", ""))
+    livekit_api_secret: str = field(default_factory=lambda: os.getenv("LIVEKIT_API_SECRET", ""))
+    # اسم الـ agent بالـ dispatch الصريح — لازم يطابق بين worker وcalls.py.
+    livekit_agent_name: str = "voice-followup"
+    # SIP trunk الصادر (WhatsApp Business Calling/Twilio عبر LiveKit SIP).
+    # فارغ = المكالمة تبقى غرفة WebRTC يدخلها تطبيق سطح المكتب بالتوكن.
+    livekit_sip_trunk_id: str = field(default_factory=lambda: os.getenv("LIVEKIT_SIP_TRUNK_ID", ""))
 
     def stt_model(self) -> SpeechToTextModel:
         """اختيار STT المركزي؛ ما تبقى شروط موديلات موزعة بالراوترات."""

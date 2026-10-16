@@ -18,10 +18,9 @@
    - `0) Health Check`
    - `1) Orders — Create Order`
    - `2) Sales — Chat`
-   - `3) Voice Followup`
-   - `4) Voice Postpone — مكالمة تأجيل التسليم`
+   - `4) Live Calls — LiveKit`
 
-كل الرابط الأساسي والمفاتيح ومنطق حفظ `session_id` بين الطلبات **معبّأ مسبقاً** كمتغيّرات على مستوى الـ Collection — لا حاجة لإنشاء Postman Environment منفصل، ولا لنسخ أي قيمة يدوياً.
+كل الرابط الأساسي والمفاتيح **معبّأ مسبقاً** كمتغيّرات على مستوى الـ Collection — لا حاجة لإنشاء Postman Environment منفصل، ولا لنسخ أي قيمة يدوياً.
 
 للتأكد من القيم أو تعديلها لاحقاً (مثلاً لو تغيّر الرابط الأساسي أو المفاتيح): اضغط بالزر اليمين على اسم المجموعة → **Edit** → تبويب **Variables**.
 
@@ -62,47 +61,15 @@
 
 ---
 
-## 4) اختبار المتابعة الصوتية (`voice_followup`)
+## 4) اختبار المكالمات الحية (`voice_followup`، LiveKit)
 
-المجلد **`3) Voice Followup`** فيه خطوتين — **شغّلهما بهذا الترتيب**:
+المجلد **`4) Live Calls — LiveKit`** فيه 3 طلبات:
 
-1. **Step 1 — Ask**: اضغط **Send** مباشرة (الجسم معبّأ ببيانات طلب تجريبي). الاستجابة ملف صوت `audio/wav` خام:
-   - لسماعه: بتبويب **Response**، اضغط **Save Response → Save to a file**.
-   - سكربت Tests المرفق يحفظ الهيدر `X-Session-Id` تلقائياً بمتغيّر `voice_session_id`.
-   - نص السؤال المولَّد موجود بهيدر `X-Question-Text` (مُرمّز Percent-encoded — Postman يعرضه بتبويب **Headers** بالاستجابة، تقدر تفكّه بموقع [urldecoder.org](https://www.urldecoder.org) أو أي أداة urldecode).
-2. **Step 2 — Respond**: افتح تبويب **Body**، بحقل `audio` اضغط **Select Files** واختر تسجيل صوتي (رد الزبون)، ثم **Send** — الرابط يستخدم `{{voice_session_id}}` المحفوظ تلقائياً من الخطوة السابقة.
-   - الاستجابة ملف صوت شكر `audio/wav` (احفظه بنفس طريقة Step 1).
-   - الهيدرات `X-Reason-Summary` و `X-Customer-Transcript` و `X-Query-Sent` تظهر بتبويب **Headers** بالاستجابة (أول اثنين Percent-encoded).
----
+1. **Operator — اتصل بهؤلاء**: الموظف يكتب أمراً. المتوقع `tool_calls: search_orders` (أداة بيانات ينفّذها تطبيق سطح المكتب).
+2. **Operator — بعد نتيجة البحث → start_call**: نفس المحادثة مع نتيجة الأداة. المتوقع `tool_calls: start_call`، والسكربت يحفظ وسائطها بمتغيّر `start_call_args`.
+3. **Start Call**: ينفّذ `start_call` (الجسم = وسائطها). يرجع `room` و`operator_token` و`dial_mode`. يحتاج `LIVEKIT_*` بالخادم، وإلا يرجع `503` واضحة.
 
-## 5) اختبار مكالمة تأجيل التسليم (`postpone`)
-
-المجلد **`4) Voice Postpone`** يختلف جوهرياً عن سابقه: هذه مكالمة **متعددة الأدوار** — Step 2 يتكرر مرة بعد مرة بنفس الجلسة، ما يُشغّل مرة وحدة.
-
-1. **Step 1 — Start Call**: اضغط **Send** مباشرة. الاستجابة صوت جملة افتتاح صباح:
-   - السكربت يحفظ `X-Session-Id` بمتغيّر `postpone_session_id`، **ويطبع نص الجملة مفكوك الترميز بتبويب Console** (`Ctrl+Alt+C`) — بلا حاجة لأداة urldecode خارجية.
-2. **Step 2 — Respond**: بحقل `audio` اضغط **Select Files** واختر تسجيل رد الزبون، ثم **Send**.
-   - افتح **Console** بعد كل إرسال لتشوف: كلام الزبون، رد صباح، والموعد المختار.
-   - **كرّر نفس الطلب** بتسجيل جديد كل دور، طالما الكونسول يقول "المكالمة مستمرة".
-   - عند الانتهاء يطبع هل انحفظ الموعد، ويفرّغ `postpone_session_id` تلقائياً.
-
-### المواعيد اللي تقدر تجرّبها
-
-| قل بالتسجيل | المتوقع بـ `X-Chosen-Option` |
-|---|---|
-| "اليوم" / "هسه" | `today` |
-| "باجر" / "باچر" / "بكرة" | `plus_1` |
-| "بعد باجر" / "بعد بكرة" | `plus_2` |
-| "بعد أربع أيام" | `plus_4` |
-| "بعد أسبوع" | `plus_7` |
-| "خليها الخميس" | `weekday_3` |
-| "بعد شهر" | فارغ — تعتذر صباح وتطلب موعد أقرب (السقف ١٤ يوم) |
-
-**مسار نموذجي** (٣ أدوار): "بعد أربع أيام" ← صباح تأكد ← "نعم" → `X-Call-Status: ended` و`X-Postpone-Saved: true`.
-
-**سكوت الزبون ليس خطأ**: تسجيل فارغ يجعل صباح تعيد السؤال مرة، وبالمحاولة الثانية تقفل المكالمة بأدب بلا تثبيت أي موعد.
-
-تفاصيل الصيغ المقبولة والهيدرات كاملة في [voice-followup.md](../api/voice-followup.md#مكالمة-تأجيل-التسليم--voice_followuppostpone-شخصية-صباح).
+المكالمة نفسها صوت حي عبر LiveKit، فما تنجرّب من Postman: ادخل الغرفة بـ `operator_token` من [LiveKit Meet](https://meet.livekit.io) (Custom: `livekit_url` + التوكن) واحچي مع الـ agent. التفاصيل: [voice-followup.md](../api/voice-followup.md).
 
 ---
 
@@ -113,7 +80,7 @@
 | `401 Unauthorized` | هيدر `X-API-Key` غلط — تأكد من متغيّرات `orders_api_key` / `sales_api_key` / `voice_api_key` بالمجموعة |
 | `422 Unprocessable Entity` | حقل إلزامي ناقص أو نوعه غلط بالجسم |
 | `400 Bad Request` | (خاص بـ `/orders/create`) أرسلت أكثر من حقل واحد أو ولا حقل من `text`/`audio`/`image` |
-| `404 Not Found` | (خاص بـ `/voice_followup/respond` و`/postpone/respond`) الـ `session_id` غير موجود أو انتهت صلاحيته (٣٠ دقيقة) — أعد تشغيل Step 1 |
-| `501` / `503` | ميزة تحتاج بيئة GPU غير متوفرة حالياً على الخادم |
+| `502` | (خاص بـ `/voice_followup/calls`) خادم LiveKit رفض الطلب أو ما يستجيب |
+| `501` / `503` | ميزة تحتاج بيئة GPU غير متوفرة حالياً، أو `LIVEKIT_*` غير مضبوطة (`/voice_followup/calls`) |
 
 تفاصيل كل كود حسب المسار موجودة بجداول "أخطاء محتملة" في ملفات [docs/api/](../api/overview.md).

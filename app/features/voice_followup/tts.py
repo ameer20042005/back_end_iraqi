@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
-"""توليد صوت المتابعة العربي بموديل Chatterbox Multilingual ومرجع صوت محلي ثابت.
+"""صوت الـ agent بالمكالمات الحية: Chatterbox Multilingual ومرجع صوت محلي ثابت.
 
-تُنزل الأوزان من Hugging Face أول مرة وتُعاد الاستفادة من نسخة واحدة.
-الصوت المرجعي (voice cloning) محدد في إعدادات التطبيق؛ Chatterbox ما يحتاج
-نص المرجع، ويأخذ أول ~10 ثوانٍ من المقطع فقط للتكييف.
+**التزامن:** نسخة Chatterbox الواحدة مو آمنة للاستدعاء المتوازي — كل توليد
+يعيد بناء `t3.patched_model` ويعلّق hooks على طبقات الموديل المشتركة، فمكالمتين
+على نفس النسخة تخرّبان بعض. لذلك عندنا مجمّع (pool) من النسخ: كل نسخة تنطق
+لمكالمة وحدة بالمرة، وعددها `settings.tts_pool_size`. النسخ تُحمَّل عند الحاجة
+(أول ما تنشغل كل النسخ الموجودة) حتى ما نحجز VRAM ما نحتاجه.
+
+**بصمة الصوت تُحسب مرة وحدة لكل نسخة** (prepare_conditionals)، لا بكل جملة:
+تمرير audio_prompt_path لـ generate() يعيد قراءة الملف المرجعي كاملاً
+وحساب البصمة من جديد مع كل جملة.
 """
 
 import logging
+import threading
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 try:
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
@@ -21,79 +28,121 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_instance = None
+# exaggeration ثابتة بكل المكالمات حتى تبقى البصمة المحسوبة صالحة (أي قيمة
+# مختلفة تخلي المكتبة تعيد بناء جزء من البصمة بكل جملة).
+_EXAGGERATION = 0.5
+# cfg_weight أقل من الافتراضي (0.5) يبطّئ الإلقاء شوي فيصير أهدأ وأوضح بالمكالمة.
+_CFG_WEIGHT = 0.4
 
 
-def _get_instance() -> tuple:
-    """تحميل نسخة النطق العربي مع مسار مرجعها مرة واحدة."""
-    global _instance
-    if _instance is not None:
-        return _instance
+class _VoicePool:
+    """نسخ جاهزة (بأوزانها وبصمة الصوت) تُستعار وتُرجَع؛ تنتظر لو كلها مشغولة."""
 
-    import torch
+    def __init__(self, size: int) -> None:
+        self._size = size
+        self._free: List[object] = []
+        self._created = 0
+        self._cond = threading.Condition()
 
-    model = settings.tts_model()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info("تحميل موديل النطق %s (%s) على %s (أول مرة قد تستغرق دقائق للتنزيل)...",
-                model.repository, model.checkpoint, device)
-    inst = ChatterboxMultilingualTTS.from_pretrained(device=device, t3_model=model.checkpoint)
-    ref_audio = str(Path(__file__).resolve().parent / model.reference_audio)
+    def _create(self):
+        import torch
 
-    _instance = (inst, ref_audio, model.language)
-    return _instance
+        model = settings.tts_model()
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info("تحميل نسخة نطق %d/%d: %s (%s) على %s...",
+                    self._created, self._size, model.repository, model.checkpoint, device)
+        inst = ChatterboxMultilingualTTS.from_pretrained(device=device, t3_model=model.checkpoint)
+        inst.prepare_conditionals(
+            str(Path(__file__).resolve().parent / model.reference_audio), exaggeration=_EXAGGERATION,
+        )
+        return inst
+
+    def acquire(self):
+        with self._cond:
+            while True:
+                if self._free:
+                    return self._free.pop()
+                if self._created < self._size:
+                    self._created += 1
+                    break
+                self._cond.wait()
+        # التحميل خارج القفل حتى ما يوقف المكالمات اللي تنتظر نسخة جاهزة.
+        try:
+            return self._create()
+        except Exception:
+            with self._cond:
+                self._created -= 1
+                self._cond.notify()
+            raise
+
+    def release(self, inst) -> None:
+        with self._cond:
+            self._free.append(inst)
+            self._cond.notify()
 
 
-def warmup() -> bool:
-    """يحمّل موديل النطق **العربي** (أوزان + مرجع الصوت) عند إقلاع الخادم
-    بدل أول طلب حقيقي — نفس مبرر transcribe.warmup (انظر هناك). يرجع True
-    إن جهز الموديل فعلاً."""
-    if not _CHATTERBOX_AVAILABLE:
-        return False
+_pool: Optional[_VoicePool] = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool() -> _VoicePool:
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = _VoicePool(settings.tts_pool_size)
+        return _pool
+
+
+def available() -> bool:
+    return _CHATTERBOX_AVAILABLE
+
+
+def synthesize_array(text: str) -> Optional[Tuple["object", int]]:
+    """يولّد صوت النص كمصفوفة float32 أحادية مع معدل العينات. None إذا
+    المكتبة غير مثبَّتة أو النص فارغ؛ أخطاء التوليد تُرفع للمستدعي."""
+    if not _CHATTERBOX_AVAILABLE or not text.strip():
+        return None
+    pool = _get_pool()
+    inst = pool.acquire()
     try:
-        if synthesize("مرحبا") is None:
-            return False
-        logger.info("✅ موديل تحويل النص لصوت جاهز (تحميل مسبق مكتمل)")
-        return True
-    except Exception:
-        logger.warning("تعذّر التحميل المسبق لموديل TTS — سيُحمَّل عند أول طلب", exc_info=True)
-        return False
+        wav = inst.generate(
+            text,
+            language_id=settings.tts_model().language,
+            exaggeration=_EXAGGERATION,
+            cfg_weight=_CFG_WEIGHT,
+        )
+        # generate() يرجع torch.Tensor بشكل (1, N) بمعدل inst.sr (24kHz).
+        return wav.squeeze(0).detach().cpu().numpy(), inst.sr
+    finally:
+        pool.release(inst)
 
 
 def synthesize(text: str) -> Optional[bytes]:
-    """يحوّل النص لملف صوتي WAV (بايتات) بالصوت المرجعي. يرجع None إذا مكتبة
-    chatterbox-tts غير مثبَّتة (محلياً بدون GPU) أو فشل التوليد فعلياً (نفاد
-    ذاكرة GPU، تعارض إصدارات...) — المستدعي (router) يقرر كيف يتعامل مع
-    الحالة (503 واضح للزبون بدل انهيار 500 خام بلا رسالة).
-
-    ⚠️ استثناءات generate() تُلتقط هنا صراحةً وتُسجَّل بالتفصيل (traceback
-    كامل) بدل ما تتسرّب كـ500 غير مفسَّر لـFastAPI، حتى يظهر السبب الحقيقي
-    بـ/tmp/api.log فوراً."""
-    if not _CHATTERBOX_AVAILABLE:
-        return None
-    if not text.strip():
-        return None
-
+    """نفس synthesize_array لكن كملف WAV (بايتات) — يرجع None بدل رفع
+    استثناء عند الفشل، ويسجّل السبب الكامل باللوق."""
     import io
 
     import soundfile as sf
 
     try:
-        inst, ref_audio, language = _get_instance()
-        wav = inst.generate(
-            text,
-            language_id=language,
-            audio_prompt_path=ref_audio,
-            # الافتراضيات (0.5/0.5) موصى بيها لأغلب الحالات. cfg_weight أقل
-            # شوي يبطّئ الإلقاء ويخليه أهدأ وأوضح بمكالمة متابعة، وexaggeration
-            # بالافتراضي حتى ما يصير الأداء مبالغ أو سريع.
-            exaggeration=0.5,
-            cfg_weight=0.4,
-        )
-        # generate() يرجع torch.Tensor بشكل (1, N) بمعدل inst.sr (24kHz).
-        audio = wav.squeeze(0).detach().cpu().numpy()
+        result = synthesize_array(text)
+        if result is None:
+            return None
+        audio, sample_rate = result
         buf = io.BytesIO()
-        sf.write(buf, audio, inst.sr, format="WAV")
+        sf.write(buf, audio, sample_rate, format="WAV")
         return buf.getvalue()
     except Exception:
         logger.exception("فشل توليد الصوت — النص: %r", text[:100])
         return None
+
+
+def warmup() -> bool:
+    """يحمّل أول نسخة (أوزان + بصمة الصوت) ويولّد جملة قصيرة قبل أول مكالمة."""
+    if not _CHATTERBOX_AVAILABLE:
+        return False
+    if synthesize("مرحبا") is None:
+        logger.warning("تعذّر التحميل المسبق لموديل النطق — سيُحمَّل بأول مكالمة")
+        return False
+    logger.info("✅ موديل النطق جاهز للمكالمات")
+    return True
