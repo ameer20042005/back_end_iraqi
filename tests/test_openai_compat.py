@@ -5,7 +5,7 @@ import json
 
 from app.features.openai_compat import router as compat
 from app.features.openai_compat.prompts import OPENAI_COMPAT_SYSTEM_PROMPT
-from app.fallback import EXHAUSTED_FALLBACK
+from app.core.fallback import EXHAUSTED_FALLBACK
 
 
 class _FakeEngine:
@@ -164,9 +164,9 @@ def test_malformed_model_output_returns_text_fallback(monkeypatch):
 
 import pytest
 
-from app import engine as engine_module
-from app import model_status
-from app.engine import LLMUpstreamError
+from app.core import engine as engine_module
+from app.core import model_status
+from app.core.engine import LLMUpstreamError
 
 def _status(**overrides):
     values = dict(model="m", reachable=True, loaded=True, backend="lmstudio")

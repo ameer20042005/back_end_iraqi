@@ -1,7 +1,7 @@
 # ملاحظة: لا نثبّت torch/vllm هنا — start.sh يثبّتهم تلقائياً (نسخة vLLM
 # nightly بدعم Gemma4، تجيب معها torch المتوافق) عند أول إقلاع على Ubuntu
-# 22.04 خام (انظر RUNPOD_DEPLOY.md). httpx أدناه هو قناة الاتصال بخادم vLLM
-# (app/engine.py).
+# 22.04 خام (انظر docs/deploy/runpod.md). httpx أدناه هو قناة الاتصال بخادم vLLM
+# (app/core/engine.py).
 #
 # كل الإصدارات أدناه مثبَّتة (==) وليست حداً أدنى (>=) عمداً — إقلاع
 # start.sh يشغّل pip install بكل مرة، فسقف مفتوح يعني ترقية صامتة محتملة

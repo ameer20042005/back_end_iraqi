@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.config import settings
-from app.engine import (
+from app.core.engine import (
     AI_MODEL_NOT_LOADED,
     AI_REQUEST_TIMEOUT,
     AI_UPSTREAM_ERROR,

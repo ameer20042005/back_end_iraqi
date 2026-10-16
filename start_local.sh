@@ -53,7 +53,7 @@ export LLM_BASE_URL="${LLM_BASE_URL:-http://localhost:1234/v1}"
 export DISTRICT_LLM_TIMEOUT_SECONDS="${DISTRICT_LLM_TIMEOUT_SECONDS:-300}"
 
 # ── فحص الخادم واكتشاف اسم الموديل ───────────────────────────────────────
-# app/engine.py يرسل اسم الموديل بحقل "model" بكل طلب، والخادم المحلي يتوقع
+# app/core/engine.py يرسل اسم الموديل بحقل "model" بكل طلب، والخادم المحلي يتوقع
 # معرّف الموديل المحمَّل فيه فعلاً لا اسم مستودع Hugging Face الثابت. فلو ما
 # حددت LLM_MODEL نسأل GET /models وناخذ أول موديل محادثة — نتخطى موديلات
 # الـembedding لأن LM Studio يعرضها بنفس القائمة. urllib (مكتبة قياسية) بدل

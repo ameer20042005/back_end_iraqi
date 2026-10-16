@@ -105,28 +105,9 @@ class OrderConfirmation(BaseModel):
     confirmation_message: str
 
 
-def parse_order_extraction(raw: str) -> OrderExtraction:
-    """يحوّل نص خام من الموديل إلى OrderExtraction، مع محاولة تنظيف بسيطة
-    (أسوار Markdown، نص قبل/بعد الكائن) إذا فشل guided decoding أو لم يكن
-    مدعوماً بمحرك التوليد الحالي. يرجع OrderExtraction فارغ عند فشل التحليل
-    بدل رمي استثناء يكسر الطلب بالكامل."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:]
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end != -1:
-        text = text[start:end + 1]
-    try:
-        return OrderExtraction.model_validate_json(text)
-    except Exception:
-        return OrderExtraction(items=[])
-
-
 def parse_plane_extraction(raw: str) -> Optional[PlaneOrderExtraction]:
-    """نفس تنظيف parse_order_extraction لكن لمخطط plane.md — يرجع None عند
-    فشل التحليل حتى يقرر المستدعي (router) مسار الاستخراج البدائي البديل."""
+    """يحوّل نص خام من الموديل لمخطط plane.md، مع تنظيف بسيط (أسوار Markdown،
+    نص قبل/بعد الكائن). يرجع None عند فشل التحليل حتى يقرر المستدعي (router) مسار الاستخراج البدائي البديل."""
     text = raw.strip()
     if text.startswith("```"):
         text = text.strip("`")

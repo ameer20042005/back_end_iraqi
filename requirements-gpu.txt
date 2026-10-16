@@ -1,10 +1,10 @@
 # متطلبات GPU — **صارت شبه فارغة عمداً**: محرك التوليد الآن خادم vLLM منفصل
 # (يثبّته start.sh تلقائياً — نسخة nightly بدعم Gemma4، تجيب معها torch
-# المتوافق — عند أول إقلاع على Ubuntu 22.04 خام، انظر RUNPOD_DEPLOY.md)،
+# المتوافق — عند أول إقلاع على Ubuntu 22.04 خام، انظر docs/deploy/runpod.md)،
 # والباك اند عميل HTTP رفيع فقط (httpx بـ requirements.txt).
 #
 # آلية transformers.generate() + micro-batching اليدوي القديمة حُذفت بالكامل
-# من app/engine.py، ومعها peft (دمج LoRA صار بالنوتبوك حصراً — الموديل
+# من app/core/engine.py، ومعها peft (دمج LoRA صار بالنوتبوك حصراً — الموديل
 # المرفوع مدموج جاهز) وbitsandbytes (كانت للتكميم، غير مستخدمة).
 #
 # transformers تبقى مطلوبة فقط لميزة تحويل الصوت لنص (Whisper يعمل داخل
@@ -20,7 +20,7 @@
 # عربي يتحوّل لـ <unk> قبل ما يوصل الموديل. الحل النهائي كان رفع
 # tokenizer.json للمستودع، والتثبيت الدقيق هنا حتى ما تتكرر ترقية صامتة
 # تكسر الإنتاج بلا أي تغيير بالكود. لترقية عمدية: بدّل الرقم بعد اختبار
-# محلي كامل (فحص المُرمِّز أدناه بـ RUNPOD_DEPLOY.md)، لا تفتح السقف.
+# محلي كامل (فحص المُرمِّز أدناه بـ docs/deploy/runpod.md)، لا تفتح السقف.
 #
 # ملاحظة توافق: vllm 0.26.0 يشترط transformers>=5.5.3 (والإصدار 4.x ما
 # يعرف معمارية Gemma4UnifiedForConditionalGeneration أصلاً) — الإصدار
@@ -35,7 +35,7 @@ transformers==5.14.1
 tokenizers==0.22.2
 
 # فك ترميز الصورة المرفوعة (app/features/order_intake/vision.py) — التحويل
-# لـ data URI يصير بـ app/engine.py والاستدلال البصري عند خادم vLLM.
+# لـ data URI يصير بـ app/core/engine.py والاستدلال البصري عند خادم vLLM.
 Pillow==12.3.0
 
 # تحويل نص لصوت (app/features/voice_followup/tts.py) — موديل Chatterbox

@@ -45,7 +45,7 @@ class Settings:
     model_name: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "google/gemma-4-E4B-it")
 
     # عنوان خادم vLLM OpenAI-متوافق — الباك اند عميل HTTP رفيع فقط (انظر
-    # app/engine.py). محلياً بدون أي خادم يبقى ready=False وكل الميزات ترجع
+    # app/core/engine.py). محلياً بدون أي خادم يبقى ready=False وكل الميزات ترجع
     # لوضع fallback.
     # يطابق vllm_port أدناه؛ غيّرهما معاً عند نقل الخادم إلى منفذ آخر.
     vllm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL") or "http://127.0.0.1:18001/v1")
@@ -103,7 +103,7 @@ class Settings:
     rag_top_k: int = 5
 
     # باك اند السستم — النظام الداخلي اللي يملك بيانات المنتجات والطلبات
-    # الحقيقية (انظر app/order_gateway.py). هذا الباك اند
+    # الحقيقية (انظر app/orders/gateway.py). هذا الباك اند
     # (الذكاء) ما يخزّن ولا منتج ولا طلب محلياً — استعلامات المنتجات
     # وإرسال الطلبات تمر لحظياً عبر HTTP لهذا العنوان
     # ولا يُحفظ. رابط ومسارات باك اند السستم الفعلية غير معروفة بعد؛ عدّل
@@ -124,7 +124,7 @@ class Settings:
     # خدمة تصحيح مناطق شركات التوصيل: نفس FastAPI مع مفتاحها المستقل أعلاه.
     # مسارات الكتالوج وإعدادات LLM الاختيارية تُقرأ من البيئة.
     district_source_dir: Path = field(default_factory=lambda: Path(os.getenv(
-        "DISTRICT_SOURCE_DIR", str(Path(__file__).resolve().parent.parent / "assets" / "address"))))
+        "DISTRICT_SOURCE_DIR", str(Path(__file__).resolve().parent.parent / "data" / "address"))))
     district_database_path: Path = field(default_factory=lambda: Path(os.getenv(
         "DISTRICT_DATABASE_PATH", str(Path(__file__).resolve().parent / "features" / "district_correction" / "data" / "catalog.sqlite3"))))
     district_llm_base_url: str = field(default_factory=lambda: os.getenv("DISTRICT_LLM_BASE_URL", ""))

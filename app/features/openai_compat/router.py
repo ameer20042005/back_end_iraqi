@@ -16,17 +16,17 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.engine import (
+from app.core.engine import (
     AI_MODEL_NOT_LOADED,
     LM_STUDIO_UNAVAILABLE,
     LLMUpstreamError,
     llm_engine,
 )
-from app.fallback import EXHAUSTED_FALLBACK
+from app.core.fallback import EXHAUSTED_FALLBACK
 from app.features.openai_compat.auth import require_openai_compat_api_key
 from app.features.openai_compat.completion import create_completion
 from app.features.openai_compat.prompts import OPENAI_COMPAT_SYSTEM_PROMPT
-from app.model_status import get_model_status
+from app.core.model_status import get_model_status
 
 logger = logging.getLogger(__name__)
 

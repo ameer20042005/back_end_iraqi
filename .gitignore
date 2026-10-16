@@ -14,3 +14,4 @@ benchmark-results/
 training/data/batches/
 training/data/errors.jsonl
 training/models/
+.pytest_cache/

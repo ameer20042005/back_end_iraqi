@@ -4,7 +4,7 @@
 كملخّص عربي — بنفس فلسفة plane.md: النموذج يفهم اللهجة الحرة، ولا يخترع
 بيانات غير موجودة بكلام الزبون نفسه.
 
-كلا الطلبين (سؤال/تحليل) يمران بنفس محرك gemma عبر app/engine.py، بس بـ
+كلا الطلبين (سؤال/تحليل) يمران بنفس محرك gemma عبر app/core/engine.py، بس بـ
 system prompt مختلف — نفس نمط app/features/sales/prompts.py."""
 
 from typing import Dict, List, Optional

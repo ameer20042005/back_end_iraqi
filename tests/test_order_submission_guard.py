@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""فحص حارس الإرسال لنظام الطلبات (app/order_service.py).
+"""فحص حارس الإرسال لنظام الطلبات (app/orders/service.py).
 
 بوابة الاكتمال بالراوتر تحرس **المدخل** (هل ذكر العميل بياناته؟)، لكن بينها
 وبين الإرسال تجري خطوة استخراج بالموديل ممكن تفشل — وعندها كان يُبنى طلب من
@@ -18,9 +18,9 @@ import asyncio
 
 import pytest
 
-from app import order_service as service
-from app.order_service import _submission_blockers, resolve_order
-from app.order_schema import OrderExtraction, OrderItemExtraction
+from app.orders import service
+from app.orders.service import _submission_blockers, resolve_order
+from app.orders.schema import OrderExtraction, OrderItemExtraction
 
 _API_KEY = "test-key"
 

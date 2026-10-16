@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Iraqi District Correction API",
-    "description": "ميزة ضمن الباك اند الحالي. baseUrl نفس رابط مجموعة postman_collection.json، وdistrict_api_key هو مفتاح الخدمة في app/config.py.",
+    "description": "ميزة ضمن الباك اند الحالي. baseUrl نفس رابط مجموعة collection.json، وdistrict_api_key هو مفتاح الخدمة في app/config.py.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [

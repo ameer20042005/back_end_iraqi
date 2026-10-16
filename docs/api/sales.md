@@ -131,8 +131,8 @@ Content-Type: application/json
 - `stream=true` يعيد `chat.completion.chunk` وينتهي بـ`data: [DONE]`.
 
 خدمة `resolve_order` المستخدمة بواسطة `/orders/create` انتقلت إلى
-`app/order_service.py` لأنها منطق طلبات وليست جزءاً من AI API للمبيعات.
+`app/orders/service.py` لأنها منطق طلبات وليست جزءاً من AI API للمبيعات.
 
-ملف `assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER (1).md` يصف قواعد البيانات
+ملف `docs/reference/jenni-stores-schema.md` يصف قواعد البيانات
 ولا يعرّف HTTP API للأدوات. لذلك لا ينفذ `sales` SQL أو يختلق endpoints؛ تطبيق
 العميل يربط أدواته بخدمات Jenni Stores مع tenant والصلاحيات من هويته الموثقة.

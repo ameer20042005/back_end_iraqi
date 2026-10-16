@@ -4,8 +4,8 @@
 from abc import ABC, abstractmethod
 
 from app.config import settings
-from app.order_schema import OrderConfirmation
-from app.system_backend import get_client, request as backend_request
+from app.orders.schema import OrderConfirmation
+from app.core.system_backend import get_client, request as backend_request
 
 
 class OrderSubmitter(ABC):

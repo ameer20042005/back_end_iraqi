@@ -16,7 +16,7 @@ order_intake وsales. وجوده بجنب قارئه يجعل المسار سط�
 import os
 from typing import Dict, List
 
-from app.context_blocks import locations_context_block, words_context_block
+from app.core.context_blocks import locations_context_block, words_context_block
 from app.rag import all_state_names
 
 Message = Dict[str, str]

@@ -19,7 +19,7 @@ import math
 import os
 from collections import Counter, defaultdict
 
-from app.text_norm import normalize
+from app.core.text_norm import normalize
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCUMENTS_PATH = os.path.join(BASE_DIR, "documents.jsonl")
@@ -32,7 +32,7 @@ _STOPWORDS = {
 }
 
 
-# `normalize` مستوردة من app.text_norm (الطبقة ١) — تُعاد تصديرها هنا للحفاظ
+# `normalize` مستوردة من app.core.text_norm (الطبقة ١) — تُعاد تصديرها هنا للحفاظ
 # على `from app.rag.retriever import normalize` بالكود القائم. لا تعرّف تطبيعاً
 # محلياً بهذا الملف: الفهرس والاستعلام لازم يمرّان بنفس الدالة حرفياً.
 

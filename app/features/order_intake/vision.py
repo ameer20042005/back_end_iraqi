@@ -16,8 +16,8 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-from app.engine import llm_engine
-from app.vision_utils import PIL_AVAILABLE, decode_image_bytes
+from app.core.engine import llm_engine
+from app.core.vision_utils import PIL_AVAILABLE, decode_image_bytes
 
 _IMAGE_INSTRUCTION = (
     "هذي صورة طلب من زبون (قائمة مكتوبة بخط اليد، أو لقطة شاشة محادثة، أو صورة "

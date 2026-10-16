@@ -1475,7 +1475,7 @@
     },
     {
       "name": "7) District Correction — تصحيح مناطق شركات التوصيل",
-      "description": "تفاصيل العقد في docs/district-correction-api.md. companyName من الكتالوج: ALZAEEM, FUHOOD, KHAYAL, RIYAM, TEST.",
+      "description": "تفاصيل العقد في docs/api/district-correction.md. companyName من الكتالوج: ALZAEEM, FUHOOD, KHAYAL, RIYAM, TEST.",
       "item": [
         {
           "name": "Ready",

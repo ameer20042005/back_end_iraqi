@@ -10,14 +10,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
-from app.engine import (
+from app.core.engine import (
     AI_MODEL_NOT_LOADED,
     AI_REQUEST_TIMEOUT,
     LM_STUDIO_UNAVAILABLE,
     LLMUpstreamError,
     llm_engine,
 )
-from app.model_status import get_model_status
+from app.core.model_status import get_model_status
 from app.features.district_correction.router import load_catalog as load_district_catalog
 from app.features.district_correction.router import router as district_correction_router
 from app.features.order_intake.router import router as order_intake_router
@@ -26,7 +26,7 @@ from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
 from app.features.voice_followup.router import router as voice_followup_router
 from app.features.voice_followup.tts import warmup as warmup_tts
-from app.system_backend import close_client as close_system_backend_client
+from app.core.system_backend import close_client as close_system_backend_client
 
 try:
     import torch
@@ -136,7 +136,7 @@ async def llm_health():
 
 @app.get("/metrics")
 def metrics():
-    """إحصاءات عميل vLLM (app/engine.py) — عدد الطلبات، الأخطاء، أزمنة
+    """إحصاءات عميل vLLM (app/core/engine.py) — عدد الطلبات، الأخطاء، أزمنة
     استجابة p50/p95، وجاهزية خادم vLLM. لإحصاءات المحرك الداخلية التفصيلية
     (KV cache، طلبات نشطة...) انظر /metrics على منفذ خادم vLLM نفسه (8001)."""
     return llm_engine.get_metrics()

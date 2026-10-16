@@ -55,7 +55,7 @@ class Gold:
 
 
 def catalog() -> Catalog:
-    """A fresh catalog built from the Excel workbooks in assets/address."""
+    """A fresh catalog built from the Excel workbooks in data/address."""
     path = Path(tempfile.mkdtemp()) / "districts.sqlite3"
     import_catalog(settings.district_source_dir, path)
     return Catalog(path)

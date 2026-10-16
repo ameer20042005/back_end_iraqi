@@ -11,7 +11,7 @@ X-API-Key: <district_api_key>
 Content-Type: application/json
 ```
 
-المفتاح هو الحقل `district_api_key` في [app/config.py](../app/config.py) مثل بقية مفاتيح الخدمات؛ ضع القيمة نفسها في إعدادات عميل Spring أو متغير Postman `district_api_key`. هذا المفتاح مستقل عن مفاتيح المبيعات وإنشاء الطلبات. المقارنة تتم في [auth.py](../app/features/district_correction/auth.py)؛ غياب الهيدر يرجع `422`، والمفتاح الخاطئ `401`، وعدم ضبط مفتاح الخادم `500`. `GET /health` و`GET /v1/district-correction/ready` لا يحتاجان المفتاح.
+المفتاح هو الحقل `district_api_key` في [app/config.py](../../app/config.py) مثل بقية مفاتيح الخدمات؛ ضع القيمة نفسها في إعدادات عميل Spring أو متغير Postman `district_api_key`. هذا المفتاح مستقل عن مفاتيح المبيعات وإنشاء الطلبات. المقارنة تتم في [auth.py](../../app/features/district_correction/auth.py)؛ غياب الهيدر يرجع `422`، والمفتاح الخاطئ `401`، وعدم ضبط مفتاح الخادم `500`. `GET /health` و`GET /v1/district-correction/ready` لا يحتاجان المفتاح.
 
 ## الإعداد والتشغيل
 
@@ -21,13 +21,13 @@ Content-Type: application/json
 .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
 ```
 
-عند الإقلاع، يُستورد كتالوج Excel من `assets/address` تلقائياً إذا لم توجد قاعدة SQLite أو كان أي ملف Excel أحدث منها. لإعادة البناء يدوياً مع تقرير الاستيراد، ثم أعد تشغيل الباك اند لتحميل النسخة الجديدة في الذاكرة:
+عند الإقلاع، يُستورد كتالوج Excel من `data/address` تلقائياً إذا لم توجد قاعدة SQLite أو كان أي ملف Excel أحدث منها. لإعادة البناء يدوياً مع تقرير الاستيراد، ثم أعد تشغيل الباك اند لتحميل النسخة الجديدة في الذاكرة:
 
 ```powershell
-.venv\Scripts\python.exe -m app.features.district_correction.import_excel_catalogs --report docs/district-correction-import-report.json
+.venv\Scripts\python.exe -m app.features.district_correction.import_excel_catalogs --report docs/reference/district-correction-import-report.json
 ```
 
-الحقول `district_source_dir` و`district_database_path` في `app/config.py` تقبل تجاوز المسار عبر `DISTRICT_SOURCE_DIR` و`DISTRICT_DATABASE_PATH`. الاستيراد يسجل الصفوف المكررة أو غير الصالحة في [تقرير الاستيراد](district-correction-import-report.json).
+الحقول `district_source_dir` و`district_database_path` في `app/config.py` تقبل تجاوز المسار عبر `DISTRICT_SOURCE_DIR` و`DISTRICT_DATABASE_PATH`. الاستيراد يسجل الصفوف المكررة أو غير الصالحة في [تقرير الاستيراد](../reference/district-correction-import-report.json).
 تستخدم الخدمة خادم vLLM والموديل المحددين في `app/config.py` افتراضياً لتحليل الحالات التي ليست مطابقة حرفياً. يمكن تجاوزهما عبر `DISTRICT_LLM_BASE_URL` و`DISTRICT_LLM_MODEL`، وضبط `DISTRICT_LLM_API_KEY` عند الحاجة، و`DISTRICT_LLM_TIMEOUT_SECONDS` للمهلة، و`DISTRICT_LLM_MAX_CASES` (الافتراضي 100) لأقصى عدد حالات تُرسل للـLLM في الطلب الواحد. عند تعذر الوصول إلى النموذج تعود الحالة `UNRESOLVED` مع رمز الخطأ المناسب.
 
 تُرسل الحالات في دفعات من 20 صفاً، وتعمل دفعتان بالتوازي افتراضياً لكل طلب. يمكن ضبط `DISTRICT_LLM_CONCURRENCY`، واستخدام القيمة `1` لخادم لا يستفيد من التوازي. يُحجز حد الحالات قبل بدء الدفعات، وتبقى النتائج بترتيب الطلب. تُعاد الاستفادة من حسابات المطابقة المتكررة، وتراعي قائمة مرشحي النموذج الكلمات الملتصقة. رد النموذج المكرر لنفس `excelSequence` يُرفض، ولا يمحو حقل `addressDetails` الفارغ العنوان الأصلي. عند فشل التحقق، تُحفظ المطابقة المحلية الموثوقة إن وجدت؛ وإلا تبقى الحالة `UNRESOLVED`.
@@ -177,7 +177,7 @@ Content-Type: application/json
 
 ## النموذج المدرَّب: القواعد ثم النموذج ثم الـLLM
 
-نموذج Reranker يُدرَّب في [training/](../training/README.md) على بيانات مرجعية. له وضعان يحدّدهما `DISTRICT_RERANKER_MODE`:
+نموذج Reranker يُدرَّب في [training/](../../training/README.md) على بيانات مرجعية. له وضعان يحدّدهما `DISTRICT_RERANKER_MODE`:
 
 **`decide` (الافتراضي): الطرق الثلاث تعمل معًا بالترتيب.** النموذج يقرأ كل صف لم تحسمه القواعد، ثم:
 
@@ -235,16 +235,16 @@ $env:DISTRICT_EMBEDDING_BASE_URL="http://127.0.0.1:8001"; $env:DISTRICT_EMBEDDIN
 | `401` | `{"detail":"مفتاح API غير صحيح لخدمة تصحيح المناطق"}` | صحح `X-API-Key`. |
 | `422` | `{"detail":[{"type":"missing","loc":["header","X-API-Key"],"msg":"Field required","input":null}]}` | الهيدر مفقود، أو جسم الطلب غير صالح، أو `excelSequence` مكرر. |
 | `404` | `{"detail":{"code":"UNKNOWN_COMPANY"}}` | أرسل إحدى الشركات الموجودة. |
-| `503` | `CATALOG_UNAVAILABLE` أو `NOT_READY` | افحص `/v1/district-correction/ready` و[تقرير الاستيراد](district-correction-import-report.json). |
+| `503` | `CATALOG_UNAVAILABLE` أو `NOT_READY` | افحص `/v1/district-correction/ready` و[تقرير الاستيراد](../reference/district-correction-import-report.json). |
 | `500` | رسالة عدم ضبط المفتاح أو خطأ داخلي | راجع `district_api_key` في `app/config.py` وسجلات الخادم. |
 
 المحافظة غير المعروفة، أو كتالوج الشركة الفارغ لتلك المحافظة، أو مهلة LLM، أو رد LLM غير صالح، أو تجاوز حد `DISTRICT_LLM_MAX_CASES`: تعود **على مستوى الصف** بحالة `UNRESOLVED` و`errorCode` من `UNKNOWN_STATE`, `EMPTY_DISTRICT_CATALOG`, `LLM_TIMEOUT`, `LLM_INVALID_RESPONSE`, `LLM_LIMIT_EXCEEDED`، مع بقاء بقية الصفوف قابلة للمعالجة.
 
 ## تجربة Postman
 
-استورد [district-correction-postman.json](district-correction-postman.json)، ثم افتح المجموعة → **Variables**:
+استورد [district-correction-postman.json](../postman/district-correction.json)، ثم افتح المجموعة → **Variables**:
 
-1. `baseUrl` مضبوط على رابط الباك اند المنشور نفسه في [postman_collection.json](postman_collection.json)؛ غيّره إلى `http://127.0.0.1:8000` للتجربة المحلية.
+1. `baseUrl` مضبوط على رابط الباك اند المنشور نفسه في [collection.json](../postman/collection.json)؛ غيّره إلى `http://127.0.0.1:8000` للتجربة المحلية.
 2. `district_api_key` مضبوط على قيمة `district_api_key` في `app/config.py`.
 3. شغّل `Ready` للتأكد من تحميل الكتالوج، ثم `تصحيح دفعة — محافظتان وعنوان مفصول`. داخل المجموعة طلبان إضافيان للتحقق من رفض المفتاح الخاطئ والمفقود، وطلب لشركة غير معروفة.
 

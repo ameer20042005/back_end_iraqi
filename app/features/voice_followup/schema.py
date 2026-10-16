@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """صيغ مسار المتابعة الصوتية للطلبات: JSON طلب خام يجي من باك اند السستم
-(انظر assets/JENNI_STORES_SCHEMA_FOR_AI_QUERY_BUILDER.md — الحقول هنا تطابق
+(انظر docs/reference/jenni-stores-schema.md — الحقول هنا تطابق
 sells/sell_items منطقياً)، وصيغة الجلسة المحفوظة بين POST /ask وPOST /respond.
 
 الفصل بين VoiceFollowupOrder (خام من باك اند السستم) وVoiceFollowupSession
 (ما نحفظه بالجلسة) نفس فلسفة OrderExtraction/OrderConfirmation بـ
-app/order_schema.py: لا نعيد للزبون ولا نرسل لباك اند السستم إلا بيانات
+app/orders/schema.py: لا نعيد للزبون ولا نرسل لباك اند السستم إلا بيانات
 وصلت فعلياً من مصدر موثوق (JSON الطلب الأصلي)، لا نخترعها."""
 
 from typing import List, Optional

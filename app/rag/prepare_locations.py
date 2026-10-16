@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""يحوّل states.xlsx + districts.xlsx (بجذر المستودع) إلى app/rag/locations.json.
+"""يحوّل states.xlsx + districts.xlsx (data/locations/) إلى app/rag/locations.json.
 
 يُشغَّل مرة واحدة وقت التطوير (يحتاج openpyxl)؛ وقت التشغيل يقرأ
 app/rag/locations.py ملف JSON الناتج فقط بدون أي اعتماد خارجي:
@@ -35,11 +35,11 @@ def _rows(path):
 def main():
     states = [
         {"code": code, "name": name}
-        for code, name in _rows(os.path.join(REPO_ROOT, "states.xlsx"))
+        for code, name in _rows(os.path.join(REPO_ROOT, "data", "locations", "states.xlsx"))
     ]
     districts = [
         {"name": name, "state": code}
-        for name, code in _rows(os.path.join(REPO_ROOT, "districts.xlsx"))
+        for name, code in _rows(os.path.join(REPO_ROOT, "data", "locations", "districts.xlsx"))
     ]
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(

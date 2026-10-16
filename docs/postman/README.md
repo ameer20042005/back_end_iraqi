@@ -1,11 +1,11 @@
 # دليل اختبار الـ API على Postman
 
-لتجربة ميزة تصحيح مناطق شركات التوصيل المضافة إلى الباك اند نفسه، استورد [مجموعة Postman الخاصة بها](district-correction-postman.json) واتبع [عقد المراسلة](district-correction-api.md). تستخدم متغير `baseUrl` نفسه ومفتاحاً مستقلاً هو `district_api_key` في `app/config.py`.
+لتجربة ميزة تصحيح مناطق شركات التوصيل المضافة إلى الباك اند نفسه، استورد [مجموعة Postman الخاصة بها](district-correction.json) واتبع [عقد المراسلة](../api/district-correction.md). تستخدم متغير `baseUrl` نفسه ومفتاحاً مستقلاً هو `district_api_key` في `app/config.py`.
 
-> ⚠️ **تنبيه أمني**: هذا الملف وملف [`postman_collection.json`](postman_collection.json) يحتويان مفاتيح API حقيقية
-> (نفس مفاتيح [`api-order-sales-voice.md`](api-order-sales-voice.md)). لا تشاركهما أو ترفعهما لمستودع عام.
+> ⚠️ **تنبيه أمني**: هذا الملف وملف [`collection.json`](collection.json) يحتويان مفاتيح API حقيقية
+> (نفس مفاتيح [`overview.md`](../api/overview.md)). لا تشاركهما أو ترفعهما لمستودع عام.
 
-مرجع الميزات الكامل موجود في [api-order-sales-voice.md](api-order-sales-voice.md) — هذا الملف خطوات عملية جاهزة للنسخ لتشغيلها في Postman مباشرة، بدون كتابة أي شي يدوياً.
+مرجع الميزات الكامل موجود في [docs/api/](../api/overview.md) — هذا الملف خطوات عملية جاهزة للنسخ لتشغيلها في Postman مباشرة، بدون كتابة أي شي يدوياً.
 
 ---
 
@@ -13,7 +13,7 @@
 
 1. افتح Postman.
 2. **File → Import** (أو زر **Import** أعلى يسار الشاشة).
-3. اختر ملف [`docs/postman_collection.json`](postman_collection.json) من هذا المشروع.
+3. اختر ملف [`docs/postman/collection.json`](collection.json) من هذا المشروع.
 4. بعد الاستيراد تظهر مجموعة باسم **"Order/Sales/Voice API — order_intake, sales, voice_followup, postpone"** بالشريط الجانبي، فيها 5 مجلدات:
    - `0) Health Check`
    - `1) Orders — Create Order`
@@ -45,7 +45,7 @@
 
 **مهم:** كل طلب يرسل حقل واحد فقط — لا تفعّل أكثر من حقل بنفس الطلب (يرجع `400`).
 
-**الاستجابة المتوقعة**: `200 OK` مع جسم JSON من نوع `OrderConfirmation` (شكله كامل في [api-order-sales-voice.md § 1](api-order-sales-voice.md#1-ميزة-إنشاء-الطلبات--order_intake)).
+**الاستجابة المتوقعة**: `200 OK` مع جسم JSON من نوع `OrderConfirmation` (شكله كامل في [orders.md](../api/orders.md)).
 
 ---
 
@@ -102,7 +102,7 @@
 
 **سكوت الزبون ليس خطأ**: تسجيل فارغ يجعل صباح تعيد السؤال مرة، وبالمحاولة الثانية تقفل المكالمة بأدب بلا تثبيت أي موعد.
 
-تفاصيل الصيغ المقبولة والهيدرات كاملة في [api-order-sales-voice.md § 4](api-order-sales-voice.md).
+تفاصيل الصيغ المقبولة والهيدرات كاملة في [voice-followup.md](../api/voice-followup.md#مكالمة-تأجيل-التسليم--voice_followuppostpone-شخصية-صباح).
 
 ---
 
@@ -116,4 +116,4 @@
 | `404 Not Found` | (خاص بـ `/voice_followup/respond` و`/postpone/respond`) الـ `session_id` غير موجود أو انتهت صلاحيته (٣٠ دقيقة) — أعد تشغيل Step 1 |
 | `501` / `503` | ميزة تحتاج بيئة GPU غير متوفرة حالياً على الخادم |
 
-تفاصيل كل كود حسب المسار موجودة بجداول "أخطاء محتملة" في [api-order-sales-voice.md](api-order-sales-voice.md).
+تفاصيل كل كود حسب المسار موجودة بجداول "أخطاء محتملة" في ملفات [docs/api/](../api/overview.md).

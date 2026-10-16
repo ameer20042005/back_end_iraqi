@@ -12,7 +12,7 @@
 
 from typing import Optional
 
-from app.order_schema import PlaneOrderExtraction
+from app.orders.schema import PlaneOrderExtraction
 from app.rag import canonical_state, search_locations, state_for_district
 
 

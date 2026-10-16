@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""فحص الطبقة ١ — التطبيع (app/text_norm.py).
+"""فحص الطبقة ١ — التطبيع (app/core/text_norm.py).
 
 التشغيل:  python -m pytest tests/test_text_norm.py -v
 """
 
 import pytest
 
-from app.text_norm import normalize, reduce_repeats
+from app.core.text_norm import normalize, reduce_repeats
 
 CASES = [
     ("توحيد الألف بأشكالها", "أحمد إياد آمنة ٱسم", "احمد اياد امنه اسم"),

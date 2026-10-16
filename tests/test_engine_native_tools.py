@@ -2,7 +2,7 @@
 
 import asyncio
 
-from app.engine import LLMEngine
+from app.core.engine import LLMEngine
 
 
 def test_native_completion_passes_tools_without_guided_json(monkeypatch):
@@ -52,7 +52,7 @@ def test_vllm_rejection_surfaces_upstream_message():
     import httpx
     import pytest
 
-    from app.engine import LLMUpstreamError
+    from app.core.engine import LLMUpstreamError
 
     message = "default chat template is no longer allowed"
 

@@ -2,7 +2,7 @@
 
 import re
 
-from app.order_service import _new_order_id
+from app.orders.service import _new_order_id
 
 
 def test_order_id_uses_system_format():

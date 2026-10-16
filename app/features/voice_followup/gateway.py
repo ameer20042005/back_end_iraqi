@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """بوابة إرسال نتيجة المتابعة الصوتية لباك اند السستم — إدخال (Inbound) فقط،
-بلا أي تخزين محلي. نفس فلسفة app/order_gateway.py (OrderSubmitter): استعلام
+بلا أي تخزين محلي. نفس فلسفة app/orders/gateway.py (OrderSubmitter): استعلام
 لحظي حقيقي عبر HTTP، مصادَق بمفتاح API، والنتيجة تُعالَج وتُرجَع للمتصل بلا
 احتفاظ بها هنا.
 
@@ -10,7 +10,7 @@
 
 TODO: مسار باك اند السستم الفعلي لاستقبال هذا الـ query غير معروف بعد —
 `/orders/{order_id}/feedback` أدناه أفضل تخمين موثَّق (يوازي POST /orders
-بـ app/order_gateway.py). عدّل المسار فقط عند توفر التفاصيل الحقيقية؛ الواجهة
+بـ app/orders/gateway.py). عدّل المسار فقط عند توفر التفاصيل الحقيقية؛ الواجهة
 (VoiceFollowupSubmitter) والمستدعي (router.py) لا يتغيّرون.
 """
 
@@ -20,7 +20,7 @@ import httpx
 
 from app.config import settings
 from app.features.voice_followup.schema import VoiceFollowupOrderRequest
-from app.system_backend import request as backend_request
+from app.core.system_backend import request as backend_request
 
 
 class VoiceFollowupSubmitter(ABC):
@@ -51,7 +51,7 @@ class HttpVoiceFollowupSubmitter(VoiceFollowupSubmitter):
         # بيانات الزبون كاملة من الطلب الأصلي (المصدر الوحيد الموثوق —
         # لا نستنتج اسماً أو رقماً أو موقعاً من رد الزبون الصوتي نفسه) +
         # ملخّص السبب المستخرَج من رده. نفس مبدأ resolve_order بـ
-        # app/order_service.py: لا نعيد حساب أو نخترع، فقط نمرر
+        # app/orders/service.py: لا نعيد حساب أو نخترع، فقط نمرر
         # ما وصل فعلاً من مصادر موثوقة.
         payload = {
             "order_id": order.order_id,

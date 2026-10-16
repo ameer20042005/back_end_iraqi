@@ -11,8 +11,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import List
 
-from app.order_gateway import order_submitter
-from app.order_schema import OrderConfirmation, OrderExtraction, ResolvedOrderItem
+from app.orders.gateway import order_submitter
+from app.orders.schema import OrderConfirmation, OrderExtraction, ResolvedOrderItem
 
 logger = logging.getLogger(__name__)
 

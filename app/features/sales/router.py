@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import Field
 
-from app.engine import llm_engine
-from app.fallback import EXHAUSTED_FALLBACK
+from app.core.engine import llm_engine
+from app.core.fallback import EXHAUSTED_FALLBACK
 from app.features.openai_compat.completion import create_completion
 from app.features.openai_compat.router import (
     ChatCompletionRequest,

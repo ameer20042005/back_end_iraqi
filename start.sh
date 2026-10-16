@@ -3,7 +3,7 @@
 # انظر VLLM_PORT أدناه) + FastAPI (منفذ 8000، هو الوحيد المكشوف من RunPod).
 #
 # مصمَّم للعمل على قالب RunPod **Ubuntu 22.04 خام** (بدون Python ولا pip
-# ولا CUDA ولا PyTorch ولا vLLM مسبقاً — انظر RUNPOD_DEPLOY.md، الطريقة
+# ولا CUDA ولا PyTorch ولا vLLM مسبقاً — انظر docs/deploy/runpod.md، الطريقة
 # الوحيدة المعتمدة للنشر): قسم "تجهيز نظام التشغيل" بالأسفل يثبّت كل شي
 # لازم من الصفر بأول إقلاع (Python/pip، أدوات بناء، ffmpeg/libsndfile1)،
 # ثم يتحقق من توفر vLLM بدعم معمارية Gemma4ForConditionalGeneration
@@ -318,6 +318,6 @@ echo "==> vLLM is running (PID ${VLLM_PID}) on port ${VLLM_PORT}, still loading 
 trap 'kill "${VLLM_PID}" 2>/dev/null || true' EXIT
 
 echo "==> Starting FastAPI on port ${API_PORT}..."
-echo "    (features run immediately in fallback mode; the readiness check in app/engine.py"
+echo "    (features run immediately in fallback mode; the readiness check in app/core/engine.py"
 echo "     switches them to model mode automatically once vLLM finishes loading weights)"
 exec uvicorn app.main:app --host 0.0.0.0 --port "${API_PORT}" --workers 1

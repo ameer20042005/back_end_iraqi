@@ -280,10 +280,10 @@ def test_postman_example_matches_integrated_endpoint(catalog, monkeypatch):
     monkeypatch.setattr(service_router, "settings", configured)
     monkeypatch.setattr(service_auth, "settings", configured)
     monkeypatch.setattr(service_router, "LLMClient", lambda _settings: NoLLM())
-    collection_path = Path(__file__).resolve().parents[1] / "docs" / "district-correction-postman.json"
+    collection_path = Path(__file__).resolve().parents[1] / "docs" / "postman" / "district-correction.json"
     collection = json.loads(collection_path.read_text(encoding="utf-8"))
     variables = {item["key"]: item["value"] for item in collection["variable"]}
-    main_collection = json.loads((collection_path.parent / "postman_collection.json").read_text(encoding="utf-8"))
+    main_collection = json.loads((collection_path.parent / "collection.json").read_text(encoding="utf-8"))
     assert variables["baseUrl"] == next(item["value"] for item in main_collection["variable"] if item["key"] == "baseUrl")
     assert variables["district_api_key"] == settings.district_api_key
     sample = collection["item"][2]["item"][0]["request"]

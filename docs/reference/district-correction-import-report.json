@@ -1,5 +1,5 @@
 {
-  "source": "assets/address",
+  "source": "data/address",
   "companies": {
     "ALZAEEM": {
       "states_in_governorates_file": 18,

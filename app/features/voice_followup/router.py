@@ -30,7 +30,7 @@ from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from app.auth import require_voice_followup_api_key
-from app.engine import llm_engine
+from app.core.engine import llm_engine
 from app.features.order_intake.transcribe import transcribe
 from app.features.voice_followup import session_store, tts
 from app.features.voice_followup.gateway import voice_followup_submitter, voice_postpone_submitter
@@ -43,7 +43,7 @@ from app.features.voice_followup.prompts import (
     build_turn_understanding_prompt,
 )
 from app.features.voice_followup.schema import VoiceFollowupOrderRequest
-from app.system_backend import SystemBackendUnavailable
+from app.core.system_backend import SystemBackendUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -119,14 +119,6 @@ def _synthesize_or_503(text: str) -> bytes:
 # يُعامَل كخيار غير مسموح، فتعيد صباح السؤال بدل ما تثبّته.
 MAX_POSTPONE_DAYS = 14
 
-def _days_choice(days: int) -> Optional[str]:
-    """يحوّل عدد أيام لمفتاح خيار، أو None لو تجاوز السقف أو كان سالباً.
-    الصفر يصير "today" حتى يبقى مفتاح اليوم واحداً بكل المسارات."""
-    if days < 0 or days > MAX_POSTPONE_DAYS:
-        return None
-    return "today" if days == 0 else f"plus_{days}"
-
-
 # ---------------------------------------------------------------------------
 # جدول الخيارات — المصدر الحتمي الوحيد للمواعيد
 # ---------------------------------------------------------------------------
@@ -153,7 +145,7 @@ POSTPONE_CHOICES = _all_postpone_choices()
 
 
 # الشرح: مخطط الاستخراج المقيَّد (guided_json). vLLM يفرضه **فعلياً** وقت
-# التوليد لا كتلميح بالبرومبت (انظر app/engine.py::_build_body) — يعني
+# التوليد لا كتلميح بالبرومبت (انظر app/core/engine.py::_build_body) — يعني
 # النموذج **ما يقدر فيزيائياً** يرجّع قيمة خارج هذي القوائم.
 #
 # وهذا بالضبط الجواب على الخطر اللي يخلق لما ننقل الفهم للنموذج: السقف

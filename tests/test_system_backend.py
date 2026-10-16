@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""طبقة الاتصال بباك اند السستم (app/system_backend.py):
+"""طبقة الاتصال بباك اند السستم (app/core/system_backend.py):
 التقاط 4xx كـSystemBackendUnavailable، وتمرير 404
 كنتيجة مشروعة، والعميل المشترك (العطل B6) مع ترويسات لكل طلب.
 
@@ -13,8 +13,8 @@ import asyncio
 import httpx
 import pytest
 
-from app import system_backend
-from app.system_backend import SystemBackendUnavailable, auth_headers, caller_auth_token
+from app.core import system_backend
+from app.core.system_backend import SystemBackendUnavailable, auth_headers, caller_auth_token
 
 
 def _client(status_code, body=b"{}"):

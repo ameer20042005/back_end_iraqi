@@ -10,7 +10,7 @@
 
 دعم Gemma4ForConditionalGeneration وصل لـ vLLM عبر PR #44429 (نسخة nightly
 يثبّتها start.sh تلقائياً على Ubuntu 22.04 خام، أو صورة vllm/vllm-openai:
-gemma4-unified الجاهزة) — انظر start.sh وRUNPOD_DEPLOY.md.
+gemma4-unified الجاهزة) — انظر start.sh وdocs/deploy/runpod.md.
 هذا يستبدل آلية transformers.generate() + micro-batching اليدوي السابقة
 بالكامل: vLLM يدير PagedAttention وcontinuous batching داخلياً، فمئات
 الطلبات المتزامنة تتقاسم الـ GPU تلقائياً بدون طوابير يدوية.
@@ -37,7 +37,7 @@ from typing import AsyncGenerator, Dict, List, Optional, Union
 import httpx
 
 from app.config import settings
-from app.llm_options import normal_generation_options
+from app.core.llm_options import normal_generation_options
 
 logger = logging.getLogger(__name__)
 

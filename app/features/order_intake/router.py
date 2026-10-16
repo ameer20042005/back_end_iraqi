@@ -18,13 +18,13 @@ from starlette.concurrency import run_in_threadpool
 
 from app.auth import require_orders_api_key
 from app.config import settings
-from app.engine import llm_engine
+from app.core.engine import llm_engine
 from app.features.order_intake.prompts import build_order_intake_prompt
 from app.features.order_intake.transcribe import transcribe
 from app.features.order_intake.vision import order_image_reader
-from app.order_service import resolve_order
-from app.order_extraction import correct_location, state_code_for
-from app.order_schema import (
+from app.orders.service import resolve_order
+from app.orders.extraction import correct_location, state_code_for
+from app.orders.schema import (
     OrderConfirmation,
     OrderExtraction,
     PlaneOrderExtraction,
@@ -122,5 +122,5 @@ async def create_order(
     return await resolve_order(extraction, api_key)
 
 
-# تصحيح الموقع وكود المحافظة انتقلا لـ app/order_extraction.py حتى يشاركهما
+# تصحيح الموقع وكود المحافظة انتقلا لـ app/orders/extraction.py حتى يشاركهما
 # مسار /sales/chat (نفس مخطط plane.md لكل مصادر الطلب).

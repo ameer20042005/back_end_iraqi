@@ -17,8 +17,8 @@ shared with the jbot route; the engine's default policy for other features is un
 import logging
 from typing import Any, Dict, List, Optional
 
-from app.engine import llm_engine
-from app.fallback import EXHAUSTED_FALLBACK
+from app.core.engine import llm_engine
+from app.core.fallback import EXHAUSTED_FALLBACK
 from app.features.openai_compat.completion import create_completion
 from app.features.openai_compat.router import (
     ChatCompletionRequest,
