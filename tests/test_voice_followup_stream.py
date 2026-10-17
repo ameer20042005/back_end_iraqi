@@ -384,6 +384,90 @@ def test_llm_failure_reports_error_and_keeps_the_call(env):
         hang_up(ws)
 
 
+def test_tts_failure_reports_reason_and_one_line_log(env, caplog):
+    import torch
+
+    async def oom_tts(text):
+        raise torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 20.00 MiB")
+
+    env(ScriptedLLM([{"text": "هلا بيك، وياك سارة من متجر النور."}]))
+    stream.deps.tts = oom_tts
+    with caplog.at_level("ERROR", logger=stream.__name__):
+        with connect(TestClient(main.app)) as ws:
+            start(ws)
+            ws.send_json({"type": "call_state", "state": "accepted"})
+            events, frames = collect_until(ws, is_type("error"))
+            assert events[-1] == {"type": "error", "code": "tts", "message": "تعذّر توليد صوت الـ agent",
+                                  "reason": "cuda_oom"}
+            assert frames == 0
+            hang_up(ws)
+    lines = [r.getMessage() for r in caplog.records if "فشل نطق جملة" in r.getMessage()]
+    assert len(lines) == 1 and "\n" not in lines[0]
+    assert "reason=cuda_oom" in lines[0] and "OutOfMemoryError: CUDA out of memory" in lines[0]
+    assert "vram_free_gb=" in lines[0]
+
+
+def test_tts_not_installed_reason(env):
+    async def missing(text):
+        raise stream.voice_health.NotInstalledError("موديل النطق غير مثبَّت (chatterbox-tts)")
+
+    env(ScriptedLLM([{"text": "هلا بيك، وياك سارة من متجر النور."}]))
+    stream.deps.tts = missing
+    with connect(TestClient(main.app)) as ws:
+        start(ws)
+        ws.send_json({"type": "call_state", "state": "accepted"})
+        events, _ = collect_until(ws, is_type("error"))
+        assert events[-1]["reason"] == "not_installed"
+        hang_up(ws)
+
+
+def test_two_consecutive_tts_failures_end_the_call_politely(env):
+    async def broken_tts(text):
+        raise RuntimeError("generation exploded")
+
+    # الافتتاحية جملتين: الأولى تفشل (error)، الثانية تفشل ← end_call.
+    llm = ScriptedLLM([{"text": "هلا بيك، وياك سارة من متجر النور. "}, {"text": "عندي سؤال صغير إذا تسمحلي."}])
+    env(llm)
+    stream.deps.tts = broken_tts
+    with connect(TestClient(main.app)) as ws:
+        room = start(ws)
+        ws.send_json({"type": "call_state", "state": "accepted"})
+        events, frames = collect_until(ws, is_type("end_call"))
+        errors = [e for e in events if e["type"] == "error"]
+        assert [e["reason"] for e in errors] == ["generation_failed", "generation_failed"]
+        assert events[-1] == {"type": "end_call", "reason": "tts_unavailable"}
+        assert frames == 0
+        events, _ = collect_until(ws, is_type("outcome"))
+        assert events[-1]["summary"] == stream.TTS_UNAVAILABLE_SUMMARY
+        assert events[-1]["follow_up_needed"] is True
+        assert collect_until(ws, is_type("__close__"))[0][-1]["code"] == 1000
+    saved = outcomes.get_outcome(room)
+    assert saved.status == "done" and saved.follow_up_needed is True
+
+
+def test_a_successful_sentence_resets_the_tts_failure_count(env):
+    calls = []
+
+    async def flaky_tts(text):
+        calls.append(text)
+        if len(calls) % 2:  # الأولى والثالثة تفشل، الثانية تنجح
+            raise RuntimeError("flaky")
+        return await fake_tts(text)
+
+    llm = ScriptedLLM([{"text": "هلا بيك، وياك سارة من متجر النور. عندي سؤال صغير إذا تسمحلي. "
+                                "هل وصلك الطلب بالسلامة؟"}])
+    env(llm)
+    stream.deps.tts = flaky_tts
+    with connect(TestClient(main.app)) as ws:
+        start(ws)
+        ws.send_json({"type": "call_state", "state": "accepted"})
+        events, frames = collect_until(ws, lambda e: e["type"] == "transcript" and e["role"] == "agent")
+        events2, _ = collect_until(ws, is_type("error"))
+        assert len(calls) == 3 and frames > 0
+        assert not any(e["type"] == "end_call" for e in events + events2)
+        hang_up(ws)
+
+
 # ── ٦. الوحدات ──────────────────────────────────────────────────────────────
 
 def _energy_endpointer():

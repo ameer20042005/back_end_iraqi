@@ -10,12 +10,14 @@ import logging
 import threading
 from typing import Optional
 
+_IMPORT_ERROR: Optional[str] = None
 try:
     from transformers import pipeline
 
     _TRANSFORMERS_AVAILABLE = True
-except ImportError:
+except Exception as _exc:  # noqa: BLE001
     _TRANSFORMERS_AVAILABLE = False
+    _IMPORT_ERROR = type(_exc).__name__
 
 from app.config import settings
 
@@ -59,6 +61,16 @@ def _get_pipeline():
 
 def available() -> bool:
     return _TRANSFORMERS_AVAILABLE
+
+
+def status() -> dict:
+    """حالة النسخ بلا تحميل: مثبَّت؟ محمَّل؟"""
+    return {
+        "installed": _TRANSFORMERS_AVAILABLE,
+        "import_error": _IMPORT_ERROR,
+        "loaded": _pipeline is not None,
+        "model": settings.stt_model().repository,
+    }
 
 
 def transcribe_pcm(samples, sample_rate: int) -> Optional[str]:

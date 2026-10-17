@@ -128,6 +128,8 @@ _ensure_torchaudio
 # app/config.py لو لسا يتصادم بمنفذك.
 # الإعدادات ثابتة في app/config.py. نقرأها بعد تثبيت متطلبات بايثون كي يكون
 # الاسم والمنفذ وحدود vLLM متطابقة دائماً بين FastAPI وسكربت التشغيل.
+# GPU_MEMORY_UTILIZATION بالبيئة (مثل GPU_MEMORY_UTILIZATION=0.80 bash start.sh)
+# يتجاوز 0.85: config.py يقرأه، فالقيمة اللي تطلع هنا هي نفسها اللي يشوفها FastAPI.
 mapfile -t STATIC_CONFIG < <(python3 -c '
 from app.config import settings
 for value in (
@@ -279,7 +281,7 @@ _start_vllm() {
 _fix_cuda_lib_path
 _fix_cuda_nvcc_path
 
-echo "==> Starting vLLM on port ${VLLM_PORT} (model: ${MODEL_NAME})..."
+echo "==> Starting vLLM on port ${VLLM_PORT} (model: ${MODEL_NAME}, gpu_memory_utilization=${GPU_MEMORY_UTILIZATION})..."
 _start_vllm
 VLLM_PID=${VLLM_LAST_PID}
 

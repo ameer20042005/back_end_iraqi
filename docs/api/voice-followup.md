@@ -235,8 +235,8 @@ POST {CATALOG_BASE_URL}{CATALOG_PATH_CALL_OUTCOME}                 (Bearer + X-T
 | خادم ← تطبيق | نص | `{"type":"transcript","role":"user" / "agent","text":"..."}` — مقاطع نهائية بس (جملة الـ agent تنرسل بعد ما ينرسل صوتها كامل) |
 | خادم ← تطبيق | نص | `{"type":"interrupt"}` — الزبون حچى فوق الـ agent: **فرّغ صوت التشغيل المخزّن فوراً** |
 | خادم ← تطبيق | نص | `{"type":"outcome", ...نفس حقول CallOutcome...}` — بعد `save_outcome`، أو النتيجة الاحتياطية عند النهاية |
-| خادم ← تطبيق | نص | `{"type":"end_call","reason":"agent" / "idle_timeout" / "max_duration"}` — اقفل مكالمة الواتساب |
-| خادم ← تطبيق | نص | `{"type":"error","code":"...","message":"..."}` |
+| خادم ← تطبيق | نص | `{"type":"end_call","reason":"agent" / "idle_timeout" / "max_duration" / "tts_unavailable"}` — اقفل مكالمة الواتساب |
+| خادم ← تطبيق | نص | `{"type":"error","code":"...","message":"...","reason":"..."}` — `reason` اختياري (حالياً مع `code: "tts"` بس) |
 | تطبيق ← خادم | نص | `{"type":"ping"}` ← `{"type":"pong"}` (مسموح حتى قبل `start`) |
 
 **التسلسل:**
@@ -248,6 +248,7 @@ POST {CATALOG_BASE_URL}{CATALOG_PATH_CALL_OUTCOME}                 (Bearer + X-T
    - الـ agent ينهي (`end_call`): الخادم يرسل الجملة الأخيرة كاملة، ثم `{"type":"end_call","reason":"agent"}`. التطبيق يكمّل تشغيل المخزّن، يقفل الواتساب، ويرسل `call_state: ended` (أو يسكّر الاتصال). بعد 10 ثواني + مدة الصوت المتبقي الخادم يسكّر بنفسه.
    - الزبون قفل: `call_state: ended` ← الخادم يكتب النتيجة الاحتياطية إذا ما صار `save_outcome` ("الزبون لم يرد على المكالمة" إذا ما وصل `accepted`، وإلا "انتهت المكالمة بدون نتيجة مسجّلة"، و`follow_up_needed: true`)، يرسلها كحدث `outcome`، ثم يسكّر بالرمز 1000.
    - انقطاع الاتصال بلا `ended`: نفس النتيجة الاحتياطية تنكتب بالمخزن.
+   - النطق معطّل: إذا فشل نطق جملتين **ورا بعض** بنفس المكالمة (الزبون ما يسمع شي)، الخادم يرسل `{"type":"end_call","reason":"tts_unavailable"}` ويكتب نتيجة احتياطية بـ `follow_up_needed: true` وملخّص "تعذّر توليد صوت الـ agent فانتهت المكالمة — تحتاج متابعة"، ثم `outcome` والإغلاق بـ 1000. جملة تنجح بين فشلين تصفّر العدّاد.
    - مهلة: بلا كلام من الزبون ولا من الـ agent لمدة `VOICE_STREAM_IDLE_TIMEOUT_SECONDS` (60) بعد الرد، أو تجاوز `VOICE_STREAM_MAX_CALL_SECONDS` (15 دقيقة) من `ready` ← `end_call` بسبب `idle_timeout`/`max_duration` ثم النتيجة الاحتياطية والإغلاق.
 
 **رموز الإغلاق والأخطاء:**
@@ -261,7 +262,18 @@ POST {CATALOG_BASE_URL}{CATALOG_PATH_CALL_OUTCOME}                 (Bearer + X-T
 | `1011` | `internal` | خلل داخلي |
 | `1000` | — | نهاية طبيعية |
 
-أخطاء ما تسكّر المكالمة: `llm` (النموذج ما رد بهذا الدور)، `stt`، `tts`، `protocol` (رسالة غير معروفة).
+أخطاء ما تسكّر المكالمة: `llm` (النموذج ما رد بهذا الدور)، `stt`، `tts`، `protocol` (رسالة غير معروفة). (استثناء: فشل `tts` مرتين ورا بعض ينهي المكالمة بـ `tts_unavailable`، انظر فوق.)
+
+حدث `error` بـ `code: "tts"` يحمل `reason` (التطبيق يگدر يتجاهله) — بلا تفاصيل داخلية؛ النص الكامل للاستثناء باللوق بس:
+
+| `reason` | المعنى | وين تدوّر |
+|---|---|---|
+| `cuda_oom` | نفاد ذاكرة الـ GPU أثناء تحميل Chatterbox أو التوليد | `vram_free_gb` بـ `/health/voice`، وقسم ميزانية الذاكرة تحت |
+| `not_installed` | `chatterbox-tts` أو تبعية لها ما تنستورد (`tts.import_error` بـ `/health/voice`) | `python3 -c "import chatterbox.mtl_tts"` |
+| `load_failed` | المكتبة موجودة بس تحميل الأوزان/بصمة الصوت فشل لسبب غير الذاكرة (تنزيل، ملف مرجعي، توافق نسخة) | لوق uvicorn: "فشل تحميل نسخة النطق" مع traceback |
+| `generation_failed` | الموديل محمَّل والتوليد نفسه فشل (أو رجع بلا صوت) | لوق uvicorn |
+
+كل فشل نطق ينكتب بسطر لوق واحد: `فشل نطق جملة بالمكالمة <call_id> (<n> ورا بعض): reason=<...> error=<النوع>: <الرسالة> vram_free_gb=<...>`.
 
 **مثال جلسة:**
 
@@ -302,7 +314,50 @@ POST {CATALOG_BASE_URL}{CATALOG_PATH_CALL_OUTCOME}                 (Bearer + X-T
 | `VOICE_STREAM_TTS_LEAD_MS` | `1500` | كم يسبق إرسال الصوت وقت تشغيله (أقل = مقاطعة أنظف، أكثر = تحمّل أكبر لتذبذب الشبكة) |
 | `VOICE_STREAM_LLM_MAX_TOKENS` | `256` | أقصى توكنات لكل رد |
 
-**تشغيل:** Whisper (`stt.py`) وChatterbox (`tts.py`، مجمّع `TTS_POOL_SIZE`) يتحمّلون بعملية uvicorn عند أول مكالمة WebSocket (أول مكالمة أبطأ). إذا شغّلت الـ agent worker مال LiveKit بنفس الوقت، كل عملية عندها نسخها (VRAM مضاعف).
+| `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1` يحمّل Whisper وChatterbox (ويولّد جملة) عند إقلاع uvicorn بعد ما يجهز vLLM، `0` = عند أول مكالمة |
+| `GPU_MEMORY_UTILIZATION` | `0.85` | حصة vLLM من ذاكرة الكرت (بين 0.1 و0.95)؛ الباقي لموديلات الصوت. `start.sh` يحترمه |
+| `TTS_POOL_SIZE` | `2` | عدد نسخ Chatterbox (~3–4.5GB لكل نسخة). على A40 مشترك مع vLLM خلّيه `1` |
+
+**تشغيل:** Whisper (`stt.py`) وChatterbox (`tts.py`، مجمّع `TTS_POOL_SIZE`) يتحمّلون بعملية uvicorn. مع `VOICE_STREAM_WARMUP` (افتراضي على GPU) يتحمّلون عند الإقلاع بعد جاهزية vLLM — أي فشل يطلع باللوق (`🛑 فشل التحميل المسبق...`) وبـ `/health/voice` قبل أول مكالمة، وأول مكالمة ما تنتظر التحميل. بدونه يتحمّلون بأول مكالمة (أول مكالمة أبطأ).
+
+### فحص صحة الصوت — `GET /health/voice`
+
+بلا مفتاح (مثل `/health`). **ما يحمّل أي موديل** — يقرأ الحالة بس. `200` لما كلشي سليم، و`503` لو مكتبة ناقصة، أو آخر محاولة نطق فشلت، أو التحميل المسبق فشل.
+
+```json
+{
+  "status": "healthy",
+  "tts": {
+    "installed": true, "import_error": null,
+    "loaded": true, "instances": 1, "pool_size": 1,
+    "last_synthesis": {"ok": true, "at": "2026-10-17T09:12:03+00:00", "seconds": 0.84, "reason": null, "error_type": null}
+  },
+  "stt": {"installed": true, "import_error": null, "loaded": true, "model": "ayoubkirouane/whisper-small-ar"},
+  "gpu": {"cuda": true, "vram_free_gb": 2.1, "vram_total_gb": 44.43},
+  "warmup": {"enabled": true, "state": "done", "stt": true, "tts": true, "seconds": 41.7}
+}
+```
+
+- `last_synthesis.reason`: نفس قيم `reason` بحدث `error` (`cuda_oom` / `not_installed` / `load_failed` / `generation_failed`)، و`error_type` اسم نوع الاستثناء بس (بلا رسالته).
+- `import_error`: اسم نوع خطأ الاستيراد لو المكتبة ما تنستورد (مثلاً `OSError` لـ torchaudio مبني على torch مختلف).
+- `warmup.state`: `disabled` / `pending` (ينتظر vLLM) / `running` / `done` / `failed`.
+
+### ميزانية ذاكرة الـ GPU (vLLM + الصوت بنفس الكرت)
+
+vLLM يحجز `GPU_MEMORY_UTILIZATION × ذاكرة الكرت` كاملة عند الإقلاع (أوزان + KV cache)، والباقي هو كل اللي يتبقى لعملية uvicorn. تقدير استهلاك uvicorn على A40 (44.43GB فعلياً):
+
+| البند | تقريباً |
+|---|---|
+| سياق CUDA لعملية uvicorn | ~0.5GB |
+| Whisper لـ `/orders/create` (fp16 + دفعة 16) | ~0.5GB أوزان + ~1GB ذروة |
+| Whisper للمكالمات (`stt.py`، نسخة ثانية) | ~0.5GB |
+| Chatterbox نسخة وحدة (fp32: T3 + S3Gen + VE + بصمة) + ذروة التوليد | ~3–4.5GB |
+| هامش تجزئة | ~1GB |
+| **المجموع مع `TTS_POOL_SIZE=1`** | **~7–8GB** |
+
+`0.85` تترك `0.15 × 44.43 ≈ 6.7GB` — أقل من المطلوب. لـ `TTS_POOL_SIZE=1` بنفس العملية: `GPU_MEMORY_UTILIZATION ≤ (44.43 − 8) / 44.43 ≈ 0.82`، والمقترح **`0.80`** (يترك ~8.9GB). كل `−0.05` تنقص KV cache الـ vLLM بـ `0.05 × 44.43 ≈ 2.2GB` بالضبط (الأوزان ثابتة)، فتأكد بعد التغيير من سطري لوق vLLM (`/tmp/vllm_boot.log`): `Available KV cache memory` و`Maximum concurrency for 32,768 tokens per request` — لازم الأخير يبقى ≥ 1 حتى يقلع بـ `max_model_len` الحالي، و`max_num_seqs` (90) سقف جدولة بس: KV أقل = طلبات أقل تشتغل سوية بالسياق الكامل، مو فشل إقلاع.
+
+**الـ LiveKit worker:** إذا `LIVEKIT_*` مضبوطة، `start.sh` يشغّل `agent.py` كعملية **منفصلة** تحمّل نسخها الخاصة (سياق CUDA + Whisper + لحد `TTS_POOL_SIZE` نسخ Chatterbox) فوق نسخ uvicorn — ~4.5GB إضافية لكل نسخة نطق. تشغيل المسارين سوية على A40 واحد يحتاج تقريباً `GPU_MEMORY_UTILIZATION ≈ 0.70` مع `TTS_POOL_SIZE=1`، أو شغّل مسار واحد بس.
 
 ## باك اند البيانات Catalog (أدوات البيانات)
 

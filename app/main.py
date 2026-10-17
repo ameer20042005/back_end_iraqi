@@ -24,6 +24,7 @@ from app.features.order_intake.router import router as order_intake_router
 from app.features.openai_compat.router import router as openai_compat_router
 from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
+from app.features.voice_followup import voice_health
 from app.features.voice_followup.router import router as voice_followup_router
 from app.core.system_backend import close_client as close_system_backend_client
 from app.core.catalog import close_client as close_catalog_client
@@ -40,6 +41,9 @@ async def _warmup_audio_models() -> None:
     while not llm_engine.ready:
         await asyncio.sleep(5)
     await run_in_threadpool(warmup_transcriber)
+    # موديلات مكالمات WebSocket (VOICE_STREAM_WARMUP، افتراضياً على GPU بس).
+    if voice_health.warmup_enabled():
+        await run_in_threadpool(voice_health.warmup_voice_models)
 
 
 @asynccontextmanager
@@ -120,6 +124,15 @@ async def llm_health():
         status_code=200 if healthy else 503,
         content={"status": "healthy" if healthy else "unhealthy", **status.as_dict()},
     )
+
+
+@app.get("/health/voice")
+def voice_health_check():
+    """موديلات صوت المكالمات (Chatterbox + Whisper): مثبَّتة؟ محمَّلة؟ الذاكرة
+    الحرة، ونتيجة آخر محاولة نطق. ما يحمّل أي موديل. 503 لو مكتبة ناقصة أو آخر
+    نطق فشل أو فشل التحميل المسبق."""
+    status = voice_health.voice_status()
+    return JSONResponse(status_code=200 if status["status"] == "healthy" else 503, content=status)
 
 
 @app.get("/metrics")

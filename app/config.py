@@ -11,6 +11,22 @@ from pathlib import Path
 from typing import Optional
 
 
+def _env_flag(name: str) -> Optional[bool]:
+    """1/true/yes أو 0/false/no؛ غير مضبوط (أو فارغ) = None (القرار للافتراضي)."""
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return None
+    return raw not in ("0", "false", "no", "off")
+
+
+def _gpu_memory_utilization() -> float:
+    """GPU_MEMORY_UTILIZATION من البيئة (بين 0.1 و0.95) وإلا 0.85."""
+    value = float(os.getenv("GPU_MEMORY_UTILIZATION") or "0.85")
+    if not 0.1 <= value <= 0.95:
+        raise ValueError(f"GPU_MEMORY_UTILIZATION لازم بين 0.1 و0.95، والقيمة {value}")
+    return value
+
+
 @dataclass(frozen=True)
 class SpeechToTextModel:
     """نقطة تفتيش النسخ العربي ومعطيات توليدها."""
@@ -59,8 +75,11 @@ class Settings:
     # Whisper، Chatterbox) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).
 
     # إعدادات خادم vLLM (يقرأها start.sh ويمررها كأعلام لـ `vllm serve`):
-    # نسبة VRAM المحجوزة للموديل + KV cache.
-    gpu_memory_utilization: float = 0.85
+    # نسبة VRAM المحجوزة للموديل + KV cache. الباقي (1 - النسبة) هو كل اللي
+    # يتبقى لعملية uvicorn (Whisper ×2 + Chatterbox بمكالمات WebSocket) وللـ
+    # LiveKit worker لو اشتغل (نسخه الخاصة). قابلة للتجاوز بـ
+    # GPU_MEMORY_UTILIZATION — start.sh يقرأ هذه القيمة نفسها.
+    gpu_memory_utilization: float = field(default_factory=_gpu_memory_utilization)
     # طول السياق الأقصى — أقصر = مساحة KV cache أكبر = طلبات متزامنة أكثر.
     # ⚠️ لازم يطابق MAX_MODEL_LEN بـ start.sh (هو اللي يمرره فعلياً لـ vllm
     # serve؛ القيمة هنا للرجوع إليها بالكود فقط).
@@ -247,6 +266,10 @@ class Settings:
     # كم يسبق إرسال صوت الـ agent وقت تشغيله عند التطبيق: أقل = مقاطعة أنظف.
     voice_stream_tts_lead_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_TTS_LEAD_MS") or "1500"))
     voice_stream_llm_max_tokens: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_LLM_MAX_TOKENS") or "256"))
+    # تحميل Whisper وChatterbox مسبقاً عند إقلاع uvicorn (بعد جاهزية vLLM حتى
+    # يحجز ذاكرته أول): 1 = دائماً، 0 = أبداً (تُحمَّل بأول مكالمة)، غير مضبوط =
+    # على GPU بس. يطلّع أي فشل تحميل عند البدء بدل أول مكالمة.
+    voice_stream_warmup: Optional[bool] = field(default_factory=lambda: _env_flag("VOICE_STREAM_WARMUP"))
 
     # LiveKit — المكالمات الصوتية الحية (app/features/voice_followup/agent.py
     # يشغّل الـ agent worker، وcalls.py ينشئ الغرف ويرسل الـ agent إليها).

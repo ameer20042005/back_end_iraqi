@@ -35,7 +35,7 @@ from fastapi import WebSocket
 from pydantic import ValidationError
 
 from app.config import settings
-from app.features.voice_followup import call_tools, vad
+from app.features.voice_followup import call_tools, vad, voice_health
 from app.features.voice_followup.calls import agent_metadata, room_name
 from app.features.voice_followup.prompts import build_call_instructions, build_opening_instruction
 from app.features.voice_followup.schema import CallRequest
@@ -57,6 +57,10 @@ MAX_TOOL_ROUNDS = 4
 WATCHDOG_TICK_SECONDS = 0.5
 
 OPENING_PREFIX = "(تعليمات داخلية من النظام، مو كلام الزبون) "
+
+# فشل النطق هذا العدد من المرات ورا بعض بنفس المكالمة = الزبون بصمت، فننهيها.
+MAX_CONSECUTIVE_TTS_FAILURES = 2
+TTS_UNAVAILABLE_SUMMARY = "تعذّر توليد صوت الـ agent فانتهت المكالمة — تحتاج متابعة"
 
 # ---------------------------------------------------------------------------
 # التبعيات الثقيلة (قابلة للتبديل بالاختبارات)
@@ -81,7 +85,7 @@ async def whisper_stt(samples: np.ndarray, sample_rate: int) -> Optional[str]:
 
     text = await asyncio.to_thread(whisper.transcribe_pcm, samples, sample_rate)
     if text is None:
-        raise RuntimeError("موديل النسخ غير مثبَّت (transformers)")
+        raise voice_health.NotInstalledError("موديل النسخ غير مثبَّت (transformers)")
     return text
 
 
@@ -90,7 +94,7 @@ async def chatterbox_tts(text: str) -> Optional[Tuple[np.ndarray, int]]:
 
     result = await asyncio.to_thread(chatterbox.synthesize_array, text)
     if result is None:
-        raise RuntimeError("موديل النطق غير مثبَّت (chatterbox-tts)")
+        raise voice_health.NotInstalledError("موديل النطق غير مثبَّت (chatterbox-tts)")
     return result
 
 
@@ -222,6 +226,10 @@ def clean_sentence(text: str) -> str:
 _active_calls = 0
 
 
+class TtsUnavailable(Exception):
+    """النطق فشل MAX_CONSECUTIVE_TTS_FAILURES مرات ورا بعض: المكالمة تنتهي."""
+
+
 class StreamCall:
     def __init__(self, ws: WebSocket, deps_: StreamDeps, request: CallRequest, sample_rate: int) -> None:
         self.ws = ws
@@ -251,6 +259,8 @@ class StreamCall:
         self._started_at = time.monotonic()
         self._last_activity = self._started_at
         self._sent_outcome = False
+        self._tts_failures = 0
+        self._fallback_summary: Optional[str] = None
 
     # ── الإرسال ─────────────────────────────────────────────────────────────
 
@@ -303,7 +313,8 @@ class StreamCall:
     def _write_fallback(self):
         if self.tools.saved:
             return None
-        summary = call_tools.NO_OUTCOME_SUMMARY if self.accepted else call_tools.NO_ANSWER_SUMMARY
+        summary = self._fallback_summary or (
+            call_tools.NO_OUTCOME_SUMMARY if self.accepted else call_tools.NO_ANSWER_SUMMARY)
         return call_tools.save_fallback_outcome(self.meta, self.room, summary, self.customer_transcript())
 
     async def _finalize(self, fallback) -> None:
@@ -381,6 +392,7 @@ class StreamCall:
                 return
 
     async def _server_end(self, reason: str) -> None:
+        self.ending = True
         await self._send({"type": "end_call", "reason": reason})
         self.stop(reason)
 
@@ -469,6 +481,13 @@ class StreamCall:
             if spoken:
                 self.history.append({"role": "assistant", "content": " ".join(spoken)})
             raise
+        except TtsUnavailable:
+            # الزبون ما يسمع شي: ننهي بأدب بدل صمت لحد مهلة السكوت، والنتيجة
+            # الاحتياطية تطلب متابعة.
+            logger.error("النطق فشل %d مرات ورا بعض — إنهاء المكالمة %s",
+                         MAX_CONSECUTIVE_TTS_FAILURES, self.room)
+            self._fallback_summary = TTS_UNAVAILABLE_SUMMARY
+            await self._server_end("tts_unavailable")
         except Exception:
             logger.exception("فشل رد الـ agent بالمكالمة %s", self.room)
             await self._send({"type": "error", "code": "llm", "message": "تعذّر توليد رد الـ agent"})
@@ -490,14 +509,21 @@ class StreamCall:
         text = clean_sentence(sentence)
         if not text:
             return
+        failure: Optional[BaseException] = None
         try:
             result = await self.deps.tts(text)
-        except Exception:
-            logger.exception("فشل نطق جملة بالمكالمة %s", self.room)
-            result = None
+        except Exception as exc:
+            failure, result = exc, None
         if result is None:
-            await self._send({"type": "error", "code": "tts", "message": "تعذّر توليد صوت الـ agent"})
+            self._tts_failures += 1
+            logger.error("فشل نطق جملة بالمكالمة %s (%d ورا بعض): %s", self.room, self._tts_failures,
+                         voice_health.describe_failure(failure))
+            await self._send({"type": "error", "code": "tts", "message": "تعذّر توليد صوت الـ agent",
+                              "reason": voice_health.classify_error(failure)})
+            if self._tts_failures >= MAX_CONSECUTIVE_TTS_FAILURES:
+                raise TtsUnavailable()
             return
+        self._tts_failures = 0
         audio, rate = result
         pcm = vad.float_to_pcm16(vad.resample(np.asarray(audio, dtype=np.float32), rate, vad.SAMPLE_RATE))
         chunk = vad.SAMPLE_RATE * CHUNK_MS // 1000 * 2

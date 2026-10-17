@@ -30,7 +30,7 @@ X-API-Key: <المفتاح>
 | تصحيح المناطق | `POST /v1/district-correction` | `district_api_key` | `sk-district-7ea5de0fb1b68f0283df460dea42b2df` |
 
 - **تصحيح المناطق**: `POST /v1/district-correction` يستخدم مفتاحاً مستقلاً `district_api_key`؛ [العقد الكامل وPostman](district-correction.md).
-- **النقاط المفتوحة بلا مفتاح**: `GET /health`, `GET /gpu`, `GET /`, `GET /docs`, `GET /v1/district-correction/ready`.
+- **النقاط المفتوحة بلا مفتاح**: `GET /health`, `GET /health/voice`, `GET /gpu`, `GET /`, `GET /docs`, `GET /v1/district-correction/ready`.
 - **مفتاح خدمة لا يشتغل بخدمة ثانية** — كل خدمة تتحقق من مفتاحها هي حصراً (انظر `app/auth.py`).
 - كل مفاتيح الخدمات، بما فيها `district_api_key`، معرفة في `app/config.py`.
 
@@ -115,6 +115,10 @@ X-API-Key: <مفتاح الخدمة المستهدفة>
 ```json
 {"status": "healthy"}
 ```
+
+### `GET /health/voice`
+حالة موديلات صوت المكالمات (Chatterbox + Whisper) بعملية uvicorn — بلا تحميل أي موديل.
+التفاصيل والحقول: [voice-followup.md](voice-followup.md#فحص-صحة-الصوت--get-healthvoice).
 
 ### `GET /gpu`
 معلومات GPU/CUDA وحالة محرك vLLM — للتأكد إن الموديل شغال فعلاً على RunPod.

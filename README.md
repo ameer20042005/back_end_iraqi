@@ -18,7 +18,7 @@ ffmpeg/libsndfile1، Whisper وChatterbox TTS).
 | مكالمات صوتية حية (LiveKit أو WebSocket محلي) + مساعد الموظف | `app/features/voice_followup/` | `/voice_followup/*` | [voice-followup.md](docs/api/voice-followup.md) |
 | تصحيح مناطق شركات التوصيل | `app/features/district_correction/` | `/v1/district-correction*` | [district-correction.md](docs/api/district-correction.md) |
 
-المصادقة، الرابط الأساسي، نقاط الفحص (`/health`، `/gpu`، `/metrics`)، وملخص كل
+المصادقة، الرابط الأساسي، نقاط الفحص (`/health`، `/health/voice`، `/gpu`، `/metrics`)، وملخص كل
 النقاط: [docs/api/overview.md](docs/api/overview.md).
 
 ## هيكل المشروع
@@ -75,6 +75,9 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 | `CATALOG_PATH_*` | مسارات `ai_agent` | كل مسار Catalog قابل للتغيير (`CATALOG_PATH_CALL_OUTCOME` فارغ = ما ترسل النتيجة) |
 | `SYSTEM_BACKEND_CALL_OUTCOME_PATH` | `/calls/outcome` | فارغ = ما ترسل نتيجة المكالمة لباك اند السستم |
 | `VOICE_STREAM_*` | انظر التوثيق | الوكيل المحلي عبر WebSocket (`/voice_followup/stream`): السقف، VAD، المهلات |
+| `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1`/`0`: تحميل Whisper وChatterbox عند إقلاع uvicorn (بعد جاهزية vLLM) بدل أول مكالمة |
+| `GPU_MEMORY_UTILIZATION` | `0.85` | حصة vLLM من ذاكرة الكرت؛ الباقي لموديلات الصوت. `start.sh` يحترمه (انظر ميزانية الذاكرة بـ [voice-followup.md](docs/api/voice-followup.md)) |
+| `TTS_POOL_SIZE` | `2` | عدد نسخ Chatterbox (~3–4.5GB لكل نسخة)؛ على A40 مشترك مع vLLM `1` |
 
 الجدول الكامل لمتغيرات Catalog والوكيل المحلي: [voice-followup.md](docs/api/voice-followup.md).
 
