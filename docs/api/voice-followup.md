@@ -314,6 +314,9 @@ POST {CATALOG_BASE_URL}{CATALOG_PATH_CALL_OUTCOME}                 (Bearer + X-T
 | `VOICE_STREAM_TTS_LEAD_MS` | `1500` | كم يسبق إرسال الصوت وقت تشغيله (أقل = مقاطعة أنظف، أكثر = تحمّل أكبر لتذبذب الشبكة) |
 | `VOICE_STREAM_LLM_MAX_TOKENS` | `256` | أقصى توكنات لكل رد |
 
+| `VOICE_STREAM_AGC` | `1` | تطبيع مستوى صوت الزبون قبل VAD وWhisper (يرفع بس، ما يخفض). `0` يعطّله |
+| `VOICE_STREAM_AGC_TARGET_DBFS` | `-20` | المستوى الهدف لذروة الكلام |
+| `VOICE_STREAM_AGC_MAX_GAIN_DB` | `20` | أقصى رفع (يمنع تضخيم الضوضاء بالسكوت الطويل) |
 | `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1` يحمّل Whisper وChatterbox (ويولّد جملة) عند إقلاع uvicorn بعد ما يجهز vLLM، `0` = عند أول مكالمة |
 | `GPU_MEMORY_UTILIZATION` | `0.85` | حصة vLLM من ذاكرة الكرت (بين 0.1 و0.95)؛ الباقي لموديلات الصوت. `start.sh` يحترمه |
 | `TTS_POOL_SIZE` | `2` | عدد نسخ Chatterbox (~3–4.5GB لكل نسخة). على A40 مشترك مع vLLM خلّيه `1` |
@@ -334,13 +337,48 @@ POST {CATALOG_BASE_URL}{CATALOG_PATH_CALL_OUTCOME}                 (Bearer + X-T
   },
   "stt": {"installed": true, "import_error": null, "loaded": true, "model": "ayoubkirouane/whisper-small-ar"},
   "gpu": {"cuda": true, "vram_free_gb": 2.1, "vram_total_gb": 44.43},
-  "warmup": {"enabled": true, "state": "done", "stt": true, "tts": true, "seconds": 41.7}
+  "warmup": {"enabled": true, "state": "done", "stt": true, "tts": true, "seconds": 41.7},
+  "last_call": {"active": false, "duration_s": 48.2, "vad": "silero", "agc": true, "audio_bytes": 1536000,
+                "level_dbfs_mean": -52.3, "level_dbfs_max": -18.9, "vad_speech_windows": 412,
+                "segments_to_whisper": 4, "whisper_empty": 0, "user_transcripts": 4, "diagnosis": "ok", "...": "..."}
 }
 ```
 
 - `last_synthesis.reason`: نفس قيم `reason` بحدث `error` (`cuda_oom` / `not_installed` / `load_failed` / `generation_failed`)، و`error_type` اسم نوع الاستثناء بس (بلا رسالته).
 - `import_error`: اسم نوع خطأ الاستيراد لو المكتبة ما تنستورد (مثلاً `OSError` لـ torchaudio مبني على torch مختلف).
 - `warmup.state`: `disabled` / `pending` (ينتظر vLLM) / `running` / `done` / `failed`.
+- `last_call`: إحصاءات صوت الزبون لآخر مكالمة WebSocket (أو الجارية، `active: true`) — أرقام بس، بلا نص ولا رقم ولا `call_id`. ما تأثر على `status`.
+
+### إحصاءات صوت الزبون (لما الـ agent ما يسمع)
+
+كل مكالمة تكتب سطر لوق كل 5 ثواني وبالنهاية: `إحصاءات صوت المكالمة <call_id>: active=… audio_bytes=… level_dbfs_mean=… …`، ونفس الأرقام بـ `last_call`:
+
+| الحقل | المعنى |
+|---|---|
+| `vad` | الكاشف الفعلي: `silero` أو `energy` (لو Silero ما اشتغل على الـ Pod) |
+| `audio_bytes` / `audio_seconds` / `ignored_bytes` | صوت واصل ومتعالج / المتجاهل (قبل `accepted` أو بعد `end_call`) |
+| `sample_rate` / `measured_sample_rate` | المعلن بـ `start` / المستنتج من سرعة وصول البايتات |
+| `level_dbfs_mean` / `level_dbfs_max` | مستوى الصوت **الخام** (قبل AGC) بنوافذ 20ms |
+| `agc_gain_db_mean` / `agc_gain_db_max` | الرفع اللي طبّقه AGC |
+| `vad_windows` / `vad_speech_windows` / `turn_starts` | نوافذ VAD الكلية / المصنّفة كلام / بدايات الأدوار |
+| `segments_to_whisper` / `whisper_empty` / `stt_errors` / `user_transcripts` | المقاطع المرسلة لـ Whisper / رجعت فارغة / رمت استثناء / صارت `transcript` |
+| `interrupts` / `protocol_errors` | مقاطعات / رسائل نصية غير مفهومة |
+
+**`diagnosis`** يقرأ الأرقام ويسمّي السبب:
+
+| القيمة | المعنى | الحل |
+|---|---|---|
+| `no_audio` | ماكو صوت واصل (أو كله قبل `accepted`) | التطبيق: هل يبث PCM كإطارات **ثنائية** بعد `accepted`؟ |
+| `sample_rate_mismatch` | معدل الوصول بعيد عن `sample_rate` المعلن | صحّح `sample_rate` بـ `start` |
+| `too_quiet` | أعلى مستوى < -50 dBFS وVAD ما لگى كلام | AGC مفعّل؟ ارفع مستوى الالتقاط بالتطبيق |
+| `vad_no_speech` | الصوت مسموع بس VAD ما صنّفه كلام | `VOICE_STREAM_VAD=silero`، أو اخفض `VOICE_STREAM_SILERO_THRESHOLD` / `VOICE_STREAM_ENERGY_DBFS` |
+| `stt_error` | Whisper يرمي استثناء لكل مقطع (`stt_error_type`) | لوق uvicorn: "فشل نسخ مقطع" |
+| `whisper_empty` | مقاطع توصل Whisper وترجع فارغة | الصوت مو كلام فعلي (صدى/موسيقى) أو مقطوع؛ راجع `segment_seconds` |
+| `no_speech_yet` / `ok` | ماكو كلام لحد الآن / وصل نص | — |
+
+القياس المحلي على كلام عربي حقيقي بنطاق هاتفي (8kHz): Silero يلتقط ~90% من نوافذ الكلام حتى -60 dBFS (ثابت مع المستوى)، وكاشف الطاقة (-40) **صفر** تحت -50 dBFS — مع AGC يرجع يلتقطه حتى -60، وبلا كلام وهمي على ضوضاء -75 dBFS. Whisper (`whisper-small-ar`، transformers 5.14.1) نسخ نفس المقاطع صح حتى بعد خفضها 45dB.
+
+صوت الزبون يتعالج (VAD + Whisper) **حتى وقت كلام الـ agent**: يقاطعه (`interrupt`) وكلامه ينسخ ويصير دوراً. قطع الصوت بعدد بايتات فردي ما تخرّب العينات (البايت الزايد يكمّل القطعة الجاية).
 
 ### ميزانية ذاكرة الـ GPU (vLLM + الصوت بنفس الكرت)
 

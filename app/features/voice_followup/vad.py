@@ -62,6 +62,48 @@ def resample(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
     return filtered[::down].astype(np.float32)
 
 
+class Agc:
+    """تطبيع مستوى بسيط قبل VAD وWhisper: يرفع الصوت الواطي (بعد ترميز
+    الواتساب أو مايك بعيد) لحد target_dbfs، بلا خفض أبداً وبسقف max_gain_db.
+
+    المستوى المتتبَّع = أعلى RMS لنوافذ 20ms (ذروة الكلام، مو متوسط يخفّفه
+    السكوت)، يرتفع فوراً وينزل ببطء (release_seconds) حتى ما يضخّم الضوضاء
+    بين الكلمات. كاشف الطاقة يحتاجه (يفقد الكلام تحت ~-45 dBFS)؛ Silero
+    ثابت تقريباً مع المستوى، وWhisper يستفيد من مقطع بمستوى طبيعي."""
+
+    _WINDOW = 320  # 20ms
+
+    def __init__(self, target_dbfs: float = -20.0, max_gain_db: float = 20.0,
+                 release_seconds: float = 3.0) -> None:
+        self._target = 10.0 ** (target_dbfs / 20.0)
+        self._max_gain = 10.0 ** (max_gain_db / 20.0)
+        self._release = release_seconds
+        self._level = 0.0
+        self.gain = 1.0
+
+    def process(self, samples: np.ndarray) -> np.ndarray:
+        if samples.size == 0:
+            return samples
+        n = samples.size // self._WINDOW
+        if n:
+            frames = samples[:n * self._WINDOW].reshape(n, self._WINDOW).astype(np.float64)
+            rms = float(np.sqrt(np.mean(np.square(frames), axis=1)).max())
+        else:
+            rms = float(np.sqrt(np.mean(np.square(samples, dtype=np.float64))))
+        decay = math.exp(-(samples.size / SAMPLE_RATE) / self._release)
+        self._level = max(rms, self._level * decay)
+        self.gain = min(self._max_gain, max(1.0, self._target / max(self._level, 1e-9)))
+        if self.gain == 1.0:
+            return samples
+        return np.clip(samples * self.gain, -1.0, 1.0).astype(np.float32)
+
+
+def make_agc() -> Optional[Agc]:
+    if not settings.voice_stream_agc:
+        return None
+    return Agc(settings.voice_stream_agc_target_dbfs, settings.voice_stream_agc_max_gain_db)
+
+
 # ---------------------------------------------------------------------------
 # مصنّفات الإطار: كلام أو لا
 # ---------------------------------------------------------------------------
@@ -69,6 +111,7 @@ def resample(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
 class EnergyClassifier:
     """كلام = طاقة الإطار (RMS) فوق عتبة بالـ dBFS. بلا تبعيات."""
 
+    kind = "energy"
     window = 320  # 20ms
 
     def __init__(self, threshold_dbfs: float) -> None:
@@ -117,6 +160,7 @@ def _get_silero_session():
 class SileroClassifier:
     """نفس نموذج Silero اللي يستعمله الـ agent بـ LiveKit، بحالة RNN خاصة بكل مكالمة."""
 
+    kind = "silero"
     window = 512  # 32ms بـ 16kHz
     _context = 64
 
@@ -173,6 +217,10 @@ class Endpointer:
         self._speech_run = 0
         self._silence_run = 0
         self.in_speech = False
+        # عدّادات تراكمية للإحصاءات (ما تتصفّر مع reset).
+        self.windows = 0
+        self.speech_windows = 0
+        self.starts = 0
 
     def reset(self) -> None:
         self._preroll.clear()
@@ -193,6 +241,8 @@ class Endpointer:
 
     def _step(self, frame: np.ndarray) -> Optional[Event]:
         speech = self._classify(frame)
+        self.windows += 1
+        self.speech_windows += bool(speech)
         if not self.in_speech:
             self._preroll.append(frame)
             self._speech_run = self._speech_run + 1 if speech else 0
@@ -201,6 +251,7 @@ class Endpointer:
                 self._segment = list(self._preroll)
                 self._preroll.clear()
                 self._silence_run = 0
+                self.starts += 1
                 return ("start", None)
             return None
         self._segment.append(frame)

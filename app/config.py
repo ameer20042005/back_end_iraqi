@@ -266,6 +266,13 @@ class Settings:
     # كم يسبق إرسال صوت الـ agent وقت تشغيله عند التطبيق: أقل = مقاطعة أنظف.
     voice_stream_tts_lead_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_TTS_LEAD_MS") or "1500"))
     voice_stream_llm_max_tokens: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_LLM_MAX_TOKENS") or "256"))
+    # تطبيع مستوى صوت الزبون (AGC) قبل VAD وWhisper: يرفع الصوت الواطي لحد
+    # الهدف بسقف رفع، بلا خفض. 0 يعطّله.
+    voice_stream_agc: bool = field(default_factory=lambda: _env_flag("VOICE_STREAM_AGC") is not False)
+    voice_stream_agc_target_dbfs: float = field(
+        default_factory=lambda: float(os.getenv("VOICE_STREAM_AGC_TARGET_DBFS") or "-20"))
+    voice_stream_agc_max_gain_db: float = field(
+        default_factory=lambda: float(os.getenv("VOICE_STREAM_AGC_MAX_GAIN_DB") or "20"))
     # تحميل Whisper وChatterbox مسبقاً عند إقلاع uvicorn (بعد جاهزية vLLM حتى
     # يحجز ذاكرته أول): 1 = دائماً، 0 = أبداً (تُحمَّل بأول مكالمة)، غير مضبوط =
     # على GPU بس. يطلّع أي فشل تحميل عند البدء بدل أول مكالمة.

@@ -35,7 +35,7 @@ from fastapi import WebSocket
 from pydantic import ValidationError
 
 from app.config import settings
-from app.features.voice_followup import call_tools, vad, voice_health
+from app.features.voice_followup import call_stats, call_tools, vad, voice_health
 from app.features.voice_followup.calls import agent_metadata, room_name
 from app.features.voice_followup.prompts import build_call_instructions, build_opening_instruction
 from app.features.voice_followup.schema import CallRequest
@@ -55,6 +55,8 @@ END_GRACE_SECONDS = 10.0
 CHUNK_MS = 40
 MAX_TOOL_ROUNDS = 4
 WATCHDOG_TICK_SECONDS = 0.5
+# كل كم ثانية تنكتب إحصاءات صوت الزبون باللوق وبـ /health/voice (last_call).
+STATS_LOG_SECONDS = 5.0
 
 OPENING_PREFIX = "(تعليمات داخلية من النظام، مو كلام الزبون) "
 
@@ -243,7 +245,12 @@ class StreamCall:
         self.tools = call_tools.CallToolContext(
             room=self.room, meta=self.meta, customer_transcript=self.customer_transcript,
         )
-        self.endpointer = vad.Endpointer(deps_.vad())
+        classifier = deps_.vad()
+        self.endpointer = vad.Endpointer(classifier)
+        self.agc = vad.make_agc()
+        self.stats = call_stats.CallAudioStats(
+            sample_rate, getattr(classifier, "kind", type(classifier).__name__), self.agc is not None)
+        self._odd_byte = b""
 
         self.accepted = False
         self.ending = False          # end_call انطلب: ما نقبل أدوار جديدة ولا مقاطعة
@@ -296,8 +303,10 @@ class StreamCall:
 
     async def run(self) -> None:
         await self._send({"type": "ready", "call_id": self.room})
+        logger.info("صوت المكالمة %s: vad=%s agc=%s sample_rate=%d", self.room, self.stats.vad_kind,
+                    self.stats.agc, self.sample_rate)
         tasks = [asyncio.create_task(self._receive_loop()), asyncio.create_task(self._stt_worker()),
-                 asyncio.create_task(self._watchdog())]
+                 asyncio.create_task(self._watchdog()), asyncio.create_task(self._stats_loop())]
         try:
             await self._stop.wait()
         finally:
@@ -307,8 +316,20 @@ class StreamCall:
             # النتيجة الاحتياطية تنكتب قبل أي await حتى لو انلغى الاتصال نفسه
             # (إيقاف الخادم مثلاً).
             fallback = self._write_fallback()
+            self._report_stats(active=False)
             await asyncio.gather(*pending, return_exceptions=True)
             await self._finalize(fallback)
+
+    def _report_stats(self, active: bool) -> None:
+        self.stats.on_vad(self.endpointer.windows, self.endpointer.speech_windows, self.endpointer.starts)
+        logger.info("إحصاءات صوت المكالمة %s%s: %s", self.room, "" if active else " (النهاية)",
+                    self.stats.log_line(active))
+        voice_health.record_last_call(self.stats.snapshot(active))
+
+    async def _stats_loop(self) -> None:
+        while True:
+            await asyncio.sleep(STATS_LOG_SECONDS)
+            self._report_stats(active=True)
 
     def _write_fallback(self):
         if self.tools.saved:
@@ -345,6 +366,7 @@ class StreamCall:
         except json.JSONDecodeError:
             msg = None
         if not isinstance(msg, dict):
+            self.stats.protocol_errors += 1
             await self._send({"type": "error", "code": "protocol", "message": "رسالة نصية مو كائن JSON"})
             return
         kind = msg.get("type")
@@ -359,21 +381,36 @@ class StreamCall:
             elif state == "ended":
                 self.stop("customer_hangup")
             elif state not in ("ringing", "accepted"):
+                self.stats.protocol_errors += 1
                 await self._send({"type": "error", "code": "protocol", "message": f"حالة غير معروفة: {state!r}"})
         else:
+            self.stats.protocol_errors += 1
             await self._send({"type": "error", "code": "protocol", "message": f"نوع رسالة غير معروف: {kind!r}"})
 
     async def _on_audio(self, data: bytes) -> None:
+        # الصوت يتعالج دائماً وقت ما الـ agent يحچي (للنسخ وللمقاطعة سوية)؛
+        # يتجاهل بس قبل accepted وبعد end_call.
         if not self.accepted or self.ending:
+            self.stats.on_ignored(len(data))
             return
+        # قطعة بعدد بايتات فردي: البايت الأخير يكمّل أول القطعة الجاية بدل ما
+        # ينرمى ويزيح كل العينات اللي بعده بايت.
+        data = self._odd_byte + data
+        cut = len(data) - len(data) % 2
+        data, self._odd_byte = data[:cut], data[cut:]
         samples = vad.pcm16_to_float(data)
         if self.sample_rate != vad.SAMPLE_RATE:
             samples = vad.resample(samples, self.sample_rate, vad.SAMPLE_RATE)
+        self.stats.on_audio(len(data), samples)
+        if self.agc is not None:
+            samples = self.agc.process(samples)
+            self.stats.on_gain(self.agc.gain)
         for kind, segment in self.endpointer.push(samples):
             self._last_activity = time.monotonic()
             if kind == "start":
                 await self._barge_in()
             else:
+                self.stats.on_segment(segment.size)
                 self._stt_queue.put_nowait(segment)
 
     async def _watchdog(self) -> None:
@@ -407,6 +444,7 @@ class StreamCall:
             self._response.cancel()
         if (generating and self._turn_audio_sent) or playing:
             self._playback_until = 0.0
+            self.stats.interrupts += 1
             await self._send({"type": "interrupt"})
 
     async def _stt_worker(self) -> None:
@@ -414,7 +452,9 @@ class StreamCall:
             segment = await self._stt_queue.get()
             try:
                 text = (await self.deps.stt(segment, vad.SAMPLE_RATE) or "").strip()
-            except Exception:
+                self.stats.on_stt_result(text)
+            except Exception as exc:
+                self.stats.on_stt_error(exc)
                 logger.exception("فشل نسخ مقطع بالمكالمة %s", self.room)
                 await self._send({"type": "error", "code": "stt", "message": "تعذّر نسخ كلام الزبون"})
                 text = ""

@@ -135,6 +135,19 @@ def warmup_state() -> dict:
     return {"enabled": warmup_enabled(), **state}
 
 
+_last_call: Optional[dict] = None
+
+
+def record_last_call(snapshot: dict) -> None:
+    """إحصاءات صوت آخر مكالمة WebSocket (أرقام بس) — تنعرض بـ last_call."""
+    global _last_call
+    _last_call = dict(snapshot)
+
+
+def last_call() -> Optional[dict]:
+    return dict(_last_call) if _last_call else None
+
+
 def voice_status() -> dict:
     """ملخّص GET /health/voice — يقرأ الحالة بس، ما يحمّل موديل."""
     from app.features.voice_followup import stt, tts
@@ -149,4 +162,5 @@ def voice_status() -> dict:
         "stt": stt_status,
         "gpu": gpu_memory(),
         "warmup": warm,
+        "last_call": last_call(),
     }
