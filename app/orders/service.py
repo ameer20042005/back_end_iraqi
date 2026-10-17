@@ -91,7 +91,7 @@ async def resolve_order(extraction: OrderExtraction, api_key: str) -> OrderConfi
     # مجموع نثق فيه (None لا 0.0 — الصفر يُقرأ "الطلب مجاني").
     total = _parse_quoted_price(extraction.quoted_price) if extraction.quoted_price else None
 
-    note = extraction.confirmation_note or "تم تثبيت طلبك، وياتك بأقرب وقت ان شاء الله."
+    note = extraction.confirmation_note or "تم تثبيت طلبك عيوني، راح يوصلك بأقرب وقت إن شاء الله."
 
     confirmation = OrderConfirmation(
         order_id=_new_order_id(),

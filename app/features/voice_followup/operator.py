@@ -2,10 +2,11 @@
 """مساعد الموظف النصي بعقد OpenAI: الموظف يكتب "اتصل بهؤلاء" بتطبيق سطح المكتب.
 
 جولة توليد واحدة بلا حالة (نفس نمط مسارات الأدوات بالخدمة): التطبيق يرسل
-التاريخ وأدوات البيانات اللي ينفّذها هو (بحث الطلبات/الزبائن)، والخادم يضيف
-أداة start_call. النموذج يرجع tool_calls، والتطبيق ينفّذها:
-  - أدوات البيانات ← نظامه، ويعيد النتيجة برسالة role="tool".
-  - start_call ← POST /voice_followup/calls بوسائطها كما هي، فتبدأ المكالمة.
+التاريخ واسم الشركة (`company_name`) وأدواته اللي ينفّذها هو (جهات الاتصال،
+الواتساب، الحملات، التذاكر...)، والخادم يضيف أداة start_call. النموذج يرجع
+tool_calls، والتطبيق ينفّذها:
+  - أدواته ← نظامه، ويعيد النتيجة برسالة role="tool".
+  - start_call ← يملأ company_name ثم POST /voice_followup/calls، فتبدأ المكالمة.
 
 نسخة خاصة بهذه الميزة من منطق التطبيع (مستقلة عن openai_compat عمداً): كل
 ميزة تتغيّر وحدها بلا ما تأثر على غيرها.
@@ -32,7 +33,8 @@ from app.core.engine import (
     _MODEL_NOT_LOADED_HINTS,
     _upstream_error_message,
 )
-from app.features.voice_followup.prompts import OPERATOR_SYSTEM_PROMPT, START_CALL_TOOL, START_CALL_TOOL_NAME
+from app.core.dialect import dialect_block, recent_user_text
+from app.features.voice_followup.prompts import START_CALL_TOOL, START_CALL_TOOL_NAME, build_operator_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +92,8 @@ class OperatorChatRequest(BaseModel):
     tool_choice: Any = "auto"
     stream: bool = False
     max_tokens: Optional[int] = Field(default=None, gt=0)
+    # اسم الشركة من إعدادات التطبيق — يدخل رسالة system للمساعد.
+    company_name: Optional[str] = Field(default=None, max_length=120)
 
 
 def _content_as_text(content: Any) -> str:
@@ -104,7 +108,7 @@ def _content_as_text(content: Any) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-def build_messages(messages: List[OperatorMessage]) -> List[Dict[str, Any]]:
+def build_messages(messages: List[OperatorMessage], company_name: Optional[str] = None) -> List[Dict[str, Any]]:
     """رسالة system واحدة (المساعد + أي system يرسلها التطبيق) ثم الباقي كما هو."""
     rest = list(messages)
     leading = []
@@ -112,7 +116,9 @@ def build_messages(messages: List[OperatorMessage]) -> List[Dict[str, Any]]:
         text = _content_as_text(rest.pop(0).content)
         if text:
             leading.append(text)
-    converted = [{"role": "system", "content": "\n\n".join([OPERATOR_SYSTEM_PROMPT, *leading])}]
+    prompt = build_operator_system_prompt(company_name)
+    system = "\n\n".join([prompt, *leading]) + dialect_block(recent_user_text(rest))
+    converted = [{"role": "system", "content": system}]
     for message in rest:
         native = message.model_dump(exclude_none=True)
         if "content" in native:
@@ -235,7 +241,7 @@ def _parse(data: Any, model: str, allowed: set) -> Optional[dict]:
 async def run_operator_turn(engine: Any, req: OperatorChatRequest) -> dict:
     tools = build_tools(req.tools)
     allowed = {t["function"]["name"] for t in tools}
-    messages = build_messages(req.messages)
+    messages = build_messages(req.messages, req.company_name)
     data = await _completion(engine, messages, tools, req.tool_choice, req.max_tokens)
     response = _parse(data, req.model, allowed)
     if response is None:

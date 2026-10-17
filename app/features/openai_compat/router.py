@@ -25,6 +25,7 @@ from app.core.engine import (
 from app.core.fallback import EXHAUSTED_FALLBACK
 from app.features.openai_compat.auth import require_openai_compat_api_key
 from app.features.openai_compat.completion import create_completion
+from app.core.dialect import dialect_block, recent_user_text
 from app.features.openai_compat.prompts import OPENAI_COMPAT_SYSTEM_PROMPT
 from app.core.model_status import get_model_status
 
@@ -123,7 +124,7 @@ def _native_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     converted: List[Dict[str, Any]] = [
         {
             "role": "system",
-            "content": OPENAI_COMPAT_SYSTEM_PROMPT,
+            "content": OPENAI_COMPAT_SYSTEM_PROMPT + dialect_block(recent_user_text(messages)),
         },
     ]
     for message in messages:

@@ -17,6 +17,7 @@ shared with the jbot route; the engine's default policy for other features is un
 import logging
 from typing import Any, Dict, List, Optional
 
+from app.core.dialect import dialect_block, recent_user_text
 from app.core.engine import llm_engine
 from app.core.fallback import EXHAUSTED_FALLBACK
 from app.features.openai_compat.completion import create_completion
@@ -44,8 +45,9 @@ def agent_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
         text = _content_as_text(rest.pop(0).content)
         if text:
             leading.append(text)
+    system = "\n\n".join([SALES_AGENT_SYSTEM_PROMPT, *leading]) + dialect_block(recent_user_text(rest))
     return [
-        {"role": "system", "content": "\n\n".join([SALES_AGENT_SYSTEM_PROMPT, *leading])},
+        {"role": "system", "content": system},
         *(message.model_dump(exclude_none=True) for message in rest),
     ]
 

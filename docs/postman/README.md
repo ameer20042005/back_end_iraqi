@@ -14,7 +14,7 @@
 1. افتح Postman.
 2. **File → Import** (أو زر **Import** أعلى يسار الشاشة).
 3. اختر ملف [`docs/postman/collection.json`](collection.json) من هذا المشروع.
-4. بعد الاستيراد تظهر مجموعة باسم **"Order/Sales/Voice API — order_intake, sales, voice_followup, postpone"** بالشريط الجانبي، فيها 5 مجلدات:
+4. بعد الاستيراد تظهر مجموعة باسم **"Order/Sales/Voice API — order_intake, sales, voice_followup"** بالشريط الجانبي، فيها 5 مجلدات:
    - `0) Health Check`
    - `1) Orders — Create Order`
    - `2) Sales — Chat`
@@ -63,11 +63,12 @@
 
 ## 4) اختبار المكالمات الحية (`voice_followup`، LiveKit)
 
-المجلد **`4) Live Calls — LiveKit`** فيه 3 طلبات:
+المجلد **`4) Live Calls — LiveKit`** فيه 4 طلبات:
 
-1. **Operator — اتصل بهؤلاء**: الموظف يكتب أمراً. المتوقع `tool_calls: search_orders` (أداة بيانات ينفّذها تطبيق سطح المكتب).
+1. **Operator — اتصل بهؤلاء**: الموظف يكتب أمراً مع `company_name`. المتوقع `tool_calls: search_contacts` (أداة ينفّذها تطبيق سطح المكتب).
 2. **Operator — بعد نتيجة البحث → start_call**: نفس المحادثة مع نتيجة الأداة. المتوقع `tool_calls: start_call`، والسكربت يحفظ وسائطها بمتغيّر `start_call_args`.
-3. **Start Call**: ينفّذ `start_call` (الجسم = وسائطها). يرجع `room` و`operator_token` و`dial_mode`. يحتاج `LIVEKIT_*` بالخادم، وإلا يرجع `503` واضحة.
+3. **Start Call**: الجسم = وسائط `start_call` + `company_name` (`goal`، `questions`، `context`، `contact`، `reference_id`). يرجع `room` و`operator_token` و`dial_mode`. يحتاج `LIVEKIT_*` بالخادم، وإلا يرجع `503` واضحة.
+4. **Call Outcome**: `GET /voice_followup/calls/{{livekit_room}}/outcome` — `pending` لحد ما تنحفظ النتيجة، بعدها `done`.
 
 المكالمة نفسها صوت حي عبر LiveKit، فما تنجرّب من Postman: ادخل الغرفة بـ `operator_token` من [LiveKit Meet](https://meet.livekit.io) (Custom: `livekit_url` + التوكن) واحچي مع الـ agent. التفاصيل: [voice-followup.md](../api/voice-followup.md).
 

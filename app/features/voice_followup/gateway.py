@@ -1,17 +1,11 @@
 # -*- coding: utf-8 -*-
-"""بوابة إرسال نتيجة المتابعة الصوتية لباك اند السستم — إدخال (Inbound) فقط،
-بلا أي تخزين محلي. نفس فلسفة app/orders/gateway.py (OrderSubmitter): استعلام
-لحظي حقيقي عبر HTTP، مصادَق بمفتاح API، والنتيجة تُعالَج وتُرجَع للمتصل بلا
-احتفاظ بها هنا.
+"""بوابة إرسال نتيجة المكالمة لباك اند السستم — إرسال إضافي (best effort).
 
-تستدعيه أدوات الـ agent بالمكالمة الحية (agent.py: save_reason وconfirm_postpone).
-الـ query المُرسَل يحمل بيانات الزبون كاملة من الطلب الأصلي (metadata المكالمة)
-+ ما قاله الزبون — مصدران موثوقان بجسم واحد.
+المصدر الأساسي للنتيجة هو مخزن الملفات (outcomes.py) اللي يسحبه تطبيق سطح
+المكتب. لو `system_backend_base_url` مضبوط، تُرسل نفس النتيجة كمان إلى
+`POST {system_backend_base_url}/calls/outcome` بمفتاح X-API-Key.
 
-TODO: مسار باك اند السستم الفعلي لاستقبال هذا الـ query غير معروف بعد —
-`/orders/{order_id}/feedback` أدناه أفضل تخمين موثَّق (يوازي POST /orders
-بـ app/orders/gateway.py). عدّل المسار فقط عند توفر التفاصيل الحقيقية؛ الواجهة
-(VoiceFollowupSubmitter) والمستدعي (agent.py) لا يتغيّرون.
+تستدعيه أداة save_outcome بالـ agent (agent.py).
 """
 
 from abc import ABC, abstractmethod
@@ -19,112 +13,33 @@ from abc import ABC, abstractmethod
 import httpx
 
 from app.config import settings
-from app.features.voice_followup.schema import VoiceFollowupOrderRequest
 from app.core.system_backend import request as backend_request
+from app.features.voice_followup.schema import CallOutcome
 
 
-class VoiceFollowupSubmitter(ABC):
+class CallOutcomeSubmitter(ABC):
     @abstractmethod
-    async def submit(
-        self,
-        order: VoiceFollowupOrderRequest,
-        reason_summary: str,
-        customer_transcript: str,
-        api_key: str,
-    ) -> bool:
-        """يرسل نتيجة المتابعة الصوتية (سبب الزبون) لباك اند السستم. يرجع
-        True لو نجح الإرسال."""
+    async def submit(self, outcome: CallOutcome, api_key: str) -> bool:
+        """يرسل نتيجة المكالمة. يرجع True لو أُرسلت، False لو الإرسال معطّل."""
 
 
-class HttpVoiceFollowupSubmitter(VoiceFollowupSubmitter):
+class HttpCallOutcomeSubmitter(CallOutcomeSubmitter):
     def __init__(self, base_url: str = "", timeout: float = 15.0):
-        self._base_url = base_url or settings.system_backend_base_url
+        self._base_url = base_url
         self._timeout = timeout
 
-    async def submit(
-        self,
-        order: VoiceFollowupOrderRequest,
-        reason_summary: str,
-        customer_transcript: str,
-        api_key: str,
-    ) -> bool:
-        # بيانات الزبون كاملة من الطلب الأصلي (المصدر الوحيد الموثوق —
-        # لا نستنتج اسماً أو رقماً أو موقعاً من رد الزبون الصوتي نفسه) +
-        # ملخّص السبب المستخرَج من رده. نفس مبدأ resolve_order بـ
-        # app/orders/service.py: لا نعيد حساب أو نخترع، فقط نمرر
-        # ما وصل فعلاً من مصادر موثوقة.
-        payload = {
-            "order_id": order.order_id,
-            "status": order.status,
-            "customer_name": order.customer_name,
-            "customer_phone": order.customer_phone,
-            "customer_city": order.customer_city,
-            "customer_district": order.customer_district,
-            "customer_address": order.customer_address,
-            "items": [i.model_dump() for i in order.items],
-            "reason_summary": reason_summary,
-            "customer_transcript": customer_transcript,
-        }
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
+    async def submit(self, outcome: CallOutcome, api_key: str) -> bool:
+        base_url = self._base_url or settings.system_backend_base_url
+        if not base_url:
+            return False
+        async with httpx.AsyncClient(base_url=base_url, timeout=self._timeout) as client:
             resp = await backend_request(
-                client, "POST", f"/orders/{order.order_id}/feedback",
-                json=payload,
+                client, "POST", "/calls/outcome",
+                json=outcome.model_dump(),
                 headers={"X-API-Key": api_key},
             )
             resp.raise_for_status()
             return True
 
 
-voice_followup_submitter: VoiceFollowupSubmitter = HttpVoiceFollowupSubmitter()
-
-
-# ---------------------------------------------------------------------------
-# بوابة مكالمة "صباح" (تأجيل التسليم) — انظر prompts.py::SABAH_SYSTEM_PROMPT
-# ---------------------------------------------------------------------------
-#
-# تُستدعى فقط بعد ما الزبون يأكّد اختياره فعلياً (agent.py::confirm_postpone) — لا نرسل
-# شي لباك اند السستم قبل تأكيد صريح، حتى لا يُسجَّل تأجيل ما وافق عليه
-# الزبون نهائياً.
-#
-# TODO: مسار باك اند السستم الفعلي لاستقبال هذا التحديث غير معروف بعد —
-# `/orders/{order_id}/postpone` أدناه أفضل تخمين موثَّق (يوازي
-# `/orders/{order_id}/feedback` أعلاه). عدّل المسار فقط عند توفر التفاصيل
-# الحقيقية؛ الواجهة (VoicePostponeSubmitter) والمستدعي (agent.py) لا يتغيّرون.
-
-
-class VoicePostponeSubmitter(ABC):
-    @abstractmethod
-    async def submit(
-        self, order: VoiceFollowupOrderRequest, new_date: str, chosen_option: str, api_key: str,
-    ) -> bool:
-        """يرسل قرار التأجيل المؤكَّد لباك اند السستم. `new_date` تاريخ ISO
-        محسوب حتمياً (postpone.py::resolve_postpone_date) — لا نرسل الكلمة
-        العربية وحدها حتى يبقى باك اند السستم يستقبل تاريخاً صريحاً قابلاً
-        للحفظ مباشرة بجدول الطلب. يرجع True لو نجح الإرسال."""
-
-
-class HttpVoicePostponeSubmitter(VoicePostponeSubmitter):
-    def __init__(self, base_url: str = "", timeout: float = 15.0):
-        self._base_url = base_url or settings.system_backend_base_url
-        self._timeout = timeout
-
-    async def submit(
-        self, order: VoiceFollowupOrderRequest, new_date: str, chosen_option: str, api_key: str,
-    ) -> bool:
-        payload = {
-            "order_id": order.order_id,
-            "new_scheduled_date": new_date,
-            "postpone_choice": chosen_option,  # "today" | "plus_N" | "weekday_D" — قيمة داخلية، مفيدة للتقارير
-            "reason": "تأجيل بطلب الزبون عبر مكالمة صباح",
-        }
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-            resp = await backend_request(
-                client, "POST", f"/orders/{order.order_id}/postpone",
-                json=payload,
-                headers={"X-API-Key": api_key},
-            )
-            resp.raise_for_status()
-            return True
-
-
-voice_postpone_submitter: VoicePostponeSubmitter = HttpVoicePostponeSubmitter()
+call_outcome_submitter: CallOutcomeSubmitter = HttpCallOutcomeSubmitter()

@@ -34,6 +34,10 @@ How to read a case:
 - When the list has a combined name for the area and its neighborhood ("الفلوجة - حي الشهداء"), choose
   that combined name over the area alone if the text names that neighborhood.
 - Numbers are part of names: شارع 20 is never شارع 40.
+- Iraqi dialect location words are landmarks/relations, never district names: يم (next to), كبال (opposite),
+  صوب (towards/side of), قرب / گرب (near), عكد (alley), محلة (quarter), فلكة (roundabout), سيطرة (checkpoint),
+  گراج / كراج (bus station), جوه / فوك (below / above). "الكرادة يم ساحة الحرية" → district الكرادة,
+  addressDetails "يم ساحة الحرية". Read گ as ك and چ as ج.
 
 What to return for each case:
 - correctDistrict: copied exactly, character for character, from allowedDistricts. Never invent or edit a

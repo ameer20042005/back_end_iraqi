@@ -193,6 +193,13 @@ class Settings:
     # SIP trunk الصادر (WhatsApp Business Calling/Twilio عبر LiveKit SIP).
     # فارغ = المكالمة تبقى غرفة WebRTC يدخلها تطبيق سطح المكتب بالتوكن.
     livekit_sip_trunk_id: str = field(default_factory=lambda: os.getenv("LIVEKIT_SIP_TRUNK_ID", ""))
+    # نتائج المكالمات (app/features/voice_followup/outcomes.py): ملف JSON لكل غرفة.
+    # الـ agent worker عملية منفصلة عن uvicorn، فالملفات هي المخزن المشترك بينهما،
+    # وتطبيق سطح المكتب يسحبها بـ GET /voice_followup/calls/{room}/outcome.
+    call_outcomes_dir: Path = field(default_factory=lambda: Path(os.getenv(
+        "CALL_OUTCOMES_DIR", str(Path(__file__).resolve().parent.parent / "data" / "call_outcomes"))))
+    call_outcomes_ttl_hours: float = field(default_factory=lambda: float(os.getenv("CALL_OUTCOMES_TTL_HOURS", "24")))
+    call_outcomes_max_files: int = field(default_factory=lambda: max(1, int(os.getenv("CALL_OUTCOMES_MAX_FILES", "5000"))))
 
     def stt_model(self) -> SpeechToTextModel:
         """اختيار STT المركزي؛ ما تبقى شروط موديلات موزعة بالراوترات."""

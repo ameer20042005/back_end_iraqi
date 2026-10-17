@@ -54,7 +54,10 @@ def test_sales_runs_one_generation_with_client_messages(monkeypatch):
     ]), "key"))
 
     assert len(engine.calls) == 1
-    assert engine.calls[0][0][0] == {"role": "system", "content": SALES_OPENAI_SYSTEM_PROMPT}
+    system = engine.calls[0][0][0]
+    assert system["role"] == "system"
+    assert system["content"].startswith(SALES_OPENAI_SYSTEM_PROMPT)
+    assert "فهم اللهجة العراقية" in system["content"]
     assert engine.calls[0][0][-1] == {"role": "user", "content": "هلا"}
     assert response["choices"][0]["message"]["content"] == "هلا بيك"
 

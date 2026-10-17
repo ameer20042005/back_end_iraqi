@@ -17,6 +17,7 @@ import os
 from typing import Dict, List
 
 from app.core.context_blocks import locations_context_block, words_context_block
+from app.core.dialect import IRAQI_DIALECT_GUIDE
 from app.rag import all_state_names
 
 Message = Dict[str, str]
@@ -41,6 +42,8 @@ def build_order_intake_prompt(
     system_content = (
         _SYSTEM_BASE
         + locations_context_block(rag_locations, all_state_names())
+        + "\n\n" + IRAQI_DIALECT_GUIDE
+        + "\nconfirmation_note: جملة عراقية قصيرة ودودة مثل «تم تثبيت طلبك عيوني، راح يوصلك بأقرب وقت إن شاء الله»."
         + words_context_block(rag_words)
     )
     return [

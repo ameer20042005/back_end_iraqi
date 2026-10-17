@@ -15,3 +15,6 @@ training/data/batches/
 training/data/errors.jsonl
 training/models/
 .pytest_cache/
+
+# Voice call outcomes (polled by the desktop app)
+data/call_outcomes/

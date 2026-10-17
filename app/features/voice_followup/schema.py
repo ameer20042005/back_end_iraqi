@@ -1,51 +1,54 @@
 # -*- coding: utf-8 -*-
-"""صيغ المكالمات الصوتية: بيانات الطلب كما يرسلها باك اند البيانات (انظر
-docs/reference/jenni-stores-schema.md — الحقول تطابق sells/sell_items منطقياً)،
-وطلب بدء مكالمة ونتيجته.
+"""صيغ المكالمات الصوتية العامة: طلب بدء مكالمة، ونتيجتها، وما يصل للـ agent.
 
-بيانات الطلب تمر للـ agent كـ metadata للغرفة، ولا نرسل لباك اند البيانات إلا
-ما وصل فعلياً من مصدر موثوق (هذا الطلب) أو ما قاله الزبون — لا نخترع شي."""
+المكالمة بلا سيناريو ثابت: هدفها (`goal`) وأسئلتها يكتبها موظف تطبيق سطح
+المكتب، واسم الشركة من إعدادات التطبيق يُرسل بكل طلب.
 
-from typing import List, Literal, Optional
+الخصوصية: اسم الزبون ما يدخل metadata الـ agent أصلاً (AgentCallMetadata)،
+فما يوصل لسياق نموذج المكالمة."""
 
-from pydantic import BaseModel, Field
+from typing import Annotated, List, Literal, Optional
 
-
-class VoiceFollowupItem(BaseModel):
-    product_name: str
-    quantity: int = 1
+from pydantic import BaseModel, Field, StringConstraints
 
 
-class VoiceFollowupOrderRequest(BaseModel):
-    """تفاصيل الطلب. `status` محرّك نوع السؤال بمكالمة المتابعة، بلا قائمة
-    ثابتة — قيمتها من نظام البيانات الحقيقي (sell_status أو مرادفاته العربية)."""
-
-    order_id: str
-    status: str  # مثلاً: "ملغي"، "مرتجع"، "لم يتم التسليم"، "قيد التوصيل"
-    customer_name: Optional[str] = None
-    customer_phone: Optional[str] = None
-    customer_city: Optional[str] = None
-    customer_district: Optional[str] = None
-    customer_address: Optional[str] = None
-    items: List[VoiceFollowupItem] = Field(default_factory=list)
-    reason_hint: Optional[str] = None  # سبب أوّلي إن كان معروفاً بالنظام
-    notes: Optional[str] = None
-    # موعد التسليم المجدوَل حالياً (ISO "YYYY-MM-DD") — تذكّر بيه صباح الزبون
-    # قبل عرض التأجيل.
-    scheduled_date: Optional[str] = None
+def _text(min_length: int = 0, max_length: Optional[int] = None):
+    return Annotated[str, StringConstraints(strip_whitespace=True, min_length=min_length, max_length=max_length)]
 
 
-# followup: JENI تسأل عن سبب حالة الطلب (ملغي/مرتجع/لم يتم التسليم).
-# postpone: صباح تعرض تأجيل تسليم شحنة لسه ما انسلّمت.
-CallType = Literal["followup", "postpone"]
+class Contact(BaseModel):
+    # الاسم للتطبيق فقط — ما يدخل سياق نموذج المكالمة أبداً.
+    name: Optional[_text(max_length=120)] = None
+    # لازم لوضع sip؛ بلاه المكالمة bridge (التطبيق يربط صوت الواتساب).
+    phone: Optional[_text(max_length=32)] = None
 
 
 class CallRequest(BaseModel):
     """جسم POST /voice_followup/calls — وهو نفسه وسائط أداة start_call اللي
-    يرجعها مساعد الموظف النصي، فتطبيق سطح المكتب يمرّرها كما هي."""
+    يرجعها مساعد الموظف (التطبيق يملأ company_name من إعداداته)."""
 
-    call_type: CallType
-    order: VoiceFollowupOrderRequest
+    company_name: _text(1, 120)
+    agent_name: Optional[_text(max_length=60)] = None
+    goal: _text(1, 1000)
+    questions: List[_text(1, 300)] = Field(default_factory=list, max_length=10)
+    context: Optional[_text(max_length=2000)] = None
+    contact: Contact = Field(default_factory=Contact)
+    reference_id: Optional[_text(max_length=120)] = None
+    language: _text(2, 8) = "ar"
+
+
+class AgentCallMetadata(BaseModel):
+    """ما يصل للـ agent عبر metadata الـ dispatch — CallRequest بلا اسم الزبون."""
+
+    company_name: str
+    agent_name: Optional[str] = None
+    goal: str
+    questions: List[str] = Field(default_factory=list)
+    context: Optional[str] = None
+    reference_id: Optional[str] = None
+    language: str = "ar"
+    # رقم الهاتف للاتصال عبر SIP فقط؛ ما يدخل تعليمات النموذج.
+    phone: Optional[str] = None
 
 
 class CallResponse(BaseModel):
@@ -57,3 +60,21 @@ class CallResponse(BaseModel):
     # "sip": الـ agent يتصل بالزبون بنفسه عبر SIP trunk.
     # "bridge": التطبيق يدخل الغرفة بـ operator_token ويربط صوت مكالمة الواتساب.
     dial_mode: Literal["sip", "bridge"]
+
+
+class OutcomeAnswer(BaseModel):
+    question: str
+    answer: str
+
+
+class CallOutcome(BaseModel):
+    """جواب GET /voice_followup/calls/{room}/outcome."""
+
+    room: str
+    status: Literal["pending", "done"]
+    reference_id: Optional[str] = None
+    summary: Optional[str] = None
+    answers: List[OutcomeAnswer] = Field(default_factory=list)
+    follow_up_needed: bool = False
+    customer_transcript: Optional[str] = None
+    ended_at: Optional[str] = None

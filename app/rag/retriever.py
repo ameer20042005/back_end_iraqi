@@ -20,6 +20,7 @@ import os
 from collections import Counter, defaultdict
 
 from app.core.text_norm import normalize
+from app.rag.commerce_terms import commerce_documents
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCUMENTS_PATH = os.path.join(BASE_DIR, "documents.jsonl")
@@ -101,6 +102,8 @@ class Retriever:
                 line = line.strip()
                 if line:
                     self.docs.append(json.loads(line))
+        # ملحق مفردات البيع والتوصيل والمكالمات (app/rag/commerce_terms.py)
+        self.docs.extend(commerce_documents())
 
         for idx, doc in enumerate(self.docs):
             tokens = tokenize(doc["text"], keep_stopwords=True)
