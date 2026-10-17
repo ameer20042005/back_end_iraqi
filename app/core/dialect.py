@@ -98,6 +98,26 @@ def dialect_block(user_text: str = "") -> str:
     return "\n\n" + IRAQI_DIALECT_GUIDE + dialect_reference(user_text)
 
 
+MSA_REPLY_RULE = """# لغة الرد
+- افهم كلام الزبون بأي لهجة (العراقية خاصة) حسب الدليل أعلاه، لكن ردّ دائماً بعربية فصحى مبسّطة وواضحة يفهمها الجميع، بلا كلمات عامية.
+- جمل قصيرة مألوفة، مثل: "أهلاً بك"، "هل وصلك الطلب؟"، "شكراً لوقتك"."""
+
+
+def understanding_block(user_text: str = "") -> str:
+    """فهم اللهجة فقط (بلا أسلوب الرد العراقي) + قاعدة الرد بالفصحى المبسطة."""
+    return "\n\n" + IRAQI_UNDERSTANDING_EXAMPLES + dialect_reference(user_text) + "\n\n" + MSA_REPLY_RULE
+
+
+def call_understanding_block() -> str:
+    """للمكالمات الصوتية: فهم اللهجة ومفرداتها، والرد بالفصحى المبسطة."""
+    lines = [f"- {word}: {meaning}" for word, meaning, category in COMMERCE_TERMS if category in CALL_CATEGORIES]
+    return (
+        "\n\n# فهم كلام الزبون\n" + IRAQI_UNDERSTANDING_EXAMPLES
+        + "\n\nمفردات قد تسمعها بالمكالمة ومعناها:\n" + "\n".join(lines)
+        + "\n\n" + MSA_REPLY_RULE
+    )
+
+
 def call_dialect_block() -> str:
     """للمكالمات الصوتية: الدليل + قاموس ثابت لمفردات التأكيد والمواعيد والشكاوى."""
     lines = [f"- {word}: {meaning}" for word, meaning, category in COMMERCE_TERMS if category in CALL_CATEGORIES]

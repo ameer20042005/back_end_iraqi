@@ -37,7 +37,7 @@ from app.core.engine import (
     _MODEL_NOT_LOADED_HINTS,
     _upstream_error_message,
 )
-from app.core.dialect import dialect_block, recent_user_text
+from app.core.dialect import recent_user_text, understanding_block
 from app.features.voice_followup import operator_tools
 from app.features.voice_followup.prompts import START_CALL_TOOL, START_CALL_TOOL_NAME, build_operator_system_prompt
 
@@ -124,7 +124,7 @@ def build_messages(messages: List[OperatorMessage], company_name: Optional[str] 
         if text:
             leading.append(text)
     prompt = build_operator_system_prompt(company_name)
-    system = "\n\n".join([prompt, *leading]) + dialect_block(recent_user_text(rest))
+    system = "\n\n".join([prompt, *leading]) + understanding_block(recent_user_text(rest))
     converted = [{"role": "system", "content": system}]
     for message in rest:
         native = message.model_dump(exclude_none=True)

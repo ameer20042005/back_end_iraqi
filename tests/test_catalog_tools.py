@@ -204,7 +204,7 @@ def test_data_tools_hidden_without_catalog(monkeypatch):
     assert operator_tools.active_tools() == []
     assert "غير موجودة" in run(call_tools.run_tool(ctx(), "get_my_orders", {}))
     meta = AgentCallMetadata(company_name="X", goal="g")
-    assert "ما عندك وصول لبيانات" in build_call_instructions(meta, call_tools.data_tools_enabled())
+    assert "لا تملك في هذه المكالمة وصولاً" in build_call_instructions(meta, call_tools.data_tools_enabled())
 
 
 def test_data_tools_offered_with_catalog(backend):
