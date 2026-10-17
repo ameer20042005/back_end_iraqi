@@ -47,8 +47,20 @@ def _intro(meta: AgentCallMetadata) -> str:
     return f"وياك خدمة العملاء من {meta.company_name}"
 
 
-def build_call_instructions(meta: AgentCallMetadata) -> str:
-    """تعليمات نموذج المكالمة: القواعد العامة + هدف الموظف ومعطياته."""
+CALL_DATA_TOOLS_RULES = """# أدوات البيانات
+- إذا سأل الزبون عن طلباته أو حالة طلب: get_my_orders (طلباته هو، رقمه معروف تلقائياً، لا تطلبه منه) أو get_order_status برقم الطلب اللي يذكره.
+- إذا سأل عن منتج أو سعر أو توفّر: search_products بكلامه.
+- انطق بس اللي رجع بنتيجة الأداة، باختصار (رقم الطلب وحالته، أو اسم المنتج وسعره وتوفّره). إذا ما لگيت شي، گول ما لگيته واعرض إن الفريق يتابع.
+- الأداة ترجع خطأ: لا تخمّن، گول إن الفريق راح يتابع وياه."""
+
+CALL_NO_DATA_RULE = """# البيانات
+- ما عندك وصول لبيانات الطلبات أو المنتجات بهذه المكالمة. إذا سأل عن طلب أو سعر أو توفّر، گول إنك ما تگدر تتأكد هسه وإن الفريق راح يتابع وياه."""
+
+
+def build_call_instructions(meta: AgentCallMetadata, data_tools: bool = False) -> str:
+    """تعليمات نموذج المكالمة: القواعد العامة + هدف الموظف ومعطياته.
+
+    data_tools: أدوات Catalog مفعّلة (call_tools.data_tools_enabled())."""
     who = f'اسمك "{meta.agent_name}"' if meta.agent_name else "ما عندك اسم شخصي؛ عرّف نفسك كخدمة العملاء"
     parts = [
         f"أنت موظف مبيعات وخدمة عملاء مهذّب وودود بشركة {meta.company_name}، تتصل بزبون من زبائن الشركة. {who}.",
@@ -61,6 +73,7 @@ def build_call_instructions(meta: AgentCallMetadata) -> str:
         parts.append("# الأسئلة المطلوبة بالترتيب\n" + "\n".join(f"{i}. {q}" for i, q in enumerate(meta.questions, 1)))
     if meta.context:
         parts.append("# معطيات المكالمة (المعلومات الوحيدة المسموح تستشهد بيها)\n" + meta.context)
+    parts.append(CALL_DATA_TOOLS_RULES if data_tools else CALL_NO_DATA_RULE)
     if meta.language.lower().startswith("en"):
         parts.append("# اللغة\nابدأ المكالمة بإنكليزية بسيطة وواضحة، وكمّل بيها إلا إذا رد الزبون بالعربي.")
     return "\n\n".join(parts)

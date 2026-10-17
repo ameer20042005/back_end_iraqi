@@ -8,18 +8,20 @@
   (agent.py) + توكن لتطبيق سطح المكتب يراقب أو يربط بيه صوت المكالمة.
 - GET /voice_followup/calls/{room}/outcome: التطبيق يسحب نتيجة المكالمة
   (pending لحد ما الـ agent يحفظها).
+- WS /voice_followup/stream: الوكيل المحلي بلا LiveKit — التطبيق يبث صوت مكالمة
+  الواتساب والحوار يعيش بهذي العملية (stream.py).
 
-الحوار الصوتي نفسه ما يمر بهذي العملية: يعيش بالـ agent worker.
+بمسار LiveKit الحوار الصوتي ما يمر بهذي العملية: يعيش بالـ agent worker.
 """
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from fastapi.responses import StreamingResponse
 
 from app.auth import require_voice_followup_api_key
 from app.core.engine import llm_engine
-from app.features.voice_followup import calls, outcomes
+from app.features.voice_followup import calls, outcomes, stream
 from app.features.voice_followup.operator import OperatorChatRequest, completion_events, run_operator_turn
 from app.features.voice_followup.schema import CallOutcome, CallRequest, CallResponse
 
@@ -69,3 +71,9 @@ async def operator_chat(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
     return response
+
+
+@router.websocket("/stream")
+async def call_stream(websocket: WebSocket) -> None:
+    """مكالمة صوتية كاملة عبر WebSocket (المفتاح بهيدر X-API-Key أو ?api_key=)."""
+    await stream.serve(websocket)

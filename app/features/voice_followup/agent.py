@@ -13,6 +13,7 @@
    أول مشارك يدخل الغرفة (تطبيق سطح المكتب يربط صوت مكالمة الواتساب).
 3. الحوار: Whisper ← النموذج (vLLM) ← Chatterbox. النتيجة تمر بأداة save_outcome:
    تنحفظ بملف (outcomes.py) يسحبه التطبيق، وتُرسل لباك اند السستم إن كان مضبوطاً.
+   منطق الحفظ مشترك مع الوكيل المحلي عبر WebSocket (call_tools.py).
 
 **التزامن:** المكالمات تشتغل كخيوط بنفس العملية (JobExecutorType.THREAD)،
 لحد `VOICE_MAX_CALLS` (افتراضياً 10) مكالمة متزامنة لكل worker:
@@ -42,19 +43,19 @@ from livekit.agents.beta.tools import EndCallTool
 from livekit.plugins import openai, silero
 
 from app.config import settings
-from app.features.voice_followup import outcomes
+from app.features.voice_followup import call_tools, outcomes  # noqa: F401  (outcomes: للاختبارات)
 from app.features.voice_followup import stt as whisper
 from app.features.voice_followup import tts as chatterbox
 from app.features.voice_followup.gateway import call_outcome_submitter
 from app.features.voice_followup.livekit_io import ChatterboxTTS, WhisperSTT
 from app.features.voice_followup.prompts import build_call_instructions, build_opening_instruction
-from app.features.voice_followup.schema import AgentCallMetadata, CallOutcome, OutcomeAnswer
+from app.features.voice_followup.schema import AgentCallMetadata, OutcomeAnswer
 
 logger = logging.getLogger(__name__)
 
 CUSTOMER_IDENTITY = "customer"
-NO_ANSWER_SUMMARY = "الزبون لم يرد على المكالمة"
-NO_OUTCOME_SUMMARY = "انتهت المكالمة بدون نتيجة مسجّلة"
+NO_ANSWER_SUMMARY = call_tools.NO_ANSWER_SUMMARY
+NO_OUTCOME_SUMMARY = call_tools.NO_OUTCOME_SUMMARY
 
 
 def _customer_transcript(session: Optional[AgentSession]) -> str:
@@ -75,11 +76,29 @@ def _end_call_tool() -> EndCallTool:
     return EndCallTool(delete_room=True, end_instructions=None, ignore_on_enter=True)
 
 
+def _registry_tools(meta: AgentCallMetadata, room: str) -> list:
+    """أدوات البيانات من سجل call_tools (نفس تنفيذ مسار WebSocket) كأدوات LiveKit
+    خام. save_outcome/end_call لهن تنفيذ LiveKit الخاص تحت."""
+    ctx = call_tools.CallToolContext(room=room, meta=meta)
+    tools = []
+    for tool in call_tools.active_tools(exclude={call_tools.SAVE_OUTCOME, call_tools.END_CALL}):
+        async def handler(raw_arguments: dict, _name: str = tool.name) -> str:
+            return await call_tools.run_tool(ctx, _name, raw_arguments)
+
+        tools.append(function_tool(handler, raw_schema={
+            "name": tool.name, "description": tool.description, "parameters": tool.parameters,
+        }))
+    return tools
+
+
 class CallAgent(Agent):
     """موظف مبيعات/خدمة عملاء عام: يحقق هدف الموظف ويحفظ النتيجة مرة وحدة."""
 
     def __init__(self, meta: AgentCallMetadata, room: str) -> None:
-        super().__init__(instructions=build_call_instructions(meta), tools=[_end_call_tool()])
+        super().__init__(
+            instructions=build_call_instructions(meta, call_tools.data_tools_enabled()),
+            tools=[_end_call_tool(), *_registry_tools(meta, room)],
+        )
         self._meta = meta
         self._room = room
         self.saved = False
@@ -104,31 +123,14 @@ class CallAgent(Agent):
         """
         if self.saved:
             return "النتيجة محفوظة مسبقاً. اشكر الزبون وأنهِ المكالمة."
-        summary = (summary or "").strip()
-        if not summary:
-            raise ToolError("الملخّص فارغ. اكتب جملة من كلام الزبون.")
-        parsed = [OutcomeAnswer.model_validate(a) for a in (answers or [])]
-        outcome = CallOutcome(
-            room=self._room,
-            status="done",
-            reference_id=self._meta.reference_id,
-            summary=summary,
-            answers=[a for a in parsed if a.question.strip() and a.answer.strip()],
-            follow_up_needed=bool(follow_up_needed),
-            customer_transcript=_customer_transcript(context.session),
-            ended_at=outcomes.now_iso(),
-        )
         try:
-            outcomes.save_outcome(outcome)
-        except Exception:
-            logger.exception("فشل حفظ نتيجة المكالمة %s", self._room)
-            raise ToolError("ما انحفظت النتيجة بسبب خلل بالنظام. اعتذر وگول إن الفريق راح يتابع، ثم أنهِ المكالمة.")
+            await call_tools.store_outcome(
+                self._meta, self._room, summary, answers, follow_up_needed,
+                _customer_transcript(context.session), submitter=call_outcome_submitter,
+            )
+        except call_tools.CallToolError as exc:
+            raise ToolError(str(exc)) from exc
         self.saved = True
-        try:
-            await call_outcome_submitter.submit(outcome, settings.voice_followup_api_key)
-        except Exception:
-            # النتيجة محفوظة محلياً والتطبيق يسحبها؛ الإرسال لباك اند السستم إضافي.
-            logger.warning("تعذّر إرسال نتيجة المكالمة %s لباك اند السستم", self._room, exc_info=True)
         return "انحفظت النتيجة. اشكر الزبون بجملة قصيرة وأنهِ المكالمة."
 
 
@@ -151,18 +153,8 @@ def build_agent(meta: AgentCallMetadata, room: str) -> CallAgent:
 
 def save_fallback_outcome(meta: AgentCallMetadata, room: str, summary: str,
                           session: Optional[AgentSession] = None) -> None:
-    """مكالمة انتهت بلا save_outcome (ما رد، رقم غلط، انقطع الخط): نتيجة done
-    حتى ما يبقى التطبيق ينتظر pending للأبد. ما تكتب فوق نتيجة محفوظة."""
-    try:
-        if outcomes.load_outcome(room) is not None:
-            return
-        outcomes.save_outcome(CallOutcome(
-            room=room, status="done", reference_id=meta.reference_id, summary=summary,
-            follow_up_needed=True, customer_transcript=_customer_transcript(session),
-            ended_at=outcomes.now_iso(),
-        ))
-    except Exception:
-        logger.exception("فشل حفظ نتيجة احتياطية للغرفة %s", room)
+    """مكالمة انتهت بلا save_outcome: نفس منطق call_tools.save_fallback_outcome."""
+    call_tools.save_fallback_outcome(meta, room, summary, _customer_transcript(session))
 
 
 def prewarm(proc: JobProcess) -> None:

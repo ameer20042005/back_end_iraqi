@@ -26,6 +26,7 @@ from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
 from app.features.voice_followup.router import router as voice_followup_router
 from app.core.system_backend import close_client as close_system_backend_client
+from app.core.catalog import close_client as close_catalog_client
 
 try:
     import torch
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
         warmup_task.cancel()
         await llm_engine.shutdown()
         await close_system_backend_client()
+        await close_catalog_client()
 
 
 app = FastAPI(

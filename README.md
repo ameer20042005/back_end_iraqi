@@ -15,7 +15,7 @@ ffmpeg/libsndfile1، Whisper وChatterbox TTS).
 | وكيل مبيعات | `app/features/sales/` | `/sales/*` | [sales.md](docs/api/sales.md) |
 | واجهة OpenAI | `app/features/openai_compat/` | `/v1/chat/completions` | [openai-compat.md](docs/api/openai-compat.md) |
 | إنشاء طلب متعدد الوسائط | `app/features/order_intake/` | `/orders/create` | [orders.md](docs/api/orders.md) |
-| مكالمات صوتية حية (LiveKit) + مساعد الموظف | `app/features/voice_followup/` | `/voice_followup/*` | [voice-followup.md](docs/api/voice-followup.md) |
+| مكالمات صوتية حية (LiveKit أو WebSocket محلي) + مساعد الموظف | `app/features/voice_followup/` | `/voice_followup/*` | [voice-followup.md](docs/api/voice-followup.md) |
 | تصحيح مناطق شركات التوصيل | `app/features/district_correction/` | `/v1/district-correction*` | [district-correction.md](docs/api/district-correction.md) |
 
 المصادقة، الرابط الأساسي، نقاط الفحص (`/health`، `/gpu`، `/metrics`)، وملخص كل
@@ -69,6 +69,14 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 | المتغيّر | الافتراضي | الوصف |
 |---|---|---|
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `120` | مهلة طلب توليد واحد؛ تجاوزها يرجع `AI_REQUEST_TIMEOUT` (504) |
+| `CATALOG_BASE_URL` | فارغ (معطّل) | باك اند البيانات Catalog لأدوات الطلبات/المنتجات بالمكالمات ومساعد الموظف |
+| `CATALOG_ACCESS_TOKEN` / `CATALOG_TENANT_ID` | فارغ | `Authorization: Bearer` و`X-Tenant-Id` لـ Catalog (التوكن سر — بيئة فقط) |
+| `CATALOG_TIMEOUT_SECONDS` / `CATALOG_STORAGE_ID` | `15` / فارغ | مهلة Catalog، ومخزن المتجر لفلترة السعر والتوفّر |
+| `CATALOG_PATH_*` | مسارات `ai_agent` | كل مسار Catalog قابل للتغيير (`CATALOG_PATH_CALL_OUTCOME` فارغ = ما ترسل النتيجة) |
+| `SYSTEM_BACKEND_CALL_OUTCOME_PATH` | `/calls/outcome` | فارغ = ما ترسل نتيجة المكالمة لباك اند السستم |
+| `VOICE_STREAM_*` | انظر التوثيق | الوكيل المحلي عبر WebSocket (`/voice_followup/stream`): السقف، VAD، المهلات |
+
+الجدول الكامل لمتغيرات Catalog والوكيل المحلي: [voice-followup.md](docs/api/voice-followup.md).
 
 ## الرفع على RunPod
 

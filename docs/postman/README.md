@@ -72,6 +72,16 @@
 
 المكالمة نفسها صوت حي عبر LiveKit، فما تنجرّب من Postman: ادخل الغرفة بـ `operator_token` من [LiveKit Meet](https://meet.livekit.io) (Custom: `livekit_url` + التوكن) واحچي مع الـ agent. التفاصيل: [voice-followup.md](../api/voice-followup.md).
 
+### الوكيل المحلي عبر WebSocket (`WS /voice_followup/stream`)
+
+Postman يدعم طلبات WebSocket (**New → WebSocket**)، فتگدر تجرّب البروتوكول النصي بلا LiveKit:
+
+1. الرابط: `{{baseUrl}}` بعد تبديل `https://` بـ `wss://` (أو `http://` بـ `ws://`) + `/voice_followup/stream`، وبتبويب **Headers** أضف `X-API-Key` بمفتاح الصوت (أو بالرابط `?api_key=...`). اضغط **Connect**.
+2. أرسل كأول رسالة (Text): `{"type":"start","call":{"company_name":"متجر النور","goal":"اسأل الزبون عن رأيه بالخدمة","contact":{"phone":"07701234567"},"reference_id":"ORD-1042"},"sample_rate":16000}` ← يرجع `ready` بـ `call_id`.
+3. `{"type":"ping"}` ← `pong`. `{"type":"call_state","state":"ended"}` ← حدث `outcome` احتياطي ("الزبون لم يرد على المكالمة") ثم إغلاق، والنتيجة تبين بطلب **Call Outcome** بعد ما تحط `call_id` بمتغيّر `livekit_room`.
+
+الصوت نفسه (PCM ثنائي) ما ينجرّب عملياً من Postman؛ العقد الكامل بـ [voice-followup.md](../api/voice-followup.md#الوكيل-المحلي-عبر-websocket).
+
 ---
 
 ## 6) جدول أخطاء سريع (لكل الطلبات)

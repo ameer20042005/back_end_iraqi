@@ -109,6 +109,44 @@ class Settings:
     # ولا يُحفظ. رابط ومسارات باك اند السستم الفعلية غير معروفة بعد؛ عدّل
     # القيمة هنا عند توفرها.
     system_backend_base_url: str = "http://127.0.0.1:8081/internal"
+    # مسار إرسال نتيجة المكالمة لباك اند السستم (voice_followup/gateway.py).
+    # فارغ = ما ترسل؛ النتيجة تبقى بالمخزن المحلي دائماً.
+    system_backend_call_outcome_path: str = field(
+        default_factory=lambda: os.getenv("SYSTEM_BACKEND_CALL_OUTCOME_PATH", "/calls/outcome"))
+
+    # باك اند البيانات "Catalog" (متاجر جيني) — app/core/catalog.py. منه
+    # أدوات البيانات بالمكالمة (طلبات الزبون، المنتجات) وبمساعد الموظف. كل القيم
+    # من البيئة؛ CATALOG_BASE_URL فارغ = الأدوات ما تتسجل أصلاً.
+    catalog_base_url: str = field(default_factory=lambda: os.getenv("CATALOG_BASE_URL", "").rstrip("/"))
+    # JWT (Bearer) — سر، من البيئة فقط.
+    catalog_access_token: str = field(default_factory=lambda: os.getenv("CATALOG_ACCESS_TOKEN", ""))
+    # يُرسل بهيدر X-Tenant-Id.
+    catalog_tenant_id: str = field(default_factory=lambda: os.getenv("CATALOG_TENANT_ID", ""))
+    catalog_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("CATALOG_TIMEOUT_SECONDS") or "15"))
+    # مخزن المتجر: لو مضبوط، التوفّر والسعر من stock infos هذا المخزن بس (مثل ai_agent).
+    catalog_storage_id: str = field(default_factory=lambda: os.getenv("CATALOG_STORAGE_ID", ""))
+    # أحجام صفحات صغيرة حتى يبقى زمن الرد بالمكالمة قليل.
+    catalog_search_page_size: int = field(default_factory=lambda: int(os.getenv("CATALOG_SEARCH_PAGE_SIZE") or "5"))
+    catalog_orders_page_size: int = field(default_factory=lambda: int(os.getenv("CATALOG_ORDERS_PAGE_SIZE") or "10"))
+    catalog_stock_page_size: int = field(default_factory=lambda: int(os.getenv("CATALOG_STOCK_PAGE_SIZE") or "20"))
+    catalog_path_product_search: str = field(default_factory=lambda: os.getenv(
+        "CATALOG_PATH_PRODUCT_SEARCH", "/api/catalog/v1/products/search"))
+    catalog_path_product: str = field(default_factory=lambda: os.getenv(
+        "CATALOG_PATH_PRODUCT", "/api/catalog/v1/products/{id}"))
+    catalog_path_categories: str = field(default_factory=lambda: os.getenv(
+        "CATALOG_PATH_CATEGORIES", "/api/catalog/v1/categories/all"))
+    catalog_path_product_stock: str = field(default_factory=lambda: os.getenv(
+        "CATALOG_PATH_PRODUCT_STOCK", "/api/catalog/v1/stock-infos/product/{productId}"))
+    catalog_path_customer_orders: str = field(default_factory=lambda: os.getenv(
+        "CATALOG_PATH_CUSTOMER_ORDERS", "/api/catalog/v1/online/sells/all"))
+    catalog_path_order: str = field(default_factory=lambda: os.getenv(
+        "CATALOG_PATH_ORDER", "/api/catalog/v1/online/sells/{id}"))
+    # بحث الطلبات لمساعد الموظف: نفس قائمة /online/sells/all اللي تقبل
+    # customerPhoneNumber وcreatedAt (يوم واحد) وflowStepId وreceiptNumber.
+    catalog_path_orders_search: str = field(default_factory=lambda: os.getenv(
+        "CATALOG_PATH_ORDERS_SEARCH", "/api/catalog/v1/online/sells/all"))
+    # فارغ = ما ترسل نتيجة المكالمة لباك اند البيانات.
+    catalog_path_call_outcome: str = field(default_factory=lambda: os.getenv("CATALOG_PATH_CALL_OUTCOME", ""))
 
     # مفاتيح حماية منفصلة لكل خدمة — مفتاح مختلف لكل ميزة، يُرسَل بهيدر
     # X-API-Key (انظر app/auth.py). فصلها عن بعض يسمح بإلغاء صلاحية خدمة
@@ -180,6 +218,35 @@ class Settings:
     # أقصى مكالمات متزامنة لكل worker؛ بعدها LiveKit يوجّه المكالمة لـ worker
     # ثاني أو ينتظر لحد ما تفرغ مكالمة.
     voice_max_concurrent_calls: int = field(default_factory=lambda: max(1, int(os.getenv("VOICE_MAX_CALLS") or "10")))
+
+    # الوكيل المحلي عبر WebSocket (app/features/voice_followup/stream.py):
+    # تطبيق سطح المكتب يتصل بالزبون من رقم الواتساب مالته ويبث صوت المكالمة
+    # لـ WS /voice_followup/stream، والحوار (Whisper ← النموذج ← Chatterbox)
+    # يعيش بعملية uvicorn نفسها — بلا LiveKit.
+    # أقصى مكالمات WebSocket متزامنة؛ بعدها الاتصال يُرفض بـ busy (4429).
+    voice_stream_max_calls: int = field(default_factory=lambda: max(1, int(
+        os.getenv("VOICE_STREAM_MAX_CALLS") or os.getenv("VOICE_MAX_CALLS") or "10")))
+    # كاشف الكلام: "silero" (ONNX، أدق)، "energy" (طاقة الصوت، بلا تبعيات)،
+    # أو "auto" = silero لو onnxruntime وأوزانه موجودة، وإلا energy.
+    voice_stream_vad: str = field(default_factory=lambda: (os.getenv("VOICE_STREAM_VAD") or "auto").strip().lower())
+    voice_stream_silero_threshold: float = field(
+        default_factory=lambda: float(os.getenv("VOICE_STREAM_SILERO_THRESHOLD") or "0.5"))
+    voice_stream_energy_threshold_dbfs: float = field(
+        default_factory=lambda: float(os.getenv("VOICE_STREAM_ENERGY_DBFS") or "-40"))
+    # أقل كلام متواصل يُعتبر بداية دور (ويقاطع الـ agent)، والسكوت اللي ينهي الدور.
+    voice_stream_min_speech_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_MIN_SPEECH_MS") or "250"))
+    voice_stream_end_silence_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_END_SILENCE_MS") or "700"))
+    # مقطع أطول من هذا ينقطع ويُنسخ حتى لو الزبون بعده يحچي.
+    voice_stream_max_segment_seconds: float = field(
+        default_factory=lambda: float(os.getenv("VOICE_STREAM_MAX_SEGMENT_SECONDS") or "15"))
+    # بلا كلام من الزبون ولا من الـ agent هذه المدة بعد الرد = المكالمة تنتهي.
+    voice_stream_idle_timeout_seconds: float = field(
+        default_factory=lambda: float(os.getenv("VOICE_STREAM_IDLE_TIMEOUT_SECONDS") or "60"))
+    voice_stream_max_call_seconds: float = field(
+        default_factory=lambda: float(os.getenv("VOICE_STREAM_MAX_CALL_SECONDS") or "900"))
+    # كم يسبق إرسال صوت الـ agent وقت تشغيله عند التطبيق: أقل = مقاطعة أنظف.
+    voice_stream_tts_lead_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_TTS_LEAD_MS") or "1500"))
+    voice_stream_llm_max_tokens: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_LLM_MAX_TOKENS") or "256"))
 
     # LiveKit — المكالمات الصوتية الحية (app/features/voice_followup/agent.py
     # يشغّل الـ agent worker، وcalls.py ينشئ الغرف ويرسل الـ agent إليها).

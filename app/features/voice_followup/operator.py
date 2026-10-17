@@ -8,6 +8,10 @@ tool_calls، والتطبيق ينفّذها:
   - أدواته ← نظامه، ويعيد النتيجة برسالة role="tool".
   - start_call ← يملأ company_name ثم POST /voice_followup/calls، فتبدأ المكالمة.
 
+أدوات البيانات من باك اند Catalog (operator_tools.py: search_orders،
+search_products) ينفّذها الخادم نفسه بحلقة داخل نفس الطلب؛ الرد للتطبيق ما
+يحتوي استدعاءاتها أبداً — بس نص نهائي أو tool_calls لأدوات التطبيق/start_call.
+
 نسخة خاصة بهذه الميزة من منطق التطبيع (مستقلة عن openai_compat عمداً): كل
 ميزة تتغيّر وحدها بلا ما تأثر على غيرها.
 """
@@ -34,6 +38,7 @@ from app.core.engine import (
     _upstream_error_message,
 )
 from app.core.dialect import dialect_block, recent_user_text
+from app.features.voice_followup import operator_tools
 from app.features.voice_followup.prompts import START_CALL_TOOL, START_CALL_TOOL_NAME, build_operator_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -41,6 +46,8 @@ logger = logging.getLogger(__name__)
 # تفكير منخفض: بدونه الموديل يسأل عن تفاصيل بدل ما يستدعي الأداة اللي عنده.
 REASONING_EFFORT = "low"
 FALLBACK_REPLY = "صار خلل بالمعالجة، ممكن تعيد الطلب؟"
+# أقصى جولات أدوات خادم قبل ما نجبر النموذج يرد بلاها.
+MAX_SERVER_TOOL_ROUNDS = 3
 
 
 class OperatorFunction(BaseModel):
@@ -127,11 +134,14 @@ def build_messages(messages: List[OperatorMessage], company_name: Optional[str] 
     return converted
 
 
-def build_tools(client_tools: Optional[List[OperatorTool]]) -> List[dict]:
-    """أدوات التطبيق + start_call من الخادم (تعريف التطبيق لنفس الاسم يُستبدل)."""
+def build_tools(client_tools: Optional[List[OperatorTool]], server_tools: Optional[List[dict]] = None) -> List[dict]:
+    """أدوات التطبيق + start_call + أدوات بيانات الخادم (تعريف الخادم يحل محل
+    أداة تطبيق بنفس الاسم)."""
+    server_tools = server_tools or []
+    reserved = {START_CALL_TOOL_NAME} | {t["function"]["name"] for t in server_tools}
     tools = [t.model_dump(exclude_none=True) for t in (client_tools or [])
-             if t.function.name != START_CALL_TOOL_NAME]
-    return tools + [START_CALL_TOOL]
+             if t.function.name not in reserved]
+    return tools + [START_CALL_TOOL] + server_tools
 
 
 async def _completion(engine: Any, messages: list, tools: list, tool_choice: Any,
@@ -238,21 +248,43 @@ def _parse(data: Any, model: str, allowed: set) -> Optional[dict]:
     return None
 
 
-async def run_operator_turn(engine: Any, req: OperatorChatRequest) -> dict:
-    tools = build_tools(req.tools)
+async def _model_turn(engine: Any, req: OperatorChatRequest, messages: list, tools: list,
+                      first_round: bool) -> Optional[dict]:
     allowed = {t["function"]["name"] for t in tools}
-    messages = build_messages(req.messages, req.company_name)
     data = await _completion(engine, messages, tools, req.tool_choice, req.max_tokens)
     response = _parse(data, req.model, allowed)
     if response is None:
-        # رد فارغ: إعادة واحدة؛ بعد نتيجة أداة المطلوب نص ملخّص فنمنع أداة جديدة.
-        retry_choice = "none" if req.messages[-1].role == "tool" else req.tool_choice
+        # رد فارغ: إعادة واحدة؛ بعد نتيجة أداة التطبيق المطلوب نص ملخّص فنمنع أداة جديدة.
+        retry_choice = "none" if first_round and req.messages[-1].role == "tool" else req.tool_choice
         data = await _completion(engine, messages, tools, retry_choice, req.max_tokens)
         response = _parse(data, req.model, allowed)
     if response is None:
         logger.warning("رد غير صالح بمسار مساعد الموظف: %r", data)
-        response = _response(req.model, {"role": "assistant", "content": FALLBACK_REPLY}, "stop")
     return response
+
+
+async def run_operator_turn(engine: Any, req: OperatorChatRequest) -> dict:
+    server_tools = operator_tools.active_tools()
+    server_names = {t["function"]["name"] for t in server_tools}
+    tools = build_tools(req.tools, server_tools)
+    messages = build_messages(req.messages, req.company_name)
+    for round_no in range(MAX_SERVER_TOOL_ROUNDS + 1):
+        # آخر جولة بلا أدوات الخادم: النموذج لازم يرد نصاً أو بأدوات التطبيق.
+        round_tools = tools if round_no < MAX_SERVER_TOOL_ROUNDS else [
+            t for t in tools if t["function"]["name"] not in server_names]
+        response = await _model_turn(engine, req, messages, round_tools, round_no == 0)
+        if response is None:
+            break
+        calls = response["choices"][0]["message"].get("tool_calls") or []
+        server_calls = [c for c in calls if c["function"]["name"] in server_names]
+        if not server_calls:
+            return response
+        # أدوات الخادم تتنفّذ هنا؛ أي أداة تطبيق بنفس الرد تنعاد بعد ما يشوف النموذج النتائج.
+        messages.append({"role": "assistant", "content": None, "tool_calls": server_calls})
+        for call in server_calls:
+            result = await operator_tools.run(call["function"]["name"], call["function"]["arguments"])
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+    return _response(req.model, {"role": "assistant", "content": FALLBACK_REPLY}, "stop")
 
 
 async def completion_events(response: dict):
