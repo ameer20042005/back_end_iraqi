@@ -5,6 +5,19 @@
 set -e
 cd "$(dirname "$0")"
 
+# Requirements can contain extras (uvicorn[standard]); pip constraints cannot.
+# Keep every version pin while removing extras only from the temporary constraints.
+# Both initial installation and recovery must use the same constraints.
+_install_vllm() (
+    constraints=$(mktemp)
+    trap 'rm -f -- "${constraints}"' EXIT
+    sed -E 's/^([[:space:]]*[[:alnum:]_.-]+)\[[^]]+\]/\1/' \
+        requirements.txt requirements-gpu.txt > "${constraints}"
+    python3 -m pip install -U --force-reinstall -c "${constraints}" "vllm[audio]" torch torchvision --pre \
+        --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
+        --extra-index-url https://download.pytorch.org/whl/cu129
+)
+
 # torchaudio (تبعية Chatterbox TTS) لازم يطابق إصدار torch حرفياً، وvLLM ما
 # يجيبه. نثبّته بعد أي تثبيت/إعادة تثبيت لـ torch، بلا تبعيات حتى ما يسحب
 # torch ثاني فوق نسخة vLLM.
@@ -91,9 +104,7 @@ if ! python3 -c "import vllm.entrypoints.openai.api_server" 2>/dev/null; then
     # torch/torchvision، ويظهر الخلل لاحقاً كـ"libcudart.so.13: cannot open
     # shared object file" بدل خطأ CUDA واضح وقت التثبيت. --force-reinstall
     # يجبر إعادة حل الشجرة كاملة بنفس نسخة CUDA (cu129) دفعة وحدة.
-    python3 -m pip install -U --force-reinstall -c requirements.txt -c requirements-gpu.txt "vllm[audio]" torch torchvision --pre \
-        --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
-        --extra-index-url https://download.pytorch.org/whl/cu129
+    _install_vllm
 fi
 _ensure_torchaudio
 
@@ -258,9 +269,7 @@ if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
     tail -n 40 "${VLLM_LOG}"
     if grep -qi "Gemma4ForConditionalGeneration\|is not supported for now\|ValueError: Model architectures\|ModuleNotFoundError\|No module named\|different CUDA major versions" "${VLLM_LOG}"; then
         echo "==> Cause: the current vllm version doesn't support the Gemma4 architecture (or isn't installed) — installing nightly wheel..."
-        python3 -m pip install -U --force-reinstall -c requirements.txt -c requirements-gpu.txt "vllm[audio]" torch torchvision --pre \
-            --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
-            --extra-index-url https://download.pytorch.org/whl/cu129
+        _install_vllm
         _ensure_torchaudio
     elif grep -qi "libcudart\|libcublas\|cannot open shared object file" "${VLLM_LOG}"; then
         echo "==> Cause: CUDA runtime library path is missing — fixing LD_LIBRARY_PATH..."

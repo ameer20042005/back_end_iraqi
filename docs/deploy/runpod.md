@@ -259,6 +259,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test   (على RunPod)
 
 | المشكلة | السبب المحتمل | الحل |
 |---|---|---|
+| الإقلاع يتوقف عند `ERROR: Constraints cannot have extras` | استعمال `requirements.txt` كملف قيود pip مع وجود `uvicorn[standard]` | حدّث `start.sh` إلى النسخة التي تولّد ملف قيود مؤقتاً بلا extras؛ تبقى الإصدارات المثبّتة كما هي، وتبقى extras مفعّلة عند تثبيت المتطلبات العادية |
 | **كل الردود صارت جملة وحدة ثابتة** (مثل «عفواً حبيبي، ما وصلتني زين») مهما كان السؤال — عربي أو إنجليزي | المُرمِّز (tokenizer) محمّل فاضي: `vocab_size=5` بدل 262144، فكل نص يتحول `<unk>` والموديل ما يشوف رسالة العميل أصلاً. يصير لو `tokenizer.json` ناقص من مستودع الموديل + نسخة `transformers` جديدة (5.x ما عاد يبني المفردات ضمنياً من `tokenizer_config.json` وحده) | افحص بالأمر أدناه؛ لو `vocab` مو 262144 لازم ترفع `tokenizer.json` لمستودع الموديل من الأساس (`google/gemma-4-12B-it`). النسخ مثبّتة بـ `requirements-gpu.txt` حتى ما تتكرر ترقية صامتة |
 | فشل أي تحميل من Hugging Face بخطأ `hf_transfer` | قالب الـ Pod ضابط `HF_HUB_ENABLE_HF_TRANSFER=1` بدون الحزمة مثبّتة | `export HF_HUB_ENABLE_HF_TRANSFER=0` (أو `pip install hf_transfer`) — انظر الخطوة 4 |
 | السيرفر يموت أول ما تغلق الطرفية | ما اشتغل داخل tmux فعلياً (شائع: `Ctrl+B` `D` انضغطت غلط فظهرت كنص `^B^B`) | استخدم `tmux new-session -d` بالخطوة 4 — تبدأ منفصلة أصلاً بلا أي اختصار |
