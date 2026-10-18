@@ -971,8 +971,20 @@
     const json = (body, status) => new Response(JSON.stringify(body), { status: status || 200, headers: { "Content-Type": "application/json" } });
     const body = () => { try { return JSON.parse(options.body || "{}"); } catch (e) { return {}; } };
 
+    const outcomeMatch = path.match(/^\/voice_followup\/calls\/([^/]+)\/outcome$/);
+    if (outcomeMatch) {
+      const room = decodeURIComponent(outcomeMatch[1]);
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(room)) return json({ detail: "اسم الغرفة غير صالح" }, 422);
+      return json({ room: room, status: "done", reference_id: "DEMO-1", summary: "الطلب وصل والزبون راضي (بيانات تجريبية)",
+        answers: [{ question: "هل وصل الطلب؟", answer: "اي وصل" }], follow_up_needed: false,
+        customer_transcript: "اي وصل", ended_at: new Date().toISOString() });
+    }
+
     switch (path) {
       case "/health": return json({ status: "healthy" });
+      case "/health/llm": return json({ status: "healthy", model: "google/gemma-4-E4B-it", reachable: true, loaded: true,
+        backend: "vllm", base_url: "http://127.0.0.1:18001/v1" });
+      case "/health/voice": return json(DEMO_VOICE_HEALTH);
       case "/": return json({ status: "ok", service: "back_end_iraqi", docs: "/docs" });
       case "/gpu": return json({ torch: "2.8.0", cuda: true, vllm_ready: true, device_count: 1, device_name: "NVIDIA A40 (تجريبي)",
         cuda_version: "12.9", vram_total_gb: 44.43, vram_free_gb: 6.6 });
@@ -1096,9 +1108,9 @@
       parameters: { type: "object", properties: { status: { type: "string" }, date: { type: "string" }, order_id: { type: "string" } } } } }
   ];
   const ENDPOINTS = [
-    { id: "overview", group: "عام", name: "نظرة عامة", method: "", path: "/health · /metrics · /gpu",
+    { id: "overview", group: "عام", name: "نظرة عامة", method: "", path: "/health · /metrics · /gpu · /health/voice",
       title: "نظرة عامة على النظام",
-      desc: "حالة الخادم وخادم الموديل (vLLM على RunPod أو خادم LLM محلي عبر start_local.sh) ومؤشرات الأداء وجاهزية كتالوج المناطق بمكان واحد — تتحدّث تلقائياً كل 10 ثوانٍ.",
+      desc: "حالة الخادم وخادم الموديل (vLLM على RunPod أو خادم LLM محلي عبر start_local.sh) ومؤشرات الأداء وصوت المكالمات وجاهزية كتالوج المناطق بمكان واحد — تتحدّث تلقائياً كل 10 ثوانٍ.",
       render: renderOverview },
 
     { id: "health", group: "الحالة", name: "فحص الصحة", method: "GET", path: "/health",
@@ -1110,6 +1122,10 @@
     { id: "gpu", group: "الحالة", name: "معلومات GPU", method: "GET", path: "/gpu",
       title: "معلومات GPU وCUDA",
       desc: "على RunPod يتأكد إن CUDA شغّالة ويعرض VRAM المتبقية. محلياً بدون torch يرجع cuda: false — وهذا طبيعي مع خادم LLM خارجي.",
+      render: renderGet },
+    { id: "healthLlm", group: "الحالة", name: "جاهزية الموديل", method: "GET", path: "/health/llm",
+      title: "جاهزية خادم الموديل",
+      desc: "يسأل خادم الموديل مباشرة (بلا كاش): متاح؟ والموديل محمَّل؟ يرجع 503 لو لا — افحصه قبل الاختبارات.",
       render: renderGet },
     { id: "root", group: "الحالة", name: "معلومات الخدمة", method: "GET", path: "/",
       title: "معلومات الخدمة", desc: "اسم الخدمة ورابط التوثيق التفاعلي (/docs).", render: renderGet },
@@ -1156,6 +1172,15 @@
       title: "تجهيز جلسة صوتية (Pipecat)",
       desc: "الجسم هو نفسه وسائط start_call. يرجع stream_path وstream_id لمدة 120 ثانية. التطبيق يفتح WebSocket ويرسل start مع stream_id الاختياري، ثم يربط صوت واتساب بعد رد العميل. تجهيز الجلسة وحده لا يجري اتصالاً.",
       render: renderVoiceCall },
+    { id: "voiceOutcome", group: "المكالمات", name: "نتيجة مكالمة", method: "GET", path: "/voice_followup/calls/{room}/outcome", key: "voiceFollowup",
+      title: "نتيجة المكالمة",
+      desc: "التطبيق يسحب النتيجة دورياً بـ room (من تجهيز الجلسة أو call_id بحدث ready). status: pending لحد ما تنحفظ؛ المكالمة اللي تنتهي بلا save_outcome تنحفظ بنتيجة احتياطية و follow_up_needed: true.",
+      render: renderVoiceOutcome },
+    { id: "voiceHealth", group: "المكالمات", name: "صحة الصوت", method: "GET", path: "/health/voice",
+      short: "النطق والصوت الأصلي جاهزين؟ الذاكرة، وتشخيص ليش آخر مكالمة ما سمعت الزبون.",
+      title: "صحة صوت المكالمات (Pipecat)",
+      desc: "بلا مفتاح، وما يحمّل أي نموذج. Chatterbox (النطق) وGemma (يسمع صوت الزبون مباشرة)، التحميل المسبق، ذاكرة الـ GPU، ونتيجة آخر نطق. last_call أرقام صوت آخر مكالمة (بلا نص) مع diagnosis يسمّي سبب عدم سماع الزبون. 503 لو شي ناقص أو آخر نطق فشل.",
+      render: renderVoiceHealth },
 
     { id: "loadTest", group: "الأداء", name: "اختبار الحمل", method: "POST", path: "/sales/chat/completions ×N", key: "sales",
       short: "طلبات متزامنة لقياس سلوك الخادم تحت الضغط.",
@@ -1211,6 +1236,10 @@
       "محلياً: <code>bash start_local.sh</code> يوجّه الخادم لـ <code>http://localhost:1234/v1</code> ويكتشف الموديل المحمَّل تلقائياً. " +
       "للتغيير: <code>LLM_BASE_URL=… LLM_MODEL=… bash start_local.sh</code>. على RunPod يشغّل <code>start.sh</code> خادم vLLM." }));
 
+    const voicePanel = panel("صوت المكالمات", { actions: h("a", { class: "btn small", href: "#voiceHealth", text: "التفاصيل" }) });
+    const voiceBody = h("div", {}, emptyState("جاري التحميل…"));
+    voicePanel.appendChild(voiceBody);
+
     const districtPanel = panel("كتالوج المناطق");
     const districtBody = h("div", {}, emptyState("جاري التحميل…"));
     districtPanel.appendChild(districtBody);
@@ -1233,6 +1262,7 @@
       h("div", { class: "actions", style: "margin:0 0 12px" }, refreshBtn, updated),
       tiles,
       h("div", { class: "grid two" }, configPanel, districtPanel),
+      voicePanel,
       featuresPanel);
 
     function tile(label, value, sub, tone, small) {
@@ -1244,9 +1274,11 @@
 
     async function refresh() {
       refreshBtn.setBusy(true);
-      const [health, metrics, gpu, district] = await Promise.all([
-        getJson("/health"), getJson("/metrics"), getJson("/gpu"), getJson("/v1/district-correction/ready")
+      const [health, metrics, gpu, district, voice] = await Promise.all([
+        getJson("/health"), getJson("/metrics"), getJson("/gpu"), getJson("/v1/district-correction/ready"), getJson("/health/voice")
       ]);
+      voiceBody.replaceChildren(voice.data && voice.data.status ? voiceSummary(voice.data)
+        : errorBox("تعذّر قراءة /health/voice — " + (voice.error || "HTTP " + voice.status)));
       const m = metrics.data || {};
       const g = gpu.data || {};
       tiles.replaceChildren(
@@ -1966,6 +1998,180 @@
 
   const VOICE_CALL_EXAMPLE = {"company_name":"شركة تجريبية","goal":"اسأل عن وصول الطلب","questions":["هل وصل الطلب؟"],"contact":{},"reference_id":"DEMO-1","language":"ar"};
 
+  const DEMO_VOICE_HEALTH = {
+    status: "healthy", engine: "pipecat", input_mode: "native", stt_required: false,
+    tts: { installed: true, import_error: null, loaded: true, instances: 1, pool_size: 1,
+      last_synthesis: { ok: true, at: "2026-10-17T09:12:03+00:00", seconds: 0.84, reason: null, error_type: null } },
+    native_audio: { engine: "native_audio", model: "google/gemma-4-E4B-it", local_model: false, ready: true },
+    gpu: { cuda: true, vram_free_gb: 2.1, vram_total_gb: 44.43, process_allocated_gb: 3.2, process_reserved_gb: 3.9, process_cached_unused_gb: 0.7 },
+    warmup: { enabled: true, state: "done", tts: true, seconds: 41.7 },
+    memory_plan: { kv_cache_gb: 8, gpu_fraction: 0.8, max_sequences: 90, tts_pool_size: 1 },
+    last_call: { active: false, started_at: "2026-10-17T09:10:00+00:00", duration_s: 48.2, sample_rate: 16000, measured_sample_rate: 16000,
+      vad: "silero", agc: true, audio_bytes: 1536000, audio_seconds: 48, ignored_bytes: 0, level_dbfs_mean: -52.3, level_dbfs_max: -18.9,
+      agc_gain_db_mean: 3.1, agc_gain_db_max: 12.4, vad_windows: 1500, vad_speech_windows: 412, turn_starts: 5,
+      segments_to_model: 4, segment_seconds: 13.6, native_empty: 0, native_errors: 0, native_error_type: null,
+      user_transcripts: 4, interrupts: 1, protocol_errors: 0, diagnosis: "ok" }
+  };
+
+  // diagnosis من app/features/voice_followup/call_stats.py: [الشرح، اللون].
+  const VOICE_DIAGNOSIS = {
+    ok: ["وصل كلام الزبون", "ok"],
+    no_speech_yet: ["ماكو كلام من الزبون لحد الآن", "info"],
+    no_audio: ["ما وصل صوت — هل التطبيق يبث PCM كإطارات ثنائية بعد accepted؟", "err"],
+    sample_rate_mismatch: ["معدل الصوت الفعلي بعيد عن sample_rate المعلن بـ start", "err"],
+    too_quiet: ["الصوت واطي جداً (أقل من ‎-50 dBFS) وVAD ما لگى كلام", "warn"],
+    vad_no_speech: ["الصوت مسموع بس VAD ما صنّفه كلام", "warn"],
+    native_error: ["Gemma رمى خطأ لكل مقطع — راجع لوق الخادم", "err"],
+    native_empty: ["مقاطع وصلت Gemma ورجعت بلا نص", "warn"]
+  };
+  const TTS_REASONS = { cuda_oom: "نفاد ذاكرة GPU", not_installed: "chatterbox غير مثبّت", load_failed: "فشل تحميل النموذج", generation_failed: "فشل التوليد" };
+  const WARMUP_STATES = { disabled: "معطّل", pending: "ينتظر vLLM", running: "جاري التحميل", done: "جاهز", failed: "فشل" };
+  const LAST_CALL_FIELDS = [
+    ["duration_s", "المدة (ثانية)"], ["vad", "كاشف الكلام"], ["agc", "تطبيع المستوى (AGC)"],
+    ["sample_rate", "sample_rate المعلن"], ["measured_sample_rate", "المعدل المقاس"],
+    ["audio_seconds", "ثواني الصوت الواصل"], ["audio_bytes", "بايتات الصوت"], ["ignored_bytes", "بايتات متجاهلة (قبل accepted)"],
+    ["level_dbfs_mean", "متوسط المستوى dBFS"], ["level_dbfs_max", "أعلى مستوى dBFS"],
+    ["agc_gain_db_mean", "متوسط رفع AGC dB"], ["agc_gain_db_max", "أعلى رفع AGC dB"],
+    ["vad_windows", "نوافذ VAD"], ["vad_speech_windows", "نوافذ مصنّفة كلام"], ["turn_starts", "بدايات أدوار"],
+    ["segments_to_model", "مقاطع أُرسلت لـ Gemma"], ["segment_seconds", "ثواني المقاطع"],
+    ["native_empty", "مقاطع رجعت فارغة"], ["native_errors", "أخطاء Gemma"], ["native_error_type", "نوع آخر خطأ"],
+    ["user_transcripts", "نصوص الزبون"], ["interrupts", "مقاطعات"], ["protocol_errors", "رسائل غير مفهومة"]
+  ];
+
+  function diagnosisPill(code) {
+    const d = VOICE_DIAGNOSIS[code] || [code || "—", ""];
+    return pill(d[0], d[1]);
+  }
+
+  // ملخّص /health/voice — مشترك بين النظرة العامة وصفحة صحة الصوت.
+  function voiceSummary(v) {
+    const tts = v.tts || {}, nat = v.native_audio || {}, g = v.gpu || {}, w = v.warmup || {}, mp = v.memory_plan || {};
+    const last = tts.last_synthesis;
+    const lc = v.last_call;
+    return h("dl", { class: "kv" },
+      h("dt", { text: "الحالة" }), h("dd", {}, pill(v.status === "healthy" ? "سليم" : "غير سليم", v.status === "healthy" ? "ok" : "err"),
+        " ", pill([v.engine, v.input_mode].filter(Boolean).join(" · ") || "—", "mono outline")),
+      h("dt", { text: "سماع الزبون (Gemma)" }), h("dd", {}, pill(nat.ready ? "جاهز" : "غير جاهز", nat.ready ? "ok" : "err"),
+        nat.model ? " " : null, nat.model ? pill(nat.model, "mono outline") : null),
+      h("dt", { text: "النطق (Chatterbox)" }), h("dd", {},
+        pill(!tts.installed ? "غير مثبّت" + (tts.import_error ? " (" + tts.import_error + ")" : "") : tts.loaded ? "محمّل" : "مثبّت، غير محمّل",
+          !tts.installed ? "err" : tts.loaded ? "ok" : "info"),
+        " ", pill(ltr((tts.instances || 0) + " / " + (tts.pool_size || 0)) + " نسخة", "outline")),
+      h("dt", { text: "آخر نطق" }), h("dd", {}, !last ? pill("ما صار نطق بعد", "outline")
+        : last.ok ? pill("نجح خلال " + ltr(last.seconds + " s"), "ok")
+        : pill("فشل: " + (TTS_REASONS[last.reason] || last.reason) + (last.error_type ? " (" + last.error_type + ")" : ""), "err")),
+      h("dt", { text: "التحميل المسبق" }), h("dd", {}, pill(WARMUP_STATES[w.state] || w.state || "—",
+        w.state === "done" ? "ok" : w.state === "failed" ? "err" : "outline")),
+      h("dt", { text: "ذاكرة GPU" }), h("dd", { text: !g.cuda ? "بلا CUDA" :
+        "حر " + ltr(g.vram_free_gb + " / " + g.vram_total_gb + " GB") +
+        (g.process_allocated_gb != null ? " · هذه العملية: " + ltr(g.process_allocated_gb + " GB") + " مستخدم، " + ltr(g.process_cached_unused_gb + " GB") + " كاش" : "") }),
+      mp.gpu_fraction != null ? h("dt", { text: "خطة الذاكرة" }) : null,
+      mp.gpu_fraction != null ? h("dd", { class: "mono", text: "gpu_fraction=" + mp.gpu_fraction + " kv_cache_gb=" + mp.kv_cache_gb +
+        " max_sequences=" + mp.max_sequences + " tts_pool_size=" + mp.tts_pool_size }) : null,
+      h("dt", { text: "آخر مكالمة" }), h("dd", {}, !lc ? pill("ما صارت مكالمة بعد", "outline")
+        : h("span", {}, diagnosisPill(lc.diagnosis), " ", pill(lc.active ? "جارية" : "انتهت", lc.active ? "info" : "outline"),
+          " ", pill(ltr((lc.user_transcripts || 0) + " نص · " + (lc.segments_to_model || 0) + " مقطع"), "outline"))));
+  }
+
+  function renderVoiceHealth(container, ep) {
+    const refreshBtn = makeButton("تحديث", "small");
+    const autoCheck = h("input", { type: "checkbox", checked: true });
+    const meta = h("div", { class: "meta-row" });
+    const summaryBody = h("div", {}, emptyState("جاري التحميل…"));
+    const summary = panel("الملخّص", { actions: refreshBtn });
+    summary.append(h("label", { class: "switch", style: "margin-bottom:12px" }, autoCheck,
+      h("span", { text: "تحديث تلقائي كل 5 ثوانٍ (مفيد أثناء مكالمة جارية)" })), meta, summaryBody);
+    const callBody = h("div", {}, emptyState("جاري التحميل…"));
+    const callPanel = panel("آخر مكالمة — أرقام صوت الزبون");
+    callPanel.append(callBody, h("div", { class: "callout", html:
+      "الأرقام بلا نص ولا رقم هاتف. <code>diagnosis</code> يسمّي السبب: <code>no_audio</code> التطبيق ما يبث، " +
+      "<code>too_quiet</code>/<code>vad_no_speech</code> الكاشف ما لگى كلام، <code>native_empty</code>/<code>native_error</code> Gemma ما رجّع نص. " +
+      "نفس الأرقام تنكتب بلوق الخادم كل 5 ثوانٍ بسطر يبدأ بـ «إحصاءات صوت المكالمة»." }));
+    const raw = h("div");
+    container.append(summary, callPanel, raw);
+
+    async function run() {
+      refreshBtn.setBusy(true);
+      const r = await getJson(ep.path);
+      setMeta(meta, statusPill(r.status), msPill(r.ms), demoPill());
+      const v = r.data;
+      if (!v || !v.status) {
+        summaryBody.replaceChildren(errorBox(r.status ? errorText(v, r.status) : "تعذّر الوصول للخادم: " + r.error));
+        callBody.replaceChildren();
+        raw.replaceChildren();
+      } else {
+        summaryBody.replaceChildren(voiceSummary(v));
+        const lc = v.last_call;
+        callBody.replaceChildren(!lc ? emptyState("ما صارت مكالمة WebSocket من آخر تشغيل للخادم.") : h("div", {},
+          h("div", { class: "meta-row" }, diagnosisPill(lc.diagnosis), pill(lc.active ? "جارية" : "انتهت", lc.active ? "info" : "outline"),
+            lc.started_at ? pill(fmtDate(lc.started_at), "outline") : null),
+          h("dl", { class: "kv" }, LAST_CALL_FIELDS.filter(([k]) => k in lc).flatMap(([k, label]) => [
+            h("dt", { text: label }), h("dd", { class: "mono", text: lc[k] == null ? "—" : String(lc[k]) })]))));
+        raw.replaceChildren(fold("الرد الخام JSON", codeBlock(v)), curlFold({ method: "GET", path: ep.path }));
+      }
+      refreshBtn.setBusy(false);
+    }
+    refreshBtn.addEventListener("click", run);
+    run();
+    const timer = setInterval(() => { if (autoCheck.checked && document.visibilityState === "visible") run(); }, 5000);
+    return () => clearInterval(timer);
+  }
+
+  function renderVoiceOutcome(container, ep) {
+    const roomInput = h("input", { type: "text", spellcheck: "false", value: store.get("last_room") || "call-demo",
+      placeholder: "call-ORD-1042-3f9a1c2b" });
+    const pollCheck = h("input", { type: "checkbox" });
+    const btn = makeButton("اسحب النتيجة");
+    const meta = h("div", { class: "meta-row" });
+    const out = h("div", {}, emptyState("room من رد تجهيز الجلسة، أو call_id بحدث ready على الـ WebSocket."));
+    const p = panel("الغرفة");
+    p.append(field("room", roomInput),
+      h("label", { class: "switch", style: "margin-top:12px" }, pollCheck, h("span", { text: "كرّر كل 3 ثوانٍ لحد ما تصير done" })),
+      h("div", { class: "actions" }, btn), meta, out);
+    container.append(p);
+    let timer = null;
+
+    async function run() {
+      const room = roomInput.value.trim();
+      if (!room) return;
+      store.set("last_room", room);
+      const path = "/voice_followup/calls/" + encodeURIComponent(room) + "/outcome";
+      btn.setBusy(true);
+      const t0 = performance.now();
+      try {
+        const res = await api(path, { headers: keyHeader(ep.key) });
+        const data = await res.json().catch(() => null);
+        setMeta(meta, statusPill(res.status), msPill(performance.now() - t0), demoPill(),
+          data && data.status ? pill(data.status === "done" ? "done — انحفظت" : "pending — بعدها ما انحفظت", data.status === "done" ? "ok" : "warn") : null,
+          data && data.follow_up_needed ? pill("تحتاج متابعة", "warn") : null);
+        out.replaceChildren(res.ok ? codeBlock(data) : errorBox(errorText(data, res.status)), curlFold({ method: "GET", path: path, key: ep.key }));
+        clearTimeout(timer);
+        if (pollCheck.checked && res.ok && data && data.status === "pending") timer = setTimeout(run, 3000);
+      } catch (e) {
+        setMeta(meta, statusPill(0));
+        out.replaceChildren(errorBox("تعذّر الوصول للخادم: " + e.message));
+      }
+      btn.setBusy(false);
+    }
+    btn.addEventListener("click", run);
+    return () => clearTimeout(timer);
+  }
+
+  // بعد تجهيز الجلسة: كيف يفتح التطبيق الـ WebSocket، وأين يسحب النتيجة.
+  function voiceNextSteps(data, req, ep) {
+    if (data.room) store.set("last_room", data.room);
+    const wsUrl = baseUrl().replace(/^http/, "ws") + (data.stream_path || "/voice_followup/stream");
+    const startMsg = Object.assign({ type: "start" }, data.stream_id ? { stream_id: data.stream_id } : {}, { call: req, sample_rate: 16000 });
+    return fold("الخطوة التالية: WebSocket ثم النتيجة", h("div", {},
+      h("dl", { class: "kv", style: "margin-bottom:12px" },
+        h("dt", { text: "الرابط" }), h("dd", { class: "mono", text: wsUrl }),
+        h("dt", { text: "المصادقة" }), h("dd", { class: "mono", text: "X-API-Key: " + (apiKey(ep.key) || "…") + "  (أو ?api_key=…)" }),
+        h("dt", { text: "الصلاحية" }), h("dd", { text: data.expires_in_seconds ? "stream_id يُستهلك مرة واحدة خلال " + ltr(data.expires_in_seconds + " s") : "—" })),
+      field("أول رسالة نصية بعد الاتصال", codeBlock(startMsg)),
+      h("p", { class: "hint", text: "ثم: call_state ringing/accepted، وبث صوت الزبون PCM s16le أحادي. النتيجة تصل كحدث outcome، أو تُسحب بـ room:" }),
+      h("div", { class: "actions" }, h("a", { class: "btn small", href: "#voiceOutcome", text: "اسحب نتيجة " + (data.room || "") }))), true);
+  }
+
   function renderVoiceCall(container, ep) {
     const reqInput = h("textarea", { class: "code", value: JSON.stringify(VOICE_CALL_EXAMPLE, null, 2) });
     const sendBtn = makeButton("جهّز الجلسة");
@@ -1986,6 +2192,7 @@
         const data = await res.json().catch(() => null);
         setMeta(meta, statusPill(res.status), msPill(performance.now() - t0), demoPill());
         out.replaceChildren(res.ok ? codeBlock(data) : errorBox(errorText(data, res.status)),
+          res.ok && data ? voiceNextSteps(data, req, ep) : null,
           curlFold({ method: "POST", path: "/voice_followup/calls", key: ep.key, json: req }));
       } catch (e) {
         setMeta(meta, statusPill(0));
