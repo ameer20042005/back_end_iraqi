@@ -1,8 +1,11 @@
 """FastAPI application, engine lifecycle, and feature router registration."""
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+os.environ.setdefault("LOGURU_LEVEL", "WARNING")
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,12 +25,14 @@ from app.features.district_correction.router import load_catalog as load_distric
 from app.features.district_correction.router import router as district_correction_router
 from app.features.order_intake.router import router as order_intake_router
 from app.features.openai_compat.router import router as openai_compat_router
-from app.features.order_intake.transcribe import warmup as warmup_transcriber
 from app.features.sales.router import router as sales_router
 from app.features.voice_followup import voice_health
 from app.features.voice_followup.router import router as voice_followup_router
+from app.core.voice_logging import configure_diagnostics
 from app.core.system_backend import close_client as close_system_backend_client
 from app.core.catalog import close_client as close_catalog_client
+
+configure_diagnostics()
 
 try:
     import torch
@@ -40,7 +45,6 @@ async def _warmup_audio_models() -> None:
     """Load audio models after vLLM has reserved GPU memory."""
     while not llm_engine.ready:
         await asyncio.sleep(5)
-    await run_in_threadpool(warmup_transcriber)
     # موديلات مكالمات WebSocket (VOICE_STREAM_WARMUP، افتراضياً على GPU بس).
     if voice_health.warmup_enabled():
         await run_in_threadpool(voice_health.warmup_voice_models)
@@ -55,6 +59,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         warmup_task.cancel()
+        await asyncio.gather(warmup_task, return_exceptions=True)
         await llm_engine.shutdown()
         await close_system_backend_client()
         await close_catalog_client()
@@ -128,7 +133,7 @@ async def llm_health():
 
 @app.get("/health/voice")
 def voice_health_check():
-    """موديلات صوت المكالمات (Chatterbox + Whisper): مثبَّتة؟ محمَّلة؟ الذاكرة
+    """موديلات صوت المكالمات (Chatterbox + native Gemma audio): مثبَّتة؟ محمَّلة؟ الذاكرة
     الحرة، ونتيجة آخر محاولة نطق. ما يحمّل أي موديل. 503 لو مكتبة ناقصة أو آخر
     نطق فشل أو فشل التحميل المسبق."""
     status = voice_health.voice_status()

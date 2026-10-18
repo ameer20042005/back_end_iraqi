@@ -14,13 +14,12 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from starlette.concurrency import run_in_threadpool
 
 from app.auth import require_orders_api_key
 from app.config import settings
 from app.core.engine import llm_engine
 from app.features.order_intake.prompts import build_order_intake_prompt
-from app.features.order_intake.transcribe import transcribe
+from app.features.order_intake.transcribe import MAX_FILE_BYTES, transcribe
 from app.features.order_intake.vision import order_image_reader
 from app.orders.service import resolve_order
 from app.orders.extraction import correct_location, state_code_for
@@ -55,13 +54,11 @@ async def create_order(
     if text is not None:
         raw_text = text
     elif audio is not None:
-        audio_bytes = await audio.read()
-        # transcribe() تزامنية وثقيلة (استدلال Whisper) — تشغيلها مباشرة داخل
-        # async يجمّد الـ event loop فيتوقف **كل** الطلبات المتزامنة طول النسخ.
-        # نرميها لخيط منفصل حتى يبقى الخادم يستجيب.
-        raw_text = await run_in_threadpool(transcribe, audio_bytes)
-        if raw_text is None:
-            raise HTTPException(503, "تحويل الصوت لنص غير متوفر محلياً (يحتاج transformers مثبَّتة).")
+        audio_bytes = await audio.read(MAX_FILE_BYTES + 1)
+        try:
+            raw_text = await transcribe(audio_bytes)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         if not raw_text:
             raise HTTPException(422, "ما كدرنا نفهم أي كلام بالملف الصوتي.")
     else:

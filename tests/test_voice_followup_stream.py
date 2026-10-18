@@ -11,6 +11,9 @@
 """
 
 import asyncio
+import base64
+import io
+import wave
 import json
 import time
 from dataclasses import replace
@@ -94,7 +97,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(outcomes, "settings", replace(outcomes.settings, call_outcomes_dir=tmp_path))
     fast = replace(stream.settings, voice_stream_vad="energy", voice_stream_energy_threshold_dbfs=-30,
                    voice_stream_min_speech_ms=100, voice_stream_end_silence_ms=200,
-                   voice_stream_idle_timeout_seconds=60, voice_stream_max_calls=5)
+                   voice_stream_idle_timeout_seconds=60, voice_stream_max_calls=5,
+                   voice_stream_first_phrase_chars=200)
     monkeypatch.setattr(stream, "settings", fast)
     monkeypatch.setattr(vad, "settings", fast)
     monkeypatch.setattr(stream, "WATCHDOG_TICK_SECONDS", 0.05)
@@ -102,8 +106,24 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(gateway, "call_outcome_submitter", submitter)
 
     def install(llm, stt=None, **overrides):
+        async def native_model(messages, tools):
+            # Fake model's audio input + transcript output, not a production ASR stage.
+            events = llm(messages, tools)
+            audio = next((m for m in reversed(messages) if isinstance(m.get("content"), list)), None)
+            try:
+                if audio:
+                    wav = base64.b64decode(audio["content"][0]["input_audio"]["data"])
+                    with wave.open(io.BytesIO(wav), "rb") as source:
+                        samples = vad.pcm16_to_float(source.readframes(source.getnframes()))
+                    transcript = await (stt or FakeSTT())(samples, SR)
+                    yield {"text": "<customer_transcript>" + transcript + "</customer_transcript>"}
+                async for event in events:
+                    yield event
+            finally:
+                await events.aclose()
+
         monkeypatch.setattr(stream, "deps", stream.StreamDeps(
-            stt=stt or FakeSTT(), llm=llm, tts=fake_tts, vad=vad.make_classifier))
+            llm=native_model, tts=fake_tts, vad=vad.make_classifier))
         if overrides:
             monkeypatch.setattr(stream, "settings", replace(stream.settings, **overrides))
             monkeypatch.setattr(vad, "settings", stream.settings)
@@ -244,7 +264,8 @@ def test_full_turn_ready_accepted_speech_transcript_audio(env):
     assert opening_messages[0]["role"] == "system" and "متجر النور" in opening_messages[0]["content"]
     assert "end_call" not in opening_tools and "save_outcome" in opening_tools
     turn_messages, turn_tools = llm.calls[1]
-    assert turn_messages[-1] == {"role": "user", "content": "اي وصل"}
+    assert turn_messages[-1]["role"] == "user"
+    assert turn_messages[-1]["content"][0]["type"] == "input_audio"
     assert turn_messages[-2]["role"] == "assistant"
     assert "end_call" in turn_tools
     # الخصوصية: اسم الزبون ورقمه ما يدخلان سياق النموذج.
@@ -462,7 +483,11 @@ def test_a_successful_sentence_resets_the_tts_failure_count(env):
         start(ws)
         ws.send_json({"type": "call_state", "state": "accepted"})
         events, frames = collect_until(ws, lambda e: e["type"] == "transcript" and e["role"] == "agent")
-        events2, _ = collect_until(ws, is_type("error"))
+        # TTS now runs ahead of playback; both errors can arrive before the
+        # successful phrase's transcript. Count them without assuming order.
+        events2 = []
+        if sum(e["type"] == "error" for e in events) < 2:
+            events2, _ = collect_until(ws, is_type("error"))
         assert len(calls) == 3 and frames > 0
         assert not any(e["type"] == "end_call" for e in events + events2)
         hang_up(ws)

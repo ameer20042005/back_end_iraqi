@@ -16,7 +16,12 @@ import torch
 from fastapi.testclient import TestClient
 
 from app import config, main
-from app.features.voice_followup import stt, tts, voice_health
+from app.features.voice_followup import tts, voice_health
+
+
+@pytest.fixture(autouse=True)
+def native_model_ready(monkeypatch):
+    monkeypatch.setattr(main.llm_engine, "_ready", True)
 
 
 # ── ١. تصنيف الأسباب ───────────────────────────────────────────────────────
@@ -147,9 +152,6 @@ def _no_load(*args, **kwargs):
 def test_health_voice_reports_without_loading_models(fake_tts, monkeypatch):
     fake_tts(StrictVoice)
     monkeypatch.setattr(StrictVoice, "from_pretrained", classmethod(_no_load))
-    monkeypatch.setattr(stt, "_TRANSFORMERS_AVAILABLE", True)
-    monkeypatch.setattr(stt, "_pipeline", None)
-    monkeypatch.setattr(stt, "pipeline", _no_load, raising=False)
 
     response = TestClient(main.app).get("/health/voice")  # بلا مفتاح
     assert response.status_code == 200
@@ -157,7 +159,6 @@ def test_health_voice_reports_without_loading_models(fake_tts, monkeypatch):
     assert body["status"] == "healthy"
     assert body["tts"] == {"installed": True, "import_error": None, "loaded": False, "instances": 0,
                            "pool_size": 1, "last_synthesis": None}
-    assert body["stt"]["installed"] is True and body["stt"]["loaded"] is False
     assert body["gpu"] == {"cuda": False}
     assert body["warmup"]["enabled"] is False and body["warmup"]["state"] == "disabled"
 
@@ -165,11 +166,8 @@ def test_health_voice_reports_without_loading_models(fake_tts, monkeypatch):
 def test_health_voice_shows_loaded_and_last_failure(fake_tts, monkeypatch):
     module = fake_tts(StrictVoice)
     module.synthesize_array("هلا")
-    monkeypatch.setattr(stt, "_TRANSFORMERS_AVAILABLE", True)
-    monkeypatch.setattr(stt, "_pipeline", object())
     body = TestClient(main.app).get("/health/voice").json()
     assert body["tts"]["loaded"] is True and body["tts"]["instances"] == 1
-    assert body["stt"]["loaded"] is True
     assert body["tts"]["last_synthesis"]["ok"] is True
 
     # آخر نطق فشل ← 503 والسبب ظاهر بلا رسالة الخطأ نفسها.
@@ -214,22 +212,20 @@ def test_warmup_default_is_gpu_only(monkeypatch, flag, cuda, expected):
 
 @pytest.fixture
 def warm_state(monkeypatch):
-    monkeypatch.setattr(voice_health, "_warmup", {"state": "pending", "stt": None, "tts": None, "seconds": None})
+    monkeypatch.setattr(voice_health, "_warmup", {"state": "pending", "tts": None, "seconds": None})
     monkeypatch.setattr(voice_health, "settings", replace(voice_health.settings, voice_stream_warmup=True))
 
 
 def test_warmup_loads_both_models(warm_state, monkeypatch):
     calls = []
-    monkeypatch.setattr(stt, "warmup", lambda: calls.append("stt") or True)
     monkeypatch.setattr(tts, "warmup", lambda: calls.append("tts") or True)
     result = voice_health.warmup_voice_models()
-    assert calls == ["stt", "tts"]
-    assert result["state"] == "done" and result["stt"] is True and result["tts"] is True
+    assert calls == ["tts"]
+    assert result["state"] == "done" and result["tts"] is True
     assert voice_health.warmup_state()["enabled"] is True
 
 
 def test_warmup_failure_is_logged_and_marks_health_unhealthy(warm_state, monkeypatch, caplog):
-    monkeypatch.setattr(stt, "warmup", lambda: True)
     monkeypatch.setattr(tts, "warmup", lambda: False)
     with caplog.at_level("ERROR", logger=voice_health.__name__):
         result = voice_health.warmup_voice_models()
@@ -242,7 +238,6 @@ def test_warmup_failure_is_logged_and_marks_health_unhealthy(warm_state, monkeyp
 def test_real_warmup_with_strict_library_succeeds(warm_state, fake_tts, monkeypatch):
     """التحميل المسبق الحقيقي (tts.warmup) مع مكتبة ترفض t3_model ينجح."""
     module = fake_tts(StrictVoice)
-    monkeypatch.setattr(stt, "warmup", lambda: True)
     assert voice_health.warmup_voice_models()["state"] == "done"
     assert module.status()["loaded"] is True
 
@@ -250,7 +245,6 @@ def test_real_warmup_with_strict_library_succeeds(warm_state, fake_tts, monkeypa
 def test_lifespan_runs_voice_warmup_when_enabled(monkeypatch):
     ran = []
     monkeypatch.setattr(main.llm_engine, "_ready", True)
-    monkeypatch.setattr(main, "warmup_transcriber", lambda: True)
     monkeypatch.setattr(voice_health, "warmup_enabled", lambda: True)
     monkeypatch.setattr(voice_health, "warmup_voice_models", lambda: ran.append(True))
     import asyncio
@@ -268,9 +262,20 @@ def test_lifespan_runs_voice_warmup_when_enabled(monkeypatch):
 
 def test_gpu_memory_utilization_env_override(monkeypatch):
     monkeypatch.delenv("GPU_MEMORY_UTILIZATION", raising=False)
-    assert config.Settings().gpu_memory_utilization == 0.85
+    assert config.Settings().gpu_memory_utilization == 0.70
     monkeypatch.setenv("GPU_MEMORY_UTILIZATION", "0.8")
     assert config.Settings().gpu_memory_utilization == 0.8
     monkeypatch.setenv("GPU_MEMORY_UTILIZATION", "0.99")
     with pytest.raises(ValueError):
         config.Settings()
+
+
+def test_gpu_diagnostics_separate_process_cache_from_whole_device(monkeypatch):
+    gb = 1024**3
+    cuda = SimpleNamespace(is_available=lambda: True, mem_get_info=lambda device: (2 * gb, 8 * gb),
+                           memory_allocated=lambda device: gb, memory_reserved=lambda device: 3 * gb)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=cuda))
+    snapshot = voice_health.gpu_memory()
+    assert snapshot["vram_free_gb"] == 2 and snapshot["vram_total_gb"] == 8
+    assert snapshot["process_allocated_gb"] == 1 and snapshot["process_reserved_gb"] == 3
+    assert snapshot["process_cached_unused_gb"] == 2

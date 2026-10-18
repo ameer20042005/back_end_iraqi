@@ -20,19 +20,11 @@ def _env_flag(name: str) -> Optional[bool]:
 
 
 def _gpu_memory_utilization() -> float:
-    """GPU_MEMORY_UTILIZATION من البيئة (بين 0.1 و0.95) وإلا 0.85."""
-    value = float(os.getenv("GPU_MEMORY_UTILIZATION") or "0.85")
+    """GPU_MEMORY_UTILIZATION من البيئة (بين 0.1 و0.95) وإلا 0.70."""
+    value = float(os.getenv("GPU_MEMORY_UTILIZATION") or "0.70")
     if not 0.1 <= value <= 0.95:
         raise ValueError(f"GPU_MEMORY_UTILIZATION لازم بين 0.1 و0.95، والقيمة {value}")
     return value
-
-
-@dataclass(frozen=True)
-class SpeechToTextModel:
-    """نقطة تفتيش النسخ العربي ومعطيات توليدها."""
-
-    repository: str
-    language: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -72,37 +64,17 @@ class Settings:
         default_factory=lambda: float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS") or "120"))
 
     # لا يوجد توكن Hugging Face: كل مستودعات الموديلات هنا (Gemma المدموج،
-    # Whisper، Chatterbox) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).
+    # Chatterbox) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).
 
-    # إعدادات خادم vLLM (يقرأها start.sh ويمررها كأعلام لـ `vllm serve`):
-    # نسبة VRAM المحجوزة للموديل + KV cache. الباقي (1 - النسبة) هو كل اللي
-    # يتبقى لعملية uvicorn (Whisper ×2 + Chatterbox بمكالمات WebSocket) وللـ
-    # LiveKit worker لو اشتغل (نسخه الخاصة). قابلة للتجاوز بـ
-    # GPU_MEMORY_UTILIZATION — start.sh يقرأ هذه القيمة نفسها.
+    # vLLM weights, activations and KV are separate allocations. By default
+    # reserve 4 GiB for KV, rather than allocating a fraction of the whole GPU.
+    # GPU_MEMORY_UTILIZATION applies only when KV_CACHE_MEMORY_GB=0.
+    # The rest is left for Chatterbox and CUDA runtime/encoder overhead.
     gpu_memory_utilization: float = field(default_factory=_gpu_memory_utilization)
-    # طول السياق الأقصى — أقصر = مساحة KV cache أكبر = طلبات متزامنة أكثر.
-    # ⚠️ لازم يطابق MAX_MODEL_LEN بـ start.sh (هو اللي يمرره فعلياً لـ vllm
-    # serve؛ القيمة هنا للرجوع إليها بالكود فقط).
-    #
-    # المقايضة محسوبة على A100/H100 80GB+ بموديل 12B (كانت A40 48GB سابقاً —
-    # انظر start.sh للحساب المحدَّث): الأوزان (bf16) تأخذ ~24.4GB من أصل ~72GB
-    # متاحة (90% من 80GB)، فيتبقى للـ KV cache ~47.6GB. وKV عند 12B يكلّف
-    # ~0.375MB لكل توكن (48 طبقة × 8 رؤوس KV × head_dim 256 × 2 لـ K و V ×
-    # bf16)، يعني كل زيادة بالسياق تُضرب بعدد الطلبات المتزامنة:
-    #     4096  = 1.5GB/طلب  → ~31 طلباً متزامناً (بالسياق الأقصى فعلياً)
-    #     10000 = 3.7GB/طلب  → ~12 طلباً  ← الحالي (عملياً أكثر بكثير لأن أغلب
-    #             المحادثات أقصر من الأقصى وتتقاسم صفحات الكاش — MAX_NUM_SEQS
-    #             بـ start.sh مضبوط على 350 لهذا)
-    #     20000 = 7.3GB/طلب  → ~6  طلبات
-    #
-    # ليش 10000 تحديداً: أطول برومبت عندنا (plane.md كاملاً ≈2552 توكن + كتل
-    # RAG ≈362 + الرد 384) ≈3300 توكن، فالباقي (~6700) هامش لتاريخ المحادثة
-    # بمسارات المحادثة — كان 4096 يترك ~1200 فقط وهو ضيّق لمحادثة طويلة.
-    # الرفع فوق هذا يشتري سياقاً غير مستعمَل بثمن التزامن وكاش البادئة معاً —
-    # لهذا اخترنا توجيه مساحة الـ VRAM الإضافية (مقارنة بـ A40) للتزامن
-    # (MAX_NUM_SEQS) لا لطول السياق.
     max_model_len: int = 32768
-    max_num_seqs: int = 90
+    max_num_seqs: int = field(default_factory=lambda: max(1, int(os.getenv("VLLM_MAX_NUM_SEQS") or "16")))
+    kv_cache_memory_gb: float = field(default_factory=lambda: max(0.0, float(
+        os.getenv("KV_CACHE_MEMORY_GB") or "4")))
     # يقابل Evaluation Batch Size في LM Studio؛ vLLM يستخدمه كحد أقصى
     # لعدد التوكنات المجدولة في الدفعة الواحدة.
     max_num_batched_tokens: int = 2048
@@ -215,12 +187,6 @@ class Settings:
     district_reranker_log_path: Path = field(default_factory=lambda: Path(os.getenv(
         "DISTRICT_RERANKER_LOG_PATH", str(Path(__file__).resolve().parent / "features" / "district_correction" / "data" / "reranker_shadow.jsonl"))))
 
-    # تحويل الصوت لنص (app/features/order_intake/transcribe.py) — موديل Whisper
-    # مفرَّغ عليه اللهجة العربية (نموذج transformers عادي، يعمل بعملية FastAPI
-    # نفسها — الصوت لا يمر بخادم vLLM)
-    whisper_model_ar: str = "ayoubkirouane/whisper-small-ar"
-    whisper_language_ar: str = "arabic"
-
     # تحويل نص لصوت (app/features/voice_followup/tts.py) — صوت الـ agent
     # بالمكالمات الحية. موديل Chatterbox Multilingual (Resemble AI) يدعم
     # العربية (ar) مع voice cloning من مقطع مرجعي، يعيش بعملية الـ agent worker.
@@ -233,18 +199,17 @@ class Settings:
     # عدد نسخ Chatterbox بالـ worker: كل نسخة تنطق لمكالمة وحدة بالمرة (المكتبة
     # مو آمنة للاستدعاء المتوازي على نفس النسخة)، فالنسخ الأكثر = مكالمات
     # متزامنة تنتظر أقل، مقابل ~3GB VRAM تقريباً لكل نسخة. تُحمَّل عند الحاجة.
-    tts_pool_size: int = field(default_factory=lambda: max(1, int(os.getenv("TTS_POOL_SIZE") or "2")))
-    # أقصى مكالمات متزامنة لكل worker؛ بعدها LiveKit يوجّه المكالمة لـ worker
-    # ثاني أو ينتظر لحد ما تفرغ مكالمة.
-    voice_max_concurrent_calls: int = field(default_factory=lambda: max(1, int(os.getenv("VOICE_MAX_CALLS") or "10")))
-
+    tts_pool_size: int = field(default_factory=lambda: max(1, int(os.getenv("TTS_POOL_SIZE") or "1")))
     # الوكيل المحلي عبر WebSocket (app/features/voice_followup/stream.py):
     # تطبيق سطح المكتب يتصل بالزبون من رقم الواتساب مالته ويبث صوت المكالمة
-    # لـ WS /voice_followup/stream، والحوار (Whisper ← النموذج ← Chatterbox)
-    # يعيش بعملية uvicorn نفسها — بلا LiveKit.
+    # لـ WS /voice_followup/stream، والحوار (صوت Gemma ← Pipecat ← Chatterbox)
+    # يعيش بعملية uvicorn نفسها عبر Pipecat.
     # أقصى مكالمات WebSocket متزامنة؛ بعدها الاتصال يُرفض بـ busy (4429).
     voice_stream_max_calls: int = field(default_factory=lambda: max(1, int(
         os.getenv("VOICE_STREAM_MAX_CALLS") or os.getenv("VOICE_MAX_CALLS") or "10")))
+    # Native multimodal audio is the only speech input path.
+    voice_stream_first_phrase_chars: int = field(default_factory=lambda: max(16, min(200, int(
+        os.getenv("VOICE_STREAM_FIRST_PHRASE_CHARS") or "56"))))
     # كاشف الكلام: "silero" (ONNX، أدق)، "energy" (طاقة الصوت، بلا تبعيات)،
     # أو "auto" = silero لو onnxruntime وأوزانه موجودة، وإلا energy.
     voice_stream_vad: str = field(default_factory=lambda: (os.getenv("VOICE_STREAM_VAD") or "auto").strip().lower())
@@ -254,7 +219,7 @@ class Settings:
         default_factory=lambda: float(os.getenv("VOICE_STREAM_ENERGY_DBFS") or "-40"))
     # أقل كلام متواصل يُعتبر بداية دور (ويقاطع الـ agent)، والسكوت اللي ينهي الدور.
     voice_stream_min_speech_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_MIN_SPEECH_MS") or "250"))
-    voice_stream_end_silence_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_END_SILENCE_MS") or "700"))
+    voice_stream_end_silence_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_END_SILENCE_MS") or "400"))
     # مقطع أطول من هذا ينقطع ويُنسخ حتى لو الزبون بعده يحچي.
     voice_stream_max_segment_seconds: float = field(
         default_factory=lambda: float(os.getenv("VOICE_STREAM_MAX_SEGMENT_SECONDS") or "15"))
@@ -266,30 +231,18 @@ class Settings:
     # كم يسبق إرسال صوت الـ agent وقت تشغيله عند التطبيق: أقل = مقاطعة أنظف.
     voice_stream_tts_lead_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_TTS_LEAD_MS") or "1500"))
     voice_stream_llm_max_tokens: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_LLM_MAX_TOKENS") or "256"))
-    # تطبيع مستوى صوت الزبون (AGC) قبل VAD وWhisper: يرفع الصوت الواطي لحد
+    # تطبيع مستوى صوت الزبون (AGC) قبل VAD والنموذج: يرفع الصوت الواطي لحد
     # الهدف بسقف رفع، بلا خفض. 0 يعطّله.
     voice_stream_agc: bool = field(default_factory=lambda: _env_flag("VOICE_STREAM_AGC") is not False)
     voice_stream_agc_target_dbfs: float = field(
         default_factory=lambda: float(os.getenv("VOICE_STREAM_AGC_TARGET_DBFS") or "-20"))
     voice_stream_agc_max_gain_db: float = field(
         default_factory=lambda: float(os.getenv("VOICE_STREAM_AGC_MAX_GAIN_DB") or "20"))
-    # تحميل Whisper وChatterbox مسبقاً عند إقلاع uvicorn (بعد جاهزية vLLM حتى
+    # تحميل Chatterbox مسبقاً عند إقلاع uvicorn (بعد جاهزية vLLM حتى
     # يحجز ذاكرته أول): 1 = دائماً، 0 = أبداً (تُحمَّل بأول مكالمة)، غير مضبوط =
     # على GPU بس. يطلّع أي فشل تحميل عند البدء بدل أول مكالمة.
     voice_stream_warmup: Optional[bool] = field(default_factory=lambda: _env_flag("VOICE_STREAM_WARMUP"))
 
-    # LiveKit — المكالمات الصوتية الحية (app/features/voice_followup/agent.py
-    # يشغّل الـ agent worker، وcalls.py ينشئ الغرف ويرسل الـ agent إليها).
-    # خادم LiveKit يحتاج IP عام ومنافذ UDP، فيعيش خارج RunPod (LiveKit Cloud
-    # أو VPS). القيم من البيئة لأنها أسرار؛ فارغة = الميزة معطّلة.
-    livekit_url: str = field(default_factory=lambda: os.getenv("LIVEKIT_URL", ""))
-    livekit_api_key: str = field(default_factory=lambda: os.getenv("LIVEKIT_API_KEY", ""))
-    livekit_api_secret: str = field(default_factory=lambda: os.getenv("LIVEKIT_API_SECRET", ""))
-    # اسم الـ agent بالـ dispatch الصريح — لازم يطابق بين worker وcalls.py.
-    livekit_agent_name: str = "voice-followup"
-    # SIP trunk الصادر (WhatsApp Business Calling/Twilio عبر LiveKit SIP).
-    # فارغ = المكالمة تبقى غرفة WebRTC يدخلها تطبيق سطح المكتب بالتوكن.
-    livekit_sip_trunk_id: str = field(default_factory=lambda: os.getenv("LIVEKIT_SIP_TRUNK_ID", ""))
     # نتائج المكالمات (app/features/voice_followup/outcomes.py): ملف JSON لكل غرفة.
     # الـ agent worker عملية منفصلة عن uvicorn، فالملفات هي المخزن المشترك بينهما،
     # وتطبيق سطح المكتب يسحبها بـ GET /voice_followup/calls/{room}/outcome.
@@ -297,10 +250,6 @@ class Settings:
         "CALL_OUTCOMES_DIR", str(Path(__file__).resolve().parent.parent / "data" / "call_outcomes"))))
     call_outcomes_ttl_hours: float = field(default_factory=lambda: float(os.getenv("CALL_OUTCOMES_TTL_HOURS", "24")))
     call_outcomes_max_files: int = field(default_factory=lambda: max(1, int(os.getenv("CALL_OUTCOMES_MAX_FILES", "5000"))))
-
-    def stt_model(self) -> SpeechToTextModel:
-        """اختيار STT المركزي؛ ما تبقى شروط موديلات موزعة بالراوترات."""
-        return SpeechToTextModel(self.whisper_model_ar, self.whisper_language_ar)
 
     def tts_model(self) -> TextToSpeechModel:
         """اختيار TTS المركزي، شاملاً كل ملفات نقطة التفتيش والمرجع."""

@@ -1,25 +1,5 @@
 # -*- coding: utf-8 -*-
-"""أدوات نموذج المكالمة اللي ينفّذها الخادم — مصدر واحد للمنطق بين مسارين:
-
-- الـ agent عبر LiveKit (agent.py): يلفّ `store_outcome` بأداة function_tool.
-- الوكيل المحلي عبر WebSocket (stream.py): يعرض أدوات السجل (REGISTRY) للنموذج
-  بصيغة OpenAI وينفّذها بـ `run_tool`.
-
-**أدوات البيانات (Catalog):** get_my_orders / get_order_status / search_products
-تستدعي باك اند البيانات عبر `app.core.catalog`، وتتسجل دائماً بس تنعرض للنموذج
-لما `CATALOG_BASE_URL` مضبوط (`enabled`). رقم الزبون من metadata المكالمة
-الموثوقة (`ctx.meta.phone`) — مو من وسائط النموذج أبداً — وأي طلب رقمه مختلف
-يرجع "غير موجود".
-
-**نقطة التوسعة:** أي أداة جديدة تُعرَّف بـ `CallTool` (اسم، وصف، مخطط JSON
-للوسائط، ودالة async، وشرط تفعيل اختياري) وتُسجَّل بـ `register()`. القواعد:
-  - الدالة ترجع نصاً قصيراً يقراه النموذج (مو JSON طويل؛ كل كلمة تتحوّل لصوت).
-  - الفشل المتوقَّع يُرفع كـ `CallToolError(رسالة للنموذج)`، وما تُرجع أسماء أو
-    أرقام زبائن (الخصوصية: اسم الزبون ما يدخل سياق النموذج).
-  - ما يُخترع مسار بباك اند السستم؛ كل أداة بيانات تعتمد على مسار موثّق فعلاً.
-
-الملف هذا ما يستورد livekit حتى يشتغل بعملية uvicorn بلا تبعيات الـ worker.
-"""
+"""Shared business tools for the Pipecat call agent and persisted call outcomes."""
 
 import json
 import logging
@@ -47,7 +27,7 @@ class CallToolError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# منطق النتيجة المشترك (LiveKit + WebSocket)
+# منطق النتيجة المشترك (Pipecat WebSocket)
 # ---------------------------------------------------------------------------
 
 def _parse_answers(answers: Optional[Iterable[Any]]) -> List[OutcomeAnswer]:

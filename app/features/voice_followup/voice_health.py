@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""صحة موديلات الصوت (Whisper + Chatterbox) بعملية uvicorn: تصنيف أسباب الفشل،
+"""صحة موديلات الصوت (Gemma audio + Chatterbox) بعملية uvicorn: تصنيف أسباب الفشل،
 ذاكرة الـ GPU، حالة التحميل المسبق، وملخّص GET /health/voice.
 
 **ما يحمّل أي موديل:** `voice_status()` تقرأ الحالة بس. التحميل الوحيد هنا
@@ -70,7 +70,12 @@ def gpu_memory() -> dict:
         if not torch.cuda.is_available():
             return {"cuda": False}
         free, total = torch.cuda.mem_get_info(0)
-        return {"cuda": True, "vram_free_gb": round(free / 1024**3, 2), "vram_total_gb": round(total / 1024**3, 2)}
+        allocated, reserved = torch.cuda.memory_allocated(0), torch.cuda.memory_reserved(0)
+        return {"cuda": True, "vram_free_gb": round(free / 1024**3, 2),
+                "vram_total_gb": round(total / 1024**3, 2),
+                "process_allocated_gb": round(allocated / 1024**3, 2),
+                "process_reserved_gb": round(reserved / 1024**3, 2),
+                "process_cached_unused_gb": round((reserved - allocated) / 1024**3, 2)}
     except Exception:
         return {"cuda": False}
 
@@ -106,26 +111,26 @@ def warmup_enabled() -> bool:
 
 
 _warmup_lock = threading.Lock()
-_warmup = {"state": "pending", "stt": None, "tts": None, "seconds": None}
+_warmup = {"state": "pending", "tts": None, "seconds": None}
 
 
 def warmup_voice_models() -> dict:
-    """يحمّل Whisper وChatterbox ويولّد جملة قصيرة، ويسجّل أي فشل بوضوح."""
-    from app.features.voice_followup import stt, tts
+    """يحمّل Chatterbox ويولّد جملة قصيرة، ويسجّل أي فشل بوضوح."""
+    from app.features.voice_followup import tts
 
     with _warmup_lock:
-        _warmup.update(state="running", stt=None, tts=None, seconds=None)
+        _warmup.update(state="running", tts=None, seconds=None)
         started = time.monotonic()
-        stt_ok = stt.warmup()
+        mode = "native"
         tts_ok = tts.warmup()
-        _warmup.update(state="done" if stt_ok and tts_ok else "failed", stt=stt_ok, tts=tts_ok,
+        _warmup.update(state="done" if tts_ok else "failed", tts=tts_ok,
                        seconds=round(time.monotonic() - started, 1))
-        if stt_ok and tts_ok:
+        if tts_ok:
             logger.info("✅ موديلات صوت المكالمات جاهزة (%.1f ثانية)", _warmup["seconds"])
         else:
-            logger.error("🛑 فشل التحميل المسبق لموديلات صوت المكالمات: whisper=%s chatterbox=%s %s — "
-                         "التفاصيل بـ GET /health/voice", stt_ok, tts_ok, gpu_memory())
-        return dict(_warmup)
+            logger.error("🛑 فشل التحميل المسبق لموديلات صوت المكالمات: chatterbox=%s %s — "
+                         "التفاصيل بـ GET /health/voice", tts_ok, gpu_memory())
+        return {**_warmup, "input_mode": mode}
 
 
 def warmup_state() -> dict:
@@ -150,17 +155,28 @@ def last_call() -> Optional[dict]:
 
 def voice_status() -> dict:
     """ملخّص GET /health/voice — يقرأ الحالة بس، ما يحمّل موديل."""
-    from app.features.voice_followup import stt, tts
+    from app.features.voice_followup import tts
 
-    tts_status, stt_status, warm = tts.status(), stt.status(), warmup_state()
+    tts_status, warm = tts.status(), warmup_state()
+    stt_status = {"engine": "native_audio", "model": settings.model_name, "local_model": False}
+    mode = "native"
     last = tts_status.get("last_synthesis") or {}
-    healthy = (tts_status["installed"] and stt_status["installed"]
+    from app.core.engine import llm_engine
+
+    stt_status["ready"] = llm_engine.ready
+    healthy = (tts_status["installed"] and llm_engine.ready
                and last.get("ok") is not False and warm["state"] != "failed")
     return {
         "status": "healthy" if healthy else "unhealthy",
         "tts": tts_status,
-        "stt": stt_status,
+        "native_audio": stt_status,
         "gpu": gpu_memory(),
         "warmup": warm,
         "last_call": last_call(),
+        "engine": "pipecat",
+        "input_mode": mode,
+        "stt_required": False,
+        "memory_plan": {"kv_cache_gb": settings.kv_cache_memory_gb,
+                        "gpu_fraction": settings.gpu_memory_utilization,
+                        "max_sequences": settings.max_num_seqs, "tts_pool_size": settings.tts_pool_size},
     }

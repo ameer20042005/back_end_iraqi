@@ -7,9 +7,8 @@
 # من app/core/engine.py، ومعها peft (دمج LoRA صار بالنوتبوك حصراً — الموديل
 # المرفوع مدموج جاهز) وbitsandbytes (كانت للتكميم، غير مستخدمة).
 #
-# transformers تبقى مطلوبة فقط لميزة تحويل الصوت لنص (Whisper يعمل داخل
-# عملية FastAPI — app/features/order_intake/transcribe.py، ويحتاج ffmpeg
-# أيضاً: يثبّته start.sh تلقائياً على Ubuntu الخام لو ناقص).
+# transformers remains a Chatterbox/vLLM dependency, never an ASR model loader.
+# All audio understanding is served by the existing multimodal LLM.
 #
 # ⚠️ كل الإصدارات أدناه مثبَّتة (==) بالضبط، لا حدود دنيا/عليا (>=/<) —
 # لا تفتحها مرة ثانية. السبب (عطل حقيقي وقع 2026-07-26): سقف مفتوح خلّى
@@ -48,7 +47,7 @@ Pillow==12.3.0
 # اللي تحتاجها فعلاً وقت التشغيل مثبَّتة أدناه (بنفس أرقام pyproject.toml
 # الخاص بيها لما تكون مثبَّتة هناك). torchaudio يثبّته start.sh مطابقاً
 # لإصدار torch حتى ما ينكسر الربط بين الاثنين.
-soundfile==0.14.0
+soundfile==0.13.1
 huggingface_hub==1.27.0
 librosa==0.11.0
 s3tokenizer==0.3.0
@@ -59,9 +58,3 @@ omegaconf==2.4.0
 pyloudnorm==0.2.0
 pykakasi==2.3.0
 spacy-pkuseg==1.0.1
-
-# الـ agent worker للمكالمات الحية (app/features/voice_followup/agent.py):
-# LiveKit Agents + plugin OpenAI (يتصل بخادم vLLM نفسه) + Silero VAD.
-livekit-agents==1.8.8
-livekit-plugins-openai==1.8.8
-livekit-plugins-silero==1.8.8

@@ -54,7 +54,7 @@ curl -X POST http://localhost:8000/orders/create \
   -H "X-API-Key: sk-orders-1d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c" \
   -F "text=أريد لابتوب لينوفو"
 
-# بدء مكالمة صوتية حية (LiveKit) — انظر voice-followup.md
+# بدء مكالمة صوتية حية (Pipecat) — انظر voice-followup.md
 curl -X POST http://localhost:8000/voice_followup/calls \
   -H "Content-Type: application/json" \
   -H "X-API-Key: sk-voicefu-4e6a8c0b2d4f6a8c0e2b4d6f8a0c2e4b" \
@@ -117,7 +117,7 @@ X-API-Key: <مفتاح الخدمة المستهدفة>
 ```
 
 ### `GET /health/voice`
-حالة موديلات صوت المكالمات (Chatterbox + Whisper) بعملية uvicorn — بلا تحميل أي موديل.
+حالة موديلات صوت المكالمات (Chatterbox + Gemma audio) بعملية uvicorn — بلا تحميل أي موديل.
 التفاصيل والحقول: [voice-followup.md](voice-followup.md#فحص-صحة-الصوت--get-healthvoice).
 
 ### `GET /gpu`
@@ -156,7 +156,7 @@ X-API-Key: <مفتاح الخدمة المستهدفة>
 | المبيعات (رد كامل) | `POST /sales/chat` | `application/json` (`model`, `messages`, `tools`) | `sk-sales-...` |
 | المبيعات (بث) | `POST /sales/chat/stream` | `application/json` (نفس أعلاه) | `sk-sales-...` |
 | مساعد الموظف (اتصل بهؤلاء) | `POST /voice_followup/operator/chat/completions` | `application/json` (`model`, `messages`, `tools`, `company_name`) | `sk-voicefu-...` |
-| بدء مكالمة حية (LiveKit) | `POST /voice_followup/calls` | `application/json` (`company_name`, `goal`, `contact`...) | `sk-voicefu-...` |
+| بدء مكالمة حية (Pipecat) | `POST /voice_followup/calls` | `application/json` (`company_name`, `goal`, `contact`...) | `sk-voicefu-...` |
 | نتيجة مكالمة (سحب) | `GET /voice_followup/calls/{room}/outcome` | — | `sk-voicefu-...` |
 
 ## ملاحظات نشر على RunPod

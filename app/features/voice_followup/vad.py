@@ -1,17 +1,6 @@
 # -*- coding: utf-8 -*-
-"""كشف الكلام وتقطيع الأدوار لصوت الزبون الواصل عبر WebSocket (stream.py).
+"""CPU Silero VAD (bundled with Pipecat) and turn segmentation for 16kHz PCM."""
 
-مسار LiveKit عنده VAD جاهز (silero عبر plugin)؛ هنا ما عدنا جلسة LiveKit،
-فنستعمل نفس أوزان Silero مباشرة بـ onnxruntime (ملف الأوزان من حزمة
-livekit-plugins-silero بلا ما نستورد livekit.agents)، وإذا ما متوفرة نرجع
-لكاشف طاقة بسيط.
-
-الصوت يدخل PCM float32 أحادي بـ 16kHz (stream.py يحوّله)، ويطلع أحداث:
-  - ("start", None): الزبون بدأ يحچي (كلام متواصل ≥ min_speech_ms) — يستعمل للمقاطعة.
-  - ("end", samples): الزبون سكت ≥ end_silence_ms — المقطع كاملاً للنسخ.
-"""
-
-import importlib.util
 import logging
 import math
 import threading
@@ -63,13 +52,13 @@ def resample(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
 
 
 class Agc:
-    """تطبيع مستوى بسيط قبل VAD وWhisper: يرفع الصوت الواطي (بعد ترميز
+    """تطبيع مستوى بسيط قبل VAD والنموذج: يرفع الصوت الواطي (بعد ترميز
     الواتساب أو مايك بعيد) لحد target_dbfs، بلا خفض أبداً وبسقف max_gain_db.
 
     المستوى المتتبَّع = أعلى RMS لنوافذ 20ms (ذروة الكلام، مو متوسط يخفّفه
     السكوت)، يرتفع فوراً وينزل ببطء (release_seconds) حتى ما يضخّم الضوضاء
     بين الكلمات. كاشف الطاقة يحتاجه (يفقد الكلام تحت ~-45 dBFS)؛ Silero
-    ثابت تقريباً مع المستوى، وWhisper يستفيد من مقطع بمستوى طبيعي."""
+    ثابت تقريباً مع المستوى، والنموذج يستفيد من مقطع بمستوى طبيعي."""
 
     _WINDOW = 320  # 20ms
 
@@ -127,15 +116,19 @@ _silero_lock = threading.Lock()
 
 
 def _silero_model_path() -> Optional[Path]:
-    # find_spec ما ينفّذ __init__ الحزمة (اللي يستورد livekit.agents).
+    # Pipecat ships the same stateful Silero ONNX model; no network or GPU inference.
+    import importlib.metadata
+
     try:
-        spec = importlib.util.find_spec("livekit.plugins.silero")
-    except (ImportError, ValueError):
-        return None
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    path = Path(list(spec.submodule_search_locations)[0]) / "resources" / "silero_vad.onnx"
-    return path if path.is_file() else None
+        dist = importlib.metadata.distribution("pipecat-ai")
+        for file in dist.files or ():
+            if str(file).replace("\\", "/").endswith("/silero_vad.onnx"):
+                path = Path(dist.locate_file(file))
+                if path.is_file():
+                    return path
+    except importlib.metadata.PackageNotFoundError:
+        pass
+    return None
 
 
 def _get_silero_session():
@@ -147,7 +140,7 @@ def _get_silero_session():
 
             path = _silero_model_path()
             if path is None:
-                raise FileNotFoundError("أوزان silero_vad.onnx غير موجودة (livekit-plugins-silero)")
+                raise FileNotFoundError("Silero ONNX weights missing: install pipecat-ai==1.12.0")
             opts = onnxruntime.SessionOptions()
             opts.inter_op_num_threads = 1
             opts.intra_op_num_threads = 1
@@ -158,7 +151,7 @@ def _get_silero_session():
 
 
 class SileroClassifier:
-    """نفس نموذج Silero اللي يستعمله الـ agent بـ LiveKit، بحالة RNN خاصة بكل مكالمة."""
+    """نموذج Silero المرفق مع Pipecat، بحالة RNN خاصة بكل مكالمة."""
 
     kind = "silero"
     window = 512  # 32ms بـ 16kHz

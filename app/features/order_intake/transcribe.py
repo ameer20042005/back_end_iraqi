@@ -1,121 +1,105 @@
-# -*- coding: utf-8 -*-
-"""نسخ الصوت العربي عبر Whisper مع تحميل واحد وتقطيع التسجيلات الطويلة.
+"""Transcribe uploaded voice notes using the already-running multimodal LLM.
 
-تُثبّت لغة التوليد العربية ومهمة النسخ لتفادي ترجمة الكلام العراقي.
-يُستخدم GPU بنصف الدقة إن توفّر، وتُعالَج المقاطع بدفعات مع تراكب.
+No speech model is loaded in FastAPI. Decode on CPU, then submit chunks under
+Gemma's 30-second audio limit. Overlap protects words crossing chunk boundaries.
 """
 
+import asyncio
+import io
 import logging
-from typing import Optional
+import shutil
+import time
 
-try:
-    from transformers import pipeline
+import numpy as np
+import soundfile as sf
 
-    _TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    _TRANSFORMERS_AVAILABLE = False
-
-from app.config import settings
+from app.core.engine import llm_engine
+from app.features.voice_followup import vad
+from app.features.voice_followup.audio_input import audio_content
 
 logger = logging.getLogger(__name__)
-
-_pipeline = None
-
-# Whisper يعالج 30 ثانية بالمرة — بدون تقطيع يُقصّ أي ملف أطول بصمت.
-# الرسائل الصوتية بالواتساب توصل لدقائق، فالتقطيع ضروري لا تحسين.
-_CHUNK_LENGTH_S = 30
-# تراكب بين القطع حتى لا تنقطع كلمة على الحدّ فتضيع. transformers يقبل
-# (يسار، يمين) — تمريره كرقم واحد يجعل التراكب 1/6 من القطعة على الجهتين
-# (5 ثوانٍ لكل جهة)، أي إعادة معالجة 10 ثوانٍ زائدة بكل قطعة. الزوج الصريح
-# يقلّل الهدر للنصف مع بقاء الحماية من قطع الكلمة على الحدّ.
-_CHUNK_OVERLAP_S = (3, 2)
-# القطع مستقلة عن بعضها، فالـ GPU يعالجها **دفعة واحدة** بدل واحدة-واحدة.
-# هذا أكبر مكسب سرعة بمسار الصوت: رسالة دقيقتين = 4 قطع كانت تتسلسل، صارت
-# استدلالاً واحداً. 16 آمنة على GPU بذاكرة أكبر من A40 (مثل A100 40GB فما فوق)
-# بموديل small بنصف الدقة — راقب استهلاك الذاكرة إذا صار out-of-memory.
-_GPU_BATCH_SIZE = 16
-
-# على الـ CPU الدفعات ما تنفع (ماكو توازي حقيقي) وتزيد استهلاك الذاكرة فقط.
-_CPU_BATCH_SIZE = 1
+MAX_FILE_BYTES = 25 * 1024 * 1024
+MAX_SECONDS = 600
+CHUNK_SECONDS = 28
+OVERLAP_SECONDS = 1
 
 
-def _model_config() -> tuple:
-    """يرجع (اسم الموديل، معطيات التوليد) من اختيار config المركزي."""
-    model = settings.stt_model()
-    gen = {"task": "transcribe"}
-    if model.language:
-        gen["language"] = model.language
-    return model.repository, gen
+def _read_soundfile(data):
+    with sf.SoundFile(io.BytesIO(data)) as source:
+        if source.frames / source.samplerate > MAX_SECONDS:
+            raise ValueError("الرسالة الصوتية أطول من 10 دقائق")
+        samples = source.read(dtype="float32", always_2d=True).mean(axis=1)
+        return vad.resample(samples, source.samplerate, vad.SAMPLE_RATE)
 
 
-def _get_pipeline():
-    """تحميل نسخة واحدة من موديل النسخ العربي وإعادة استخدامها."""
-    global _pipeline
-    if _pipeline is not None:
-        return _pipeline
-    model_name, _gen = _model_config()
-
-    device, torch_dtype = -1, None
+async def decode_audio(data: bytes) -> np.ndarray:
+    if not data or len(data) > MAX_FILE_BYTES:
+        raise ValueError("حجم الملف الصوتي غير صالح (الحد 25MB)")
     try:
-        import torch
-
-        if torch.cuda.is_available():
-            device, torch_dtype = 0, torch.float16
-    except ImportError:
-        pass
-
-    logger.info(
-        "تحميل موديل تحويل الصوت %s على %s (أول مرة قد تستغرق دقائق للتنزيل)...",
-        model_name, "GPU" if device == 0 else "CPU",
-    )
-    kwargs = {
-        "model": model_name,
-        "device": device,
-        "chunk_length_s": _CHUNK_LENGTH_S,
-        "stride_length_s": _CHUNK_OVERLAP_S,
-        "batch_size": _GPU_BATCH_SIZE if device == 0 else _CPU_BATCH_SIZE,
-    }
-    if torch_dtype is not None:
-        kwargs["torch_dtype"] = torch_dtype
-    pipe = pipeline("automatic-speech-recognition", **kwargs)
-    _pipeline = pipe
-    return pipe
-
-
-def warmup() -> bool:
-    """يحمّل الموديل **العربي** (ويشغّله على صمت قصير) عند إقلاع الخادم بدل
-    أول طلب حقيقي.
-
-    بدون هذا، أول رسالة صوتية يدفع صاحبها ثمن تحميل الأوزان **ونسخ نواة
-    CUDA الأولى** — عشرات الثواني تظهر للمستخدم كأنها بطء بالتحويل نفسه،
-    بينما الطلبات اللاحقة أسرع بمرّات. يرجع True إن جهز الموديل فعلاً.
-    """
-    if not _TRANSFORMERS_AVAILABLE:
-        return False
-    try:
-        import numpy as np
-
-        pipe = _get_pipeline()
-        _model, gen_kwargs = _model_config()
-        # ثانية صمت بـ 16kHz (معدل Whisper) — تكفي لتنفيذ مسار الاستدلال كاملاً
-        # وتجهيز النواة، بلا تحميل ملف من القرص.
-        pipe(
-            {"raw": np.zeros(16000, dtype="float32"), "sampling_rate": 16000},
-            generate_kwargs=gen_kwargs,
+        samples = await asyncio.to_thread(_read_soundfile, data)
+    except (sf.LibsndfileError, RuntimeError):
+        executable = shutil.which("ffmpeg")
+        if not executable:
+            raise ValueError("تعذّر فك الملف الصوتي؛ ثبّت ffmpeg أو أرسل WAV/OGG") from None
+        process = await asyncio.create_subprocess_exec(
+            executable, "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
+            "-t", str(MAX_SECONDS + 1), "-f", "f32le", "-ac", "1", "-ar", "16000", "pipe:1",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
-        logger.info("✅ موديل تحويل الصوت جاهز (تحميل مسبق مكتمل)")
-        return True
-    except Exception:
-        # الإحماء تحسين لا شرط تشغيل — الفشل هنا ما يمنع إقلاع الخادم،
-        # والتحميل الكسول بأول طلب يبقى المسار البديل.
-        logger.warning("تعذّر التحميل المسبق لموديل الصوت — سيُحمَّل عند أول طلب", exc_info=True)
-        return False
+        try:
+            output, _ = await asyncio.wait_for(process.communicate(data), 30)
+        except BaseException:
+            if process.returncode is None:
+                process.kill()
+            await process.wait()
+            raise
+        if process.returncode:
+            raise ValueError("الملف الصوتي تالف أو صيغته غير مدعومة")
+        samples = np.frombuffer(output, dtype="<f4")
+    if not 0 < samples.size <= MAX_SECONDS * vad.SAMPLE_RATE or not np.isfinite(samples).all():
+        raise ValueError("مدة الملف الصوتي غير صالحة (الحد 10 دقائق)")
+    return samples
 
 
-def transcribe(audio_bytes: bytes) -> Optional[str]:
-    """نسخ ملف صوتي للعربية؛ None عند غياب المكتبة، ونص فارغ عند الصمت."""
-    if not _TRANSFORMERS_AVAILABLE:
-        return None
-    _model, gen_kwargs = _model_config()
-    result = _get_pipeline()(audio_bytes, generate_kwargs=gen_kwargs)
-    return (result.get("text") or "").strip()
+def merge_transcript(previous: str, current: str) -> str:
+    left, right = previous.split(), current.split()
+    overlap = 0
+    for n in range(1, min(40, len(left), len(right)) + 1):
+        if left[-n:] == right[:n]:
+            overlap = n
+    return " ".join(left + right[overlap:])
+
+
+async def transcribe(audio_bytes: bytes) -> str:
+    started = time.monotonic()
+    chunks, transcript, status = 0, "", "error"
+    try:
+        samples = await decode_audio(audio_bytes)
+        size = CHUNK_SECONDS * vad.SAMPLE_RATE
+        step = (CHUNK_SECONDS - OVERLAP_SECONDS) * vad.SAMPLE_RATE
+        for start in range(0, samples.size, step):
+            part = samples[start:start + size]
+            # Reuse the native WAV encoder without the live-call envelope prompt.
+            content = audio_content(part)[:1] + [{"type": "text", "text": (
+                "انسخ الكلام المسموع حرفياً بلغته الأصلية، بدون ترجمة أو إجابة عليه. "
+                "أخرج نص النسخ فقط، بلا شرح وبلا وسوم. عند الصمت أخرج نصاً فارغاً.")}]
+            response = await llm_engine.create_chat_completion(
+                [{"role": "user", "content": content}], max_tokens=1024,
+                generation_options={"temperature": 0, "reasoning_effort": "none",
+                                    "chat_template_kwargs": {"enable_thinking": False}},
+            )
+            choices = response.get("choices") or []
+            if not choices or choices[0].get("finish_reason") == "length":
+                raise ValueError("تعذّر نسخ المقطع كاملاً؛ جرّب رسالة صوتية أقصر")
+            text = (choices[0].get("message") or {}).get("content")
+            if not isinstance(text, str):
+                raise ValueError("النموذج لم يُرجع نص النسخ الصوتي")
+            transcript = merge_transcript(transcript, text.strip())
+            chunks += 1
+            if start + size >= samples.size:
+                break
+        status = "ok" if transcript else "empty"
+        return transcript
+    finally:
+        logger.info("audio_transcription_end engine=native_audio status=%s chunks=%d elapsed_ms=%d",
+                    status, chunks, int((time.monotonic() - started) * 1000))

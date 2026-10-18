@@ -1,60 +1,12 @@
-# المكالمات الصوتية الحية — `/voice_followup/*` (LiveKit أو WebSocket)
+# المكالمات الصوتية — Pipecat فقط
 
-> طريقتين لتشغيل المكالمة بنفس الشخصية والتعليمات والأدوات: **LiveKit** (يحتاج خادم LiveKit + SIP trunk) أو **الوكيل المحلي عبر WebSocket** (`WS /voice_followup/stream`): التطبيق يتصل من رقم الواتساب مالته ويبث صوت المكالمة لهذا الخادم — بلا LiveKit وبلا UDP، فيشتغل من وراء بروكسي RunPod. التفاصيل بقسم [الوكيل المحلي عبر WebSocket](#الوكيل-المحلي-عبر-websocket).
+تطبيق Rust يتصل عبر `/voice_followup/stream`، ويجري اتصال واتساب من جلسة المستخدم.
+الصوت PCM s16le mono 16kHz؛ يفهمه Gemma مباشرة دون نموذج نسخ مستقل.
+Pipecat يدير التوليد وتجميع العبارات والنطق والتشغيل بالتوازي. Chatterbox يحوّل الرد النصي إلى صوت.
+لا غرف RTC ولا SIP ولا عامل مستقل؛ عملية FastAPI واحدة (`--workers 1`).
 
-مكالمات صوتية حية **عامة** مع الزبائن عبر [LiveKit Agents](https://github.com/livekit/agents). ماكو سيناريو ثابت: موظف تطبيق سطح المكتب يكتب هدف المكالمة (وأسئلة اختيارية ومعطيات)، والـ agent الصوتي موظف مبيعات/خدمة عملاء مهذّب باللهجة العراقية باسم الشركة اللي تستعمل التطبيق (`company_name` من إعدادات التطبيق بكل طلب). المساعد النصي يستعمل أدوات التطبيق ويرجع أمر `start_call` لكل شخص، والتطبيق يسحب نتيجة كل مكالمة بـ `GET /voice_followup/calls/{room}/outcome`.
-
-## المعمارية
-
-```text
-تطبيق سطح المكتب ──(1) نص الموظف──► POST /voice_followup/operator/chat/completions
-        ▲                                   │ tool_calls: أدوات التطبيق… ثم start_call
-        │ (2) ينفّذ أدوات البيانات بنظامه    ▼
-        └──(3) start_call ──────────────► POST /voice_followup/calls
-                                            │ غرفة LiveKit + dispatch للـ agent
-                                            ▼
-   الزبون (WhatsApp/SIP) ◄──صوت──► LiveKit Server ◄──► Agent Worker (هذا الخادم، GPU)
-                                                        Whisper → vLLM → Chatterbox
-                                                        أدوات: save_outcome / end_call
-                                                                    │
-                                   ┌────────────────────────────────┴───────────────┐
-                                   ▼                                                ▼
-                  data/call_outcomes/{room}.json                     باك اند السستم (اختياري)
-        GET /voice_followup/calls/{room}/outcome ◄──┘                POST /calls/outcome
-```
-
-| الطرف | دوره |
-|---|---|
-| **هذا الخادم (مزوّد الذكاء)** | مساعد الموظف النصي، بدء المكالمات، والـ agent worker الصوتي (Whisper + النموذج + Chatterbox) |
-| **باك اند السستم** (اختياري) | يستقبل نسخة من نتيجة المكالمة: `POST {system_backend_base_url}/calls/outcome` (best effort) |
-| **تطبيق سطح المكتب** | واجهة الموظف: يرسل الأوامر واسم الشركة، ينفّذ أدواته و`start_call`، يدخل الغرفة للمراقبة أو لربط صوت الواتساب، ويسحب نتيجة المكالمة |
-| **خادم LiveKit** | ينقل الصوت (WebRTC/SIP). يحتاج IP عام ومنافذ UDP، فيعيش على LiveKit Cloud أو VPS، **مو على RunPod** |
-
-## الإعداد
-
-متغيرات بيئة (أسرار، فما تنحط بـ `app/config.py`):
-
-| المتغيّر | إلزامي | الوصف |
-|---|---|---|
-| `LIVEKIT_URL` | ✅ | مثل `wss://<project>.livekit.cloud` |
-| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | ✅ | مفاتيح مشروع LiveKit |
-| `LIVEKIT_SIP_TRUNK_ID` | ❌ | SIP trunk صادر (WhatsApp Business Calling أو Twilio عبر LiveKit SIP). بدونه تعمل المكالمة بوضع `bridge` |
-| `VOICE_MAX_CALLS` | ❌ | أقصى مكالمات متزامنة لكل worker (افتراضياً `10`). بعدها LiveKit يوجّه المكالمة لـ worker ثاني أو تنتظر لحد ما تفرغ مكالمة |
-| `CALL_OUTCOMES_DIR` | ❌ | مجلد ملفات نتائج المكالمات (افتراضياً `data/call_outcomes`). لازم يكون مشتركاً بين uvicorn والـ agent worker |
-| `CALL_OUTCOMES_TTL_HOURS` / `CALL_OUTCOMES_MAX_FILES` | ❌ | مدة بقاء النتيجة (افتراضياً `24`) وأقصى عدد ملفات (افتراضياً `5000`) |
-| `TTS_POOL_SIZE` | ❌ | عدد نسخ Chatterbox (افتراضياً `2`)، كل نسخة تنطق لمكالمة وحدة بالمرة. كل نسخة ~3GB VRAM تقريباً |
-| `SYSTEM_BACKEND_CALL_OUTCOME_PATH` | ❌ | مسار إرسال النتيجة لباك اند السستم (افتراضياً `/calls/outcome`). فارغ = ما ترسل |
-
-متغيرات الوكيل المحلي (WebSocket) وباك اند البيانات Catalog بأقسامها تحت.
-
-`start.sh` يشغّل الـ agent worker تلقائياً لو المتغيرات الثلاثة الأولى موجودة (اللوق: `/tmp/agent.log`). يدوياً:
-
-```bash
-python -m app.features.voice_followup.agent download-files   # مرة وحدة (أوزان VAD)
-python -m app.features.voice_followup.agent start
-```
-
-بدون هذه المتغيرات، `POST /voice_followup/calls` يرجع `503` واضحة.
+التشغيل وميزانية GPU ونتائج المراجعة: [Pipecat والصوت الأصلي](../pipecat-native-audio.md).
+المصادقة تبقى `X-API-Key`، وأسماء نقاط API وعقد PCM لم تتغير.
 
 ## مساعد الموظف — `POST /voice_followup/operator/chat/completions`
 
@@ -93,62 +45,13 @@ curl -X POST "$BASE/voice_followup/operator/chat/completions" \
 
 وسائطها هي نفسها جسم `POST /voice_followup/calls` (الجدول أدناه). المطلوب بمخطط الأداة: `goal` و`contact` (مع `phone`) فقط — `company_name` **غير مطلوب بالأداة** لأن التطبيق يملأه (ويستبدله) قبل الإرسال.
 
-## بدء مكالمة — `POST /voice_followup/calls`
+## تجهيز جلسة — `POST /voice_followup/calls`
 
-```json
-{
-  "company_name": "متجر النور",
-  "agent_name": "سارة",
-  "goal": "اسأل الزبون عن رأيه بالمنتج وهل يحتاج شي ثاني",
-  "questions": ["هل وصلك الطلب؟", "شنو تقييمك؟"],
-  "context": "المنتج: غسالة اتوماتيك. الموعد السابق 2026-09-05",
-  "contact": {"name": "أحمد", "phone": "07701234567"},
-  "reference_id": "ORD-1042",
-  "language": "ar"
-}
-```
-
-| الحقل | النوع | إلزامي | الوصف |
-|---|---|---|---|
-| `company_name` | string (1–120) | ✅ | اسم الشركة من إعدادات التطبيق؛ الـ agent يتكلم باسمها |
-| `agent_name` | string \| null (≤ 60) | ❌ | اسم أول يعرّف بيه الـ agent نفسه. بدونه: "وياك خدمة العملاء من {company_name}" |
-| `goal` | string (1–1000) | ✅ | هدف المكالمة كما كتبه الموظف |
-| `questions` | array of string (≤ 10، كل واحد ≤ 300) | ❌ | أسئلة محددة تنسأل بالترتيب، سؤال بكل دور |
-| `context` | string \| null (≤ 2000) | ❌ | حقائق يقدر الـ agent يستشهد بيها. ماكو أي معلومة غيرها |
-| `contact.phone` | string \| null (≤ 32) | ❌* | لازم لوضع `sip`. ما يدخل تعليمات النموذج |
-| `contact.name` | string \| null (≤ 120) | ❌ | للتطبيق فقط. **ما يدخل سياق نموذج المكالمة أبداً**، ولو انكتب (أو الرقم) داخل `goal`/`questions`/`context` ينشال تلقائياً |
-| `reference_id` | string \| null (≤ 120) | ❌ | معرّف يربط بيه التطبيق النتيجة (طلب/تذكرة/جهة اتصال). يرجع بالنتيجة ويدخل اسم الغرفة |
-| `language` | string | ❌ | افتراضياً `"ar"`. `"en"` = يبدأ بإنكليزية بسيطة |
-
-`contact` نفسه اختياري بالجسم (بدونه = وضع `bridge`).
-
-**استجابة 200:**
-
-```json
-{
-  "room": "call-ORD-1042-3f9a1c2b",
-  "livekit_url": "wss://project.livekit.cloud",
-  "operator_token": "eyJhbGciOi...",
-  "dispatch_id": "AD_xxxxx",
-  "dial_mode": "sip"
-}
-```
-
-| `dial_mode` | المعنى |
-|---|---|
-| `sip` | الـ agent يتصل بالزبون بنفسه عبر `LIVEKIT_SIP_TRUNK_ID` وينتظر الرد قبل ما يتكلم. التوكن للمراقبة أو لتسلّم المكالمة |
-| `bridge` | ماكو SIP أو ماكو رقم: التطبيق يدخل الغرفة بـ `operator_token` (LiveKit SDK) وينشر صوت مكالمة الواتساب كمسار صوت. الـ agent يبدأ الكلام أول ما يدخل أول مشارك |
-
-الغرفة تنحذف تلقائياً إذا ما دخلها أحد خلال دقيقتين، وتنحذف عند انتهاء المكالمة (`end_call`).
-
-**أخطاء:**
-
-| كود | السبب |
-|---|---|
-| `401` | مفتاح `X-API-Key` غلط |
-| `422` | `company_name`/`goal` ناقص أو فارغ، أو تجاوز الحدود (أكثر من 10 أسئلة، `context` > 2000...) |
-| `502` | خادم LiveKit رفض الطلب أو ما يستجيب |
-| `503` | `LIVEKIT_*` غير مضبوطة |
+الجسم: `company_name` و`goal` مطلوبان، و`questions` و`agent_name` و`context` و`contact` و`reference_id` و`language` اختيارية.
+يرجع `room` و`transport: "pipecat"` و`stream_path: "/voice_followup/stream"` و`stream_id` و`expires_in_seconds: 120`.
+يرسل العميل `stream_id` ضمن `start` لاستخدام نفس `room` للنتيجة. يُستهلك مرة واحدة، وتُرفض الجلسات المنتهية أو ذات الجسم المختلف.
+يمكن للتطبيق الاستمرار بإرسال `start` دون تجهيز مسبق، وهو مسار `ai_call_dial` الحالي.
+هذا الطلب يجهّز الجلسة ولا يتصل بالزبون وحده. الحقول القديمة `livekit_url/operator_token/dispatch_id` فارغة للتوافق فقط.
 
 ## نتيجة المكالمة — `GET /voice_followup/calls/{room}/outcome`
 
@@ -168,56 +71,20 @@ curl -X POST "$BASE/voice_followup/operator/chat/completions" \
 ```
 
 - `status: "pending"` (HTTP 200، `answers: []` وباقي الحقول `null`/`false`) لحد ما تنحفظ النتيجة.
-- `customer_transcript`: كلام الزبون وحده حرفياً كما نسخه Whisper.
+- `customer_transcript`: كلام الزبون وحده حرفياً كما نسخه Gemma.
 - مكالمة انتهت بلا `save_outcome` (ما رد، رقم غلط، انقطع الخط) تنحفظ نتيجتها `done` بملخّص ثابت ("الزبون لم يرد على المكالمة" / "انتهت المكالمة بدون نتيجة مسجّلة") و`follow_up_needed: true`، حتى ما يبقى التطبيق ينتظر.
 - التخزين: ملف JSON لكل غرفة تحت `CALL_OUTCOMES_DIR` (الـ agent worker عملية منفصلة عن uvicorn)، يبقى `CALL_OUTCOMES_TTL_HOURS` (24 ساعة) وبعدها يرجع `pending`.
 - `room` لازم يطابق `^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`، وإلا `422` (لا path traversal).
 
-## سلوك الـ agent بالمكالمة
+## سلوك الوكيل والتزامن
 
-موظف مبيعات وخدمة عملاء مهذّب باللهجة العراقية، باسم `company_name`:
+تعليمات الشركة والهدف والأسئلة والأدوات ونتائج المكالمات بقيت مشتركة من `prompts.py` و`call_tools.py`.
+الافتتاحية تُجهّز أثناء الرنين ولا يُرسل أي صوت قبل `accepted`.
+كل مكالمة تملك سياقها وقاطعها الصوتي؛ Chatterbox يملك نسخة واحدة افتراضياً لتوفير VRAM.
+`VOICE_STREAM_MAX_CALLS` يحدد السعة، و`TTS_POOL_SIZE` يرفع توازي النطق على حساب الذاكرة.
+Pipecat يلغي التوليد والنطق والتشغيل عند المقاطعة، ويسجّل النص المنطوق قبل دور العميل الجديد.
 
-1. تحية قصيرة وتعريف مرة وحدة ("هلا بيك، وياك سارة من متجر النور")، ثم سبب الاتصال بجملة، ثم أول سؤال.
-2. يسأل `questions` بالترتيب، سؤال وحد بكل دور، جمل قصيرة (٦–١٦ كلمة)، بلا رموز ولا قوائم (الكلام يتحوّل لصوت).
-3. أول ما يتحقق `goal` أو يرفض الزبون: يستدعي `save_outcome(summary, answers, follow_up_needed)` مرة وحدة — الملخّص والأجوبة من كلام الزبون حصراً.
-4. يشكر وينهي بـ `end_call` (يحذف الغرفة فيقطع كل المشاركين بما فيهم SIP).
-
-قواعد ثابتة: ما يدّعي إنه AI ولا يذكر مصطلحات تقنية؛ ما ينطق اسم الزبون أو رقمه؛ ما يخترع معلومة مو موجودة بـ `context`؛ يبدّل لإنكليزية بسيطة إذا الزبون حچى إنكليزي؛ "رقم غلط / مو إلي" ← اعتذار و`end_call` بلا `save_outcome`.
-
-`save_outcome` يحفظ النتيجة بملف (المصدر اللي يسحبه التطبيق، دائماً)، ثم يرسل نفس جسم النتيجة (best effort) لكل وجهة مضبوطة:
-
-```text
-POST {system_backend_base_url}{SYSTEM_BACKEND_CALL_OUTCOME_PATH}   (X-API-Key: voice_followup_api_key؛ الافتراضي /calls/outcome، فارغ = معطّل)
-POST {CATALOG_BASE_URL}{CATALOG_PATH_CALL_OUTCOME}                 (Bearer + X-Tenant-Id؛ فارغ افتراضياً = معطّل)
-```
-
-فشل هذا الإرسال ما يلغي النتيجة المحفوظة (ينسجّل باللوق بس). إذا فشل الحفظ نفسه، الـ agent يعتذر ويگول إن الفريق راح يتابع، وما يدّعي إن شي انحفظ.
-
-## التزامن (عدة مكالمات بنفس الوقت)
-
-الـ worker الواحد يشغّل لحد `VOICE_MAX_CALLS` مكالمة متزامنة (افتراضياً 10)، كلها خيوط بنفس العملية فالأوزان تُحمَّل مرة وحدة:
-
-| المرحلة | السلوك مع مكالمات متزامنة |
-|---|---|
-| النموذج (vLLM) | يخدمها كلها سوية (continuous batching)، ما تنتظر بعض |
-| النسخ (Whisper) | نسخة وحدة، المقاطع تمر واحد واحد. المقطع قصير (~0.3 ثانية) فالانتظار قليل |
-| النطق (Chatterbox) | مجمّع من `TTS_POOL_SIZE` نسخة. كل نسخة لمكالمة بالمرة، فإذا كل النسخ مشغولة الجملة تنتظر أول نسخة تفرغ |
-
-**النطق هو عنق الزجاجة:** مكتبة Chatterbox ما تقبل توليدين متوازيين على نفس النسخة، فعدد المكالمات اللي تحچي **بنفس اللحظة** بلا انتظار = `TTS_POOL_SIZE`. المكالمات ما تحچي كل الوقت (الزبون يحچي نص الوقت)، فـ 10 مكالمات ما تحتاج 10 نسخ، بس كل ما قلّت النسخ زادت الوقفة قبل الرد وقت الضغط. القرار الصحيح يحتاج قياس على كرت RunPod الفعلي:
-
-- **A40 مشترك مع vLLM** (~6GB متبقي): واقعياً `TTS_POOL_SIZE=1-2`.
-- **كرت أكبر** (A100 80GB / H100) أو **كرت ثاني للـ worker**: `TTS_POOL_SIZE=4-5` يغطي 10 مكالمات براحة.
-- عدة workers على عدة كروت: LiveKit يوزّع المكالمات بينها تلقائياً.
-
-## الوكيل المحلي عبر WebSocket
-
-**`WS /voice_followup/stream`** — مكالمة كاملة بلا LiveKit. تطبيق سطح المكتب يتصل بالزبون من رقم الواتساب مالته، ويبث صوت الزبون لهنا، وهذا الخادم يدير الحوار (Whisper ← النموذج ← Chatterbox) بنفس `build_call_instructions` ونفس الأدوات (`call_tools.py`) اللي يستعملها الـ agent بـ LiveKit. يشتغل بعملية uvicorn نفسها (FastAPI WebSocket عادي)، فيعبر بروكسي RunPod HTTPS (`wss://<POD_ID>-8000.proxy.runpod.net/voice_followup/stream`).
-
-```text
-الزبون ◄─WhatsApp─► تطبيق سطح المكتب ◄──WebSocket (PCM + JSON)──► هذا الخادم
-                      (رقم الشركة)                               VAD → Whisper → vLLM → Chatterbox
-                                                                 أدوات: save_outcome / end_call / بيانات Catalog
-```
+## WebSocket
 
 ### المصادقة
 
@@ -294,108 +161,21 @@ POST {CATALOG_BASE_URL}{CATALOG_PATH_CALL_OUTCOME}                 (Bearer + X-T
 ### كشف الكلام والمقاطعة
 
 - **VAD:** نفس أوزان Silero اللي يستعملها الـ agent بـ LiveKit، تشتغل مباشرة بـ onnxruntime (ملف `silero_vad.onnx` من حزمة `livekit-plugins-silero`، بلا استيراد `livekit.agents`) بحالة RNN لكل مكالمة ونوافذ 32ms. إذا مو متوفرة (`VOICE_STREAM_VAD=auto`) يرجع لكاشف طاقة (RMS بالـ dBFS، نوافذ 20ms).
-- **تقطيع الأدوار:** كلام متواصل ≥ `VOICE_STREAM_MIN_SPEECH_MS` (250) = بداية دور؛ سكوت ≥ `VOICE_STREAM_END_SILENCE_MS` (700) = نهاية الدور، والمقطع (مع ~300ms قبله) يروح لـ Whisper. مقطع أطول من `VOICE_STREAM_MAX_SEGMENT_SECONDS` (15) ينقطع وينسخ. مقاطع متتالية قبل رد الـ agent تندمج بدور واحد، والرد يبدأ بس لما يسكت الزبون.
+- **تقطيع الأدوار:** كلام متواصل ≥ `VOICE_STREAM_MIN_SPEECH_MS` (250) = بداية دور؛ سكوت ≥ `VOICE_STREAM_END_SILENCE_MS` (700) = نهاية الدور، والمقطع (مع ~300ms قبله) يروح لـ Gemma. مقطع أطول من `VOICE_STREAM_MAX_SEGMENT_SECONDS` (15) ينقطع وينسخ. مقاطع متتالية قبل رد الـ agent تندمج بدور واحد، والرد يبدأ بس لما يسكت الزبون.
 - **المقاطعة:** أول ما تبدأ "بداية دور" والـ agent يولّد أو صوته بعده يشتغل عند التطبيق (حسب تقدير الخادم لمدة التشغيل): تنلغي مهمة الرد (النموذج + النطق) وينرسل `interrupt`. الجمل اللي انگالت كاملة تبقى بتاريخ المحادثة. بعد `end_call` المقاطعة تتعطل.
 - **زمن الرد:** النموذج يتدفق (`stream: true`)، والرد يتقطع لجمل وكل جملة تنطق وتنرسل أول ما تكمل، فأول صوت يطلع بعد أول جملة بدل الرد كامل.
 
-### إعدادات الوكيل المحلي
+### إعدادات الصوت والتشخيص
 
-| المتغيّر | الافتراضي | الوصف |
-|---|---|---|
-| `VOICE_STREAM_MAX_CALLS` | `VOICE_MAX_CALLS` أو `10` | أقصى مكالمات WebSocket متزامنة؛ بعدها `busy`/4429 |
-| `VOICE_STREAM_VAD` | `auto` | `silero` / `energy` / `auto` |
-| `VOICE_STREAM_SILERO_THRESHOLD` | `0.5` | عتبة احتمال الكلام لـ Silero |
-| `VOICE_STREAM_ENERGY_DBFS` | `-40` | عتبة كاشف الطاقة |
-| `VOICE_STREAM_MIN_SPEECH_MS` | `250` | أقل كلام يبدأ دوراً (ويقاطع) |
-| `VOICE_STREAM_END_SILENCE_MS` | `700` | السكوت اللي ينهي الدور |
-| `VOICE_STREAM_MAX_SEGMENT_SECONDS` | `15` | أطول مقطع ينسخ مرة وحدة |
-| `VOICE_STREAM_IDLE_TIMEOUT_SECONDS` | `60` | سكوت الطرفين بعد الرد قبل الإنهاء |
-| `VOICE_STREAM_MAX_CALL_SECONDS` | `900` | أقصى مدة للمكالمة |
-| `VOICE_STREAM_TTS_LEAD_MS` | `1500` | كم يسبق إرسال الصوت وقت تشغيله (أقل = مقاطعة أنظف، أكثر = تحمّل أكبر لتذبذب الشبكة) |
-| `VOICE_STREAM_LLM_MAX_TOKENS` | `256` | أقصى توكنات لكل رد |
+`VOICE_STREAM_END_SILENCE_MS=400`، و`VOICE_STREAM_FIRST_PHRASE_CHARS=56`، و`TTS_POOL_SIZE=1` افتراضياً.
+الصوت الأصلي هو المسار الوحيد. الحد لكل دور صوتي 30 ثانية؛ الرسائل المسجلة تُقسّم إلى قطع 28 ثانية متراكبة.
+يفحص الخادم جاهزية النموذج والنطق قبل حدث `ready`. رمز الإغلاق 1013 يعني أن الصوت غير متوفر أو لم يجهز بعد.
+الفشل والضغط لا يُسقطان البيانات بصمت: `audio_backpressure` و`native_transcript` و`voice_worker_failed` وأخطاء SSE ظاهرة.
 
-| `VOICE_STREAM_AGC` | `1` | تطبيع مستوى صوت الزبون قبل VAD وWhisper (يرفع بس، ما يخفض). `0` يعطّله |
-| `VOICE_STREAM_AGC_TARGET_DBFS` | `-20` | المستوى الهدف لذروة الكلام |
-| `VOICE_STREAM_AGC_MAX_GAIN_DB` | `20` | أقصى رفع (يمنع تضخيم الضوضاء بالسكوت الطويل) |
-| `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1` يحمّل Whisper وChatterbox (ويولّد جملة) عند إقلاع uvicorn بعد ما يجهز vLLM، `0` = عند أول مكالمة |
-| `GPU_MEMORY_UTILIZATION` | `0.85` | حصة vLLM من ذاكرة الكرت (بين 0.1 و0.95)؛ الباقي لموديلات الصوت. `start.sh` يحترمه |
-| `TTS_POOL_SIZE` | `2` | عدد نسخ Chatterbox (~3–4.5GB لكل نسخة). على A40 مشترك مع vLLM خلّيه `1` |
-
-**تشغيل:** Whisper (`stt.py`) وChatterbox (`tts.py`، مجمّع `TTS_POOL_SIZE`) يتحمّلون بعملية uvicorn. مع `VOICE_STREAM_WARMUP` (افتراضي على GPU) يتحمّلون عند الإقلاع بعد جاهزية vLLM — أي فشل يطلع باللوق (`🛑 فشل التحميل المسبق...`) وبـ `/health/voice` قبل أول مكالمة، وأول مكالمة ما تنتظر التحميل. بدونه يتحمّلون بأول مكالمة (أول مكالمة أبطأ).
-
-### فحص صحة الصوت — `GET /health/voice`
-
-بلا مفتاح (مثل `/health`). **ما يحمّل أي موديل** — يقرأ الحالة بس. `200` لما كلشي سليم، و`503` لو مكتبة ناقصة، أو آخر محاولة نطق فشلت، أو التحميل المسبق فشل.
-
-```json
-{
-  "status": "healthy",
-  "tts": {
-    "installed": true, "import_error": null,
-    "loaded": true, "instances": 1, "pool_size": 1,
-    "last_synthesis": {"ok": true, "at": "2026-10-17T09:12:03+00:00", "seconds": 0.84, "reason": null, "error_type": null}
-  },
-  "stt": {"installed": true, "import_error": null, "loaded": true, "model": "ayoubkirouane/whisper-small-ar"},
-  "gpu": {"cuda": true, "vram_free_gb": 2.1, "vram_total_gb": 44.43},
-  "warmup": {"enabled": true, "state": "done", "stt": true, "tts": true, "seconds": 41.7},
-  "last_call": {"active": false, "duration_s": 48.2, "vad": "silero", "agc": true, "audio_bytes": 1536000,
-                "level_dbfs_mean": -52.3, "level_dbfs_max": -18.9, "vad_speech_windows": 412,
-                "segments_to_whisper": 4, "whisper_empty": 0, "user_transcripts": 4, "diagnosis": "ok", "...": "..."}
-}
-```
-
-- `last_synthesis.reason`: نفس قيم `reason` بحدث `error` (`cuda_oom` / `not_installed` / `load_failed` / `generation_failed`)، و`error_type` اسم نوع الاستثناء بس (بلا رسالته).
-- `import_error`: اسم نوع خطأ الاستيراد لو المكتبة ما تنستورد (مثلاً `OSError` لـ torchaudio مبني على torch مختلف).
-- `warmup.state`: `disabled` / `pending` (ينتظر vLLM) / `running` / `done` / `failed`.
-- `last_call`: إحصاءات صوت الزبون لآخر مكالمة WebSocket (أو الجارية، `active: true`) — أرقام بس، بلا نص ولا رقم ولا `call_id`. ما تأثر على `status`.
-
-### إحصاءات صوت الزبون (لما الـ agent ما يسمع)
-
-كل مكالمة تكتب سطر لوق كل 5 ثواني وبالنهاية: `إحصاءات صوت المكالمة <call_id>: active=… audio_bytes=… level_dbfs_mean=… …`، ونفس الأرقام بـ `last_call`:
-
-| الحقل | المعنى |
-|---|---|
-| `vad` | الكاشف الفعلي: `silero` أو `energy` (لو Silero ما اشتغل على الـ Pod) |
-| `audio_bytes` / `audio_seconds` / `ignored_bytes` | صوت واصل ومتعالج / المتجاهل (قبل `accepted` أو بعد `end_call`) |
-| `sample_rate` / `measured_sample_rate` | المعلن بـ `start` / المستنتج من سرعة وصول البايتات |
-| `level_dbfs_mean` / `level_dbfs_max` | مستوى الصوت **الخام** (قبل AGC) بنوافذ 20ms |
-| `agc_gain_db_mean` / `agc_gain_db_max` | الرفع اللي طبّقه AGC |
-| `vad_windows` / `vad_speech_windows` / `turn_starts` | نوافذ VAD الكلية / المصنّفة كلام / بدايات الأدوار |
-| `segments_to_whisper` / `whisper_empty` / `stt_errors` / `user_transcripts` | المقاطع المرسلة لـ Whisper / رجعت فارغة / رمت استثناء / صارت `transcript` |
-| `interrupts` / `protocol_errors` | مقاطعات / رسائل نصية غير مفهومة |
-
-**`diagnosis`** يقرأ الأرقام ويسمّي السبب:
-
-| القيمة | المعنى | الحل |
-|---|---|---|
-| `no_audio` | ماكو صوت واصل (أو كله قبل `accepted`) | التطبيق: هل يبث PCM كإطارات **ثنائية** بعد `accepted`؟ |
-| `sample_rate_mismatch` | معدل الوصول بعيد عن `sample_rate` المعلن | صحّح `sample_rate` بـ `start` |
-| `too_quiet` | أعلى مستوى < -50 dBFS وVAD ما لگى كلام | AGC مفعّل؟ ارفع مستوى الالتقاط بالتطبيق |
-| `vad_no_speech` | الصوت مسموع بس VAD ما صنّفه كلام | `VOICE_STREAM_VAD=silero`، أو اخفض `VOICE_STREAM_SILERO_THRESHOLD` / `VOICE_STREAM_ENERGY_DBFS` |
-| `stt_error` | Whisper يرمي استثناء لكل مقطع (`stt_error_type`) | لوق uvicorn: "فشل نسخ مقطع" |
-| `whisper_empty` | مقاطع توصل Whisper وترجع فارغة | الصوت مو كلام فعلي (صدى/موسيقى) أو مقطوع؛ راجع `segment_seconds` |
-| `no_speech_yet` / `ok` | ماكو كلام لحد الآن / وصل نص | — |
-
-القياس المحلي على كلام عربي حقيقي بنطاق هاتفي (8kHz): Silero يلتقط ~90% من نوافذ الكلام حتى -60 dBFS (ثابت مع المستوى)، وكاشف الطاقة (-40) **صفر** تحت -50 dBFS — مع AGC يرجع يلتقطه حتى -60، وبلا كلام وهمي على ضوضاء -75 dBFS. Whisper (`whisper-small-ar`، transformers 5.14.1) نسخ نفس المقاطع صح حتى بعد خفضها 45dB.
-
-صوت الزبون يتعالج (VAD + Whisper) **حتى وقت كلام الـ agent**: يقاطعه (`interrupt`) وكلامه ينسخ ويصير دوراً. قطع الصوت بعدد بايتات فردي ما تخرّب العينات (البايت الزايد يكمّل القطعة الجاية).
-
-### ميزانية ذاكرة الـ GPU (vLLM + الصوت بنفس الكرت)
-
-vLLM يحجز `GPU_MEMORY_UTILIZATION × ذاكرة الكرت` كاملة عند الإقلاع (أوزان + KV cache)، والباقي هو كل اللي يتبقى لعملية uvicorn. تقدير استهلاك uvicorn على A40 (44.43GB فعلياً):
-
-| البند | تقريباً |
-|---|---|
-| سياق CUDA لعملية uvicorn | ~0.5GB |
-| Whisper لـ `/orders/create` (fp16 + دفعة 16) | ~0.5GB أوزان + ~1GB ذروة |
-| Whisper للمكالمات (`stt.py`، نسخة ثانية) | ~0.5GB |
-| Chatterbox نسخة وحدة (fp32: T3 + S3Gen + VE + بصمة) + ذروة التوليد | ~3–4.5GB |
-| هامش تجزئة | ~1GB |
-| **المجموع مع `TTS_POOL_SIZE=1`** | **~7–8GB** |
-
-`0.85` تترك `0.15 × 44.43 ≈ 6.7GB` — أقل من المطلوب. لـ `TTS_POOL_SIZE=1` بنفس العملية: `GPU_MEMORY_UTILIZATION ≤ (44.43 − 8) / 44.43 ≈ 0.82`، والمقترح **`0.80`** (يترك ~8.9GB). كل `−0.05` تنقص KV cache الـ vLLM بـ `0.05 × 44.43 ≈ 2.2GB` بالضبط (الأوزان ثابتة)، فتأكد بعد التغيير من سطري لوق vLLM (`/tmp/vllm_boot.log`): `Available KV cache memory` و`Maximum concurrency for 32,768 tokens per request` — لازم الأخير يبقى ≥ 1 حتى يقلع بـ `max_model_len` الحالي، و`max_num_seqs` (90) سقف جدولة بس: KV أقل = طلبات أقل تشتغل سوية بالسياق الكامل، مو فشل إقلاع.
-
-**الـ LiveKit worker:** إذا `LIVEKIT_*` مضبوطة، `start.sh` يشغّل `agent.py` كعملية **منفصلة** تحمّل نسخها الخاصة (سياق CUDA + Whisper + لحد `TTS_POOL_SIZE` نسخ Chatterbox) فوق نسخ uvicorn — ~4.5GB إضافية لكل نسخة نطق. تشغيل المسارين سوية على A40 واحد يحتاج تقريباً `GPU_MEMORY_UTILIZATION ≈ 0.70` مع `TTS_POOL_SIZE=1`، أو شغّل مسار واحد بس.
+`GET /health/voice` يعرض `engine: pipecat` و`input_mode: native` و`native_audio` و`memory_plan` و`gpu` و`last_call`.
+حقول `gpu.process_allocated_gb/process_reserved_gb/process_cached_unused_gb` تخص عملية Python الحالية؛ `vram_free_gb` يخص الكرت كله.
+إحصاءات العميل تشمل `segments_to_model/native_empty/native_errors`؛ لا يُحمّل الفحص نموذجاً.
+تفاصيل قياس التأخير والذاكرة وخطوات التحقق في [تقرير المراجعة](../pipecat-native-audio.md).
 
 ## باك اند البيانات Catalog (أدوات البيانات)
 
@@ -420,7 +200,7 @@ vLLM يحجز `GPU_MEMORY_UTILIZATION × ذاكرة الكرت` كاملة عن�
 | `CATALOG_PATH_ORDERS_SEARCH` | `/api/catalog/v1/online/sells/all` | بحث مساعد الموظف (الفلاتر تحت) |
 | `CATALOG_PATH_CALL_OUTCOME` | فارغ | لو مضبوط: `POST` نتيجة المكالمة (جسم CallOutcome) لـ Catalog. فارغ = ما ترسل |
 
-### أدوات المكالمة الصوتية (LiveKit وWebSocket)
+### أدوات المكالمة الصوتية (Pipecat)
 
 | الأداة | الوسائط | السلوك |
 |---|---|---|

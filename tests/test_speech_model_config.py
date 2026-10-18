@@ -1,53 +1,66 @@
-# -*- coding: utf-8 -*-
-"""اختبارات مصدر إعدادات موديلات الصوت الموحّد."""
+import asyncio
+import base64
+import io
+import wave
 
-import sys
-from types import SimpleNamespace
+import numpy as np
+import pytest
 
 from app.config import Settings
+from app.features.order_intake import transcribe as module
 
 
-def test_speech_models_come_only_from_settings():
+def wav(seconds):
+    data = io.BytesIO()
+    with wave.open(data, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(np.full(int(seconds * 16000), 5000, dtype='<i2').tobytes())
+    return data.getvalue()
+
+
+def test_single_model_audio_and_tts_memory_defaults(monkeypatch):
+    for name in ("TTS_POOL_SIZE", "KV_CACHE_MEMORY_GB", "VLLM_MAX_NUM_SEQS"):
+        monkeypatch.delenv(name, raising=False)
     settings = Settings()
-
-    assert settings.stt_model().repository == settings.whisper_model_ar
-    assert settings.tts_model().repository == settings.tts_model_ar
-
-
-def test_environment_variables_do_not_override_static_settings(monkeypatch):
-    monkeypatch.setenv("WHISPER_MODEL", "example/legacy-stt")
-    monkeypatch.setenv("TTS_MODEL", "example/legacy-tts")
-
-    settings = Settings()
-
-    assert settings.stt_model().repository == "ayoubkirouane/whisper-small-ar"
     assert settings.tts_model().repository == "ResembleAI/chatterbox"
+    assert settings.tts_pool_size == 1 and settings.kv_cache_memory_gb == 4 and settings.max_num_seqs == 16
 
 
-def test_transcription_reuses_arabic_pipeline_and_generation_settings(monkeypatch):
-    from app.features.order_intake import transcribe as module
+def test_voice_notes_use_native_audio_and_keep_all_long_recording_chunks(monkeypatch):
+    seen = []
 
-    loaded = []
-    calls = []
+    async def completion(messages, **kwargs):
+        encoded = messages[0]["content"][0]["input_audio"]["data"]
+        with wave.open(io.BytesIO(base64.b64decode(encoded))) as audio:
+            seen.append(audio.getnframes())
+        assert kwargs["generation_options"]["chat_template_kwargs"] == {"enable_thinking": False}
+        text = "الطلب وصل" if len(seen) == 1 else "وصل والزبون راضي"
+        return {"choices": [{"finish_reason": "stop", "message": {"content": text}}]}
 
-    def pipe(audio, **kwargs):
-        calls.append((audio, kwargs))
-        return {"text": "  هلا بيك  "}
+    monkeypatch.setattr(module.llm_engine, "create_chat_completion", completion)
+    assert asyncio.run(module.transcribe(wav(45))) == "الطلب وصل والزبون راضي"
+    assert seen == [28 * 16000, 18 * 16000]
 
-    def factory(task, **kwargs):
-        loaded.append((task, kwargs))
-        return pipe
 
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
-    monkeypatch.setattr(module, "_TRANSFORMERS_AVAILABLE", True)
-    monkeypatch.setattr(module, "pipeline", factory, raising=False)
-    monkeypatch.setattr(module, "_pipeline", None)
-    assert module.transcribe(b"first") == "هلا بيك"
-    assert module.transcribe(b"second") == "هلا بيك"
-    assert len(loaded) == 1
-    assert loaded[0][0] == "automatic-speech-recognition"
-    assert loaded[0][1]["model"] == module.settings.whisper_model_ar
-    assert loaded[0][1]["chunk_length_s"] == 30
-    assert loaded[0][1]["stride_length_s"] == (3, 2)
-    assert all(kwargs["generate_kwargs"] == {"task": "transcribe", "language": "arabic"}
-               for _, kwargs in calls)
+def test_voice_note_invalid_audio_and_truncation_fail_explicitly(monkeypatch):
+    async def truncated(*args, **kwargs):
+        return {"choices": [{"finish_reason": "length", "message": {"content": "partial"}}]}
+
+    monkeypatch.setattr(module.llm_engine, "create_chat_completion", truncated)
+    with pytest.raises(ValueError, match="كاملاً"):
+        asyncio.run(module.transcribe(wav(1)))
+    with pytest.raises(ValueError):
+        asyncio.run(module.decode_audio(b""))
+    with pytest.raises(ValueError, match="10"):
+        asyncio.run(module.decode_audio(wav(601)))
+
+
+def test_native_transcription_errors_propagate(monkeypatch):
+    async def broken(*args, **kwargs):
+        raise RuntimeError("model_unavailable")
+
+    monkeypatch.setattr(module.llm_engine, "create_chat_completion", broken)
+    with pytest.raises(RuntimeError, match="model_unavailable"):
+        asyncio.run(module.transcribe(wav(1)))

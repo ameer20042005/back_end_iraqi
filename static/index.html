@@ -1025,16 +1025,15 @@
           completion = demoCompletion({ messages: [{ role: "user", content: "تم" }], tools: [] });
           completion.choices[0] = { index: 0, finish_reason: "tool_calls", message: { role: "assistant", content: null, tool_calls: [{
             id: "call_demo_1", type: "function", function: { name: "start_call", arguments: JSON.stringify({
-              call_type: "followup", order: { order_id: "ORD-1042", status: "ملغي", customer_phone: "07701234567",
-                items: [{ product_name: "غسالة اتوماتيك", quantity: 1 }] } }) } }] } };
+              ...VOICE_CALL_EXAMPLE }) } }] } };
         }
         return b.stream ? new Response(sseFromCompletion(completion), { status: 200, headers: { "Content-Type": "text/event-stream" } }) : json(completion);
       }
       case "/voice_followup/calls": {
         const b = body();
-        if (!b.call_type || !b.order) return json({ detail: "call_type و order مطلوبة" }, 422);
-        return json({ room: "call-" + b.call_type + "-" + b.order.order_id + "-demo", livekit_url: "wss://demo.livekit.cloud",
-          operator_token: "eyJ...demo", dispatch_id: "AD_demo", dial_mode: "bridge" });
+        if (!b.company_name || !b.goal) return json({ detail: "company_name و goal مطلوبة" }, 422);
+        return json({ room: "call-demo", livekit_url: "", operator_token: "", dispatch_id: "", dial_mode: "bridge",
+          transport: "pipecat", stream_path: "/voice_followup/stream", stream_id: "demo-session", expires_in_seconds: 120 });
       }
       default:
         return json({ detail: "مسار غير مدعوم بالوضع التجريبي: " + path }, 404);
@@ -1133,7 +1132,7 @@
     { id: "ordersCreate", group: "الطلبات", name: "إنشاء طلب", method: "POST", path: "/orders/create", key: "orders",
       short: "نص أو صوت أو صورة ← JSON طلب مؤكَّد مباشرة، بلا محادثة.",
       title: "إنشاء طلب من نص أو صوت أو صورة",
-      desc: "مدخل واحد فقط بكل طلب (multipart): نص رسالة الزبون، أو ملف صوتي (Whisper يحوّله لنص)، أو صورة (لقطة شاشة أو طلب مكتوب). يرجع طلباً مؤكَّداً مطابقاً للكتالوج.",
+      desc: "مدخل واحد فقط بكل طلب (multipart): نص رسالة الزبون، أو ملف صوتي (Gemma يسمعه مباشرة وينسخه)، أو صورة (لقطة شاشة أو طلب مكتوب). يرجع طلباً مؤكَّداً مطابقاً للكتالوج.",
       render: renderOrders },
 
     { id: "districtReady", group: "تصحيح المناطق", name: "جاهزية الكتالوج", method: "GET", path: "/v1/district-correction/ready",
@@ -1153,9 +1152,9 @@
       desc: "صيغة OpenAI بلا حالة. الخادم يضيف أداة start_call لأدواتك تلقائياً. نفّذ أدوات البيانات بنظامك وأعد نتيجتها كرسالة role: tool؛ أما start_call فنفّذها بإرسال وسائطها كما هي إلى /voice_followup/calls.",
       render: renderChat },
     { id: "voiceCall", group: "المكالمات", name: "بدء مكالمة", method: "POST", path: "/voice_followup/calls", key: "voiceFollowup",
-      short: "غرفة LiveKit + agent صوتي + توكن لتطبيق سطح المكتب.",
-      title: "بدء مكالمة صوتية حية (LiveKit)",
-      desc: "الجسم هو نفسه وسائط start_call. يرجع اسم الغرفة وتوكن دخولها. dial_mode = sip: الـ agent يتصل بالزبون بنفسه؛ bridge: تطبيق سطح المكتب يدخل الغرفة بالتوكن ويربط صوت مكالمة الواتساب.",
+      short: "جلسة Pipecat لربط صوت واتساب من تطبيق مركز الاتصال.",
+      title: "تجهيز جلسة صوتية (Pipecat)",
+      desc: "الجسم هو نفسه وسائط start_call. يرجع stream_path وstream_id لمدة 120 ثانية. التطبيق يفتح WebSocket ويرسل start مع stream_id الاختياري، ثم يربط صوت واتساب بعد رد العميل. تجهيز الجلسة وحده لا يجري اتصالاً.",
       render: renderVoiceCall },
 
     { id: "loadTest", group: "الأداء", name: "اختبار الحمل", method: "POST", path: "/sales/chat/completions ×N", key: "sales",
@@ -1965,15 +1964,13 @@
 
   /* ================= المتابعة الصوتية ================= */
 
+  const VOICE_CALL_EXAMPLE = {"company_name":"شركة تجريبية","goal":"اسأل عن وصول الطلب","questions":["هل وصل الطلب؟"],"contact":{},"reference_id":"DEMO-1","language":"ar"};
+
   function renderVoiceCall(container, ep) {
-    const reqInput = h("textarea", { class: "code", value: JSON.stringify({
-      call_type: "followup",
-      order: { order_id: "ORD-1042", status: "ملغي", customer_phone: "07701234567",
-        items: [{ product_name: "غسالة اتوماتيك", quantity: 1 }], reason_hint: null, scheduled_date: null }
-    }, null, 2) });
-    const sendBtn = makeButton("ابدأ المكالمة");
+    const reqInput = h("textarea", { class: "code", value: JSON.stringify(VOICE_CALL_EXAMPLE, null, 2) });
+    const sendBtn = makeButton("جهّز الجلسة");
     const meta = h("div", { class: "meta-row" });
-    const out = h("div", {}, emptyState("call_type: followup (سبب الحالة) أو postpone (تأجيل التسليم)."));
+    const out = h("div", {}, emptyState("هذه تجهّز الجلسة؛ تطبيق مركز الاتصال يربط صوت واتساب عبر Pipecat بعد رد العميل."));
     const p = panel("طلب المكالمة");
     p.append(field("JSON (نفس وسائط start_call)", reqInput), h("div", { class: "actions" }, sendBtn), meta, out);
     container.append(p);

@@ -1,18 +1,5 @@
 # -*- coding: utf-8 -*-
-"""المكالمات الصوتية الحية عبر LiveKit — نقاط الـ API.
-
-- POST /voice_followup/operator/chat/completions: مساعد الموظف النصي (عقد OpenAI).
-  الموظف يكتب "اتصل بهؤلاء واسألهم كذا"، والنموذج يستعمل أدوات التطبيق ويرجع
-  start_call لكل شخص.
-- POST /voice_followup/calls: تنفيذ start_call — غرفة LiveKit + إرسال الـ agent
-  (agent.py) + توكن لتطبيق سطح المكتب يراقب أو يربط بيه صوت المكالمة.
-- GET /voice_followup/calls/{room}/outcome: التطبيق يسحب نتيجة المكالمة
-  (pending لحد ما الـ agent يحفظها).
-- WS /voice_followup/stream: الوكيل المحلي بلا LiveKit — التطبيق يبث صوت مكالمة
-  الواتساب والحوار يعيش بهذي العملية (stream.py).
-
-بمسار LiveKit الحوار الصوتي ما يمر بهذي العملية: يعيش بالـ agent worker.
-"""
+"""Pipecat calls: operator chat, session reservation, PCM WebSocket and outcomes."""
 
 import logging
 
@@ -38,11 +25,9 @@ async def create_call(
     """يبدأ مكالمة حية مع جهة اتصال وحدة. الجسم هو نفسه وسائط أداة start_call."""
     try:
         return await calls.start_call(req)
-    except calls.LiveKitNotConfigured as exc:
-        raise HTTPException(503, f"المكالمات الصوتية غير مفعّلة: {exc}") from exc
     except Exception as exc:
         logger.exception("فشل بدء مكالمة %s", req.reference_id or "-")
-        raise HTTPException(502, f"تعذّر بدء المكالمة عبر LiveKit: {exc}") from exc
+        raise HTTPException(502, "تعذّر تجهيز جلسة المكالمة؛ راجع سجل الخادم") from exc
 
 
 @router.get("/calls/{room}/outcome", response_model=CallOutcome)

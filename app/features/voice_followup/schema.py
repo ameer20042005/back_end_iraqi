@@ -53,13 +53,19 @@ class AgentCallMetadata(BaseModel):
 
 class CallResponse(BaseModel):
     room: str
-    livekit_url: str
+    # Deprecated compatibility keys for existing desktop IPC consumers.
+    # Pipecat uses stream_path/stream_id; these keys never enable an RTC path.
+    livekit_url: str = Field(default="", deprecated=True)
     # توكن دخول الغرفة لتطبيق سطح المكتب (مراقبة المكالمة أو تسلّمها من الموظف).
-    operator_token: str
-    dispatch_id: str
+    operator_token: str = Field(default="", deprecated=True)
+    dispatch_id: str = Field(default="", deprecated=True)
     # "sip": الـ agent يتصل بالزبون بنفسه عبر SIP trunk.
     # "bridge": التطبيق يدخل الغرفة بـ operator_token ويربط صوت مكالمة الواتساب.
     dial_mode: Literal["sip", "bridge"]
+    transport: Optional[Literal["pipecat"]] = None
+    stream_path: Optional[str] = None
+    stream_id: Optional[str] = None
+    expires_in_seconds: Optional[int] = None
 
 
 class OutcomeAnswer(BaseModel):

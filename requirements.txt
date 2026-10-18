@@ -18,6 +18,5 @@ httpx==0.28.1
 # (Python 3.10، أعلى نسخة متاحة 2.2.x)، وتثبيت نسخة بعينها يكسر pip install
 # بكل إقلاع أو يتعارض معهما. النطاق مُتحقَّق أصلاً هناك فلا يغيّر شيئاً.
 numpy>=1.26,<3
-# بدء المكالمات الصوتية (app/features/voice_followup/calls.py): إنشاء غرفة
-# LiveKit وdispatch للـ agent وتوكن دخول لتطبيق سطح المكتب.
-livekit-api==1.2.2
+# Pipecat voice pipeline; includes CPU Silero ONNX and native WebSocket processing.
+pipecat-ai==1.12.0

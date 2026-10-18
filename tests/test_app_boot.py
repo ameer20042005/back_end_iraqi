@@ -31,7 +31,8 @@ def test_audio_warmup_runs_after_engine_is_ready(monkeypatch):
 
     monkeypatch.setattr(main, "llm_engine", ReadyEngine())
     monkeypatch.setattr(main, "run_in_threadpool", run)
-    monkeypatch.setattr(main, "warmup_transcriber", warmup_transcriber)
+    monkeypatch.setattr(main.voice_health, "warmup_enabled", lambda: True)
+    monkeypatch.setattr(main.voice_health, "warmup_voice_models", warmup_transcriber)
 
     asyncio.run(main._warmup_audio_models())
     assert calls == ["warmup_transcriber"]

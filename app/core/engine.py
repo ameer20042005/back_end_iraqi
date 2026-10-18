@@ -263,11 +263,14 @@ class LLMEngine:
         guided_json: Optional[dict],
         tools: Optional[List[dict]] = None,
         tool_choice: Optional[object] = None,
+        generation_options: Optional[dict] = None,
     ) -> dict:
         body = self._build_body(
             messages, max_tokens, stop, guided_json,
             tools=tools, tool_choice=tool_choice,
         )
+        if generation_options:
+            body.update(generation_options)
 
         if not self._ready:
             # LLMUpstreamError يرث RuntimeError، فأي مستدعٍ قديم يلتقط
@@ -322,6 +325,7 @@ class LLMEngine:
         tools: Optional[List[dict]] = None,
         tool_choice: Optional[object] = "auto",
         max_tokens: Optional[int] = None,
+        generation_options: Optional[dict] = None,
     ) -> dict:
         """Return one native OpenAI chat completion from vLLM.
 
@@ -337,6 +341,7 @@ class LLMEngine:
             guided_json=None,
             tools=tools,
             tool_choice=tool_choice,
+            generation_options=generation_options,
         )
 
     async def generate_stream(

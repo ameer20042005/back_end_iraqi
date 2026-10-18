@@ -1,12 +1,12 @@
 # back_end_iraqi — مزوّد الذكاء الاصطناعي (FastAPI + vLLM)
 
 باك اند FastAPI يقدّم خدمات الذكاء الاصطناعي باللهجة العراقية: وكيل مبيعات، واجهة
-OpenAI متوافقة، استخراج طلب من نص/صوت/صورة، مكالمات صوتية حية (LiveKit)، وتصحيح مناطق شركات
+OpenAI متوافقة، استخراج طلب من نص/صوت/صورة، مكالمات صوتية حية (Pipecat)، وتصحيح مناطق شركات
 التوصيل. لا يخزّن بيانات أعمال — البيانات عند باك اند السستم، وتنفيذ الأدوات عند العميل.
 
 يشتغل محلياً، وعلى RunPod بصورة `ubuntu:22.04` خام: `start.sh` يبني كل شي من
 الصفر بأول إقلاع (Python/pip، vLLM nightly بدعم Gemma 4 مع torch المتوافق،
-ffmpeg/libsndfile1، Whisper وChatterbox TTS).
+ffmpeg/libsndfile1، Chatterbox مع فهم الصوت الأصلي بواسطة Gemma TTS).
 
 ## الميزات
 
@@ -15,7 +15,7 @@ ffmpeg/libsndfile1، Whisper وChatterbox TTS).
 | وكيل مبيعات | `app/features/sales/` | `/sales/*` | [sales.md](docs/api/sales.md) |
 | واجهة OpenAI | `app/features/openai_compat/` | `/v1/chat/completions` | [openai-compat.md](docs/api/openai-compat.md) |
 | إنشاء طلب متعدد الوسائط | `app/features/order_intake/` | `/orders/create` | [orders.md](docs/api/orders.md) |
-| مكالمات صوتية حية (LiveKit أو WebSocket محلي) + مساعد الموظف | `app/features/voice_followup/` | `/voice_followup/*` | [voice-followup.md](docs/api/voice-followup.md) |
+| مكالمات صوتية حية (Pipecat عبر WebSocket) + مساعد الموظف | `app/features/voice_followup/` | `/voice_followup/*` | [voice-followup.md](docs/api/voice-followup.md) |
 | تصحيح مناطق شركات التوصيل | `app/features/district_correction/` | `/v1/district-correction*` | [district-correction.md](docs/api/district-correction.md) |
 
 المصادقة، الرابط الأساسي، نقاط الفحص (`/health`، `/health/voice`، `/gpu`، `/metrics`)، وملخص كل
@@ -75,8 +75,8 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 | `CATALOG_PATH_*` | مسارات `ai_agent` | كل مسار Catalog قابل للتغيير (`CATALOG_PATH_CALL_OUTCOME` فارغ = ما ترسل النتيجة) |
 | `SYSTEM_BACKEND_CALL_OUTCOME_PATH` | `/calls/outcome` | فارغ = ما ترسل نتيجة المكالمة لباك اند السستم |
 | `VOICE_STREAM_*` | انظر التوثيق | الوكيل المحلي عبر WebSocket (`/voice_followup/stream`): السقف، VAD، المهلات |
-| `VOICE_STREAM_AGC` | `1` | تطبيع مستوى صوت الزبون قبل VAD وWhisper (`VOICE_STREAM_AGC_TARGET_DBFS`=-20، `VOICE_STREAM_AGC_MAX_GAIN_DB`=20) |
-| `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1`/`0`: تحميل Whisper وChatterbox عند إقلاع uvicorn (بعد جاهزية vLLM) بدل أول مكالمة |
+| `VOICE_STREAM_AGC` | `1` | تطبيع مستوى صوت الزبون قبل VAD وGemma (`VOICE_STREAM_AGC_TARGET_DBFS`=-20، `VOICE_STREAM_AGC_MAX_GAIN_DB`=20) |
+| `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1`/`0`: تحميل Chatterbox مع فهم الصوت الأصلي بواسطة Gemma عند إقلاع uvicorn (بعد جاهزية vLLM) بدل أول مكالمة |
 | `GPU_MEMORY_UTILIZATION` | `0.85` | حصة vLLM من ذاكرة الكرت؛ الباقي لموديلات الصوت. `start.sh` يحترمه (انظر ميزانية الذاكرة بـ [voice-followup.md](docs/api/voice-followup.md)) |
 | `TTS_POOL_SIZE` | `2` | عدد نسخ Chatterbox (~3–4.5GB لكل نسخة)؛ على A40 مشترك مع vLLM `1` |
 

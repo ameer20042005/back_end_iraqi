@@ -1,42 +1,33 @@
 # -*- coding: utf-8 -*-
-"""بدء مكالمة: غرفة LiveKit + dispatch صريح للـ agent + توكن لتطبيق سطح المكتب.
-
-الـ agent نفسه (agent.py) هو اللي يتصل بالزبون عبر SIP لو مضبوط، حتى يبقى
-تسلسل "اتصل ← انتظر الرد ← ابدأ الكلام" بمكان واحد.
-"""
+"""Reserve a short-lived Pipecat WebSocket session for the WhatsApp bridge."""
 
 import re
 import uuid
-from datetime import timedelta
+import time
 
-from livekit import api
 
-from app.config import settings
 from app.features.voice_followup.schema import AgentCallMetadata, CallRequest, CallResponse
 
-OPERATOR_IDENTITY_PREFIX = "operator"
-# الغرفة تُحذف تلقائياً إذا ما دخلها أحد خلال هذه المدة (مكالمة ما انربطت).
-_EMPTY_TIMEOUT_SECONDS = 120
 _UNSAFE_ROOM_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
+_pending = {}
+_PENDING_TTL = 120
+_MAX_PENDING = 64
 
 
-class LiveKitNotConfigured(RuntimeError):
-    pass
+def consume_stream_id(stream_id: str, request: CallRequest) -> str:
+    _prune_pending()
+    pending = _pending.get(stream_id)
+    if pending is None or pending[2] != request:
+        raise ValueError("stream_id invalid, expired, consumed or call does not match")
+    del _pending[stream_id]
+    return pending[1]
 
 
-def configured() -> bool:
-    return bool(settings.livekit_url and settings.livekit_api_key and settings.livekit_api_secret)
-
-
-def _operator_token(room: str) -> str:
-    return (
-        api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
-        .with_identity(f"{OPERATOR_IDENTITY_PREFIX}-{uuid.uuid4().hex[:8]}")
-        .with_name("operator")
-        .with_ttl(timedelta(hours=1))
-        .with_grants(api.VideoGrants(room_join=True, room=room))
-        .to_jwt()
-    )
+def _prune_pending() -> None:
+    now = time.monotonic()
+    for key, (expires, _, _) in list(_pending.items()):
+        if expires <= now:
+            del _pending[key]
 
 
 def room_name(request: CallRequest) -> str:
@@ -69,28 +60,12 @@ def agent_metadata(request: CallRequest) -> AgentCallMetadata:
 
 
 async def start_call(request: CallRequest) -> CallResponse:
-    if not configured():
-        raise LiveKitNotConfigured("LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET غير مضبوطة")
-
+    _prune_pending()
+    if len(_pending) >= _MAX_PENDING:
+        raise RuntimeError("Too many calls awaiting WebSocket connection")
+    stream_id = uuid.uuid4().hex
     room = room_name(request)
-    metadata = agent_metadata(request)
-    async with api.LiveKitAPI(
-        settings.livekit_url, settings.livekit_api_key, settings.livekit_api_secret,
-    ) as lkapi:
-        await lkapi.room.create_room(api.CreateRoomRequest(
-            name=room, empty_timeout=_EMPTY_TIMEOUT_SECONDS,
-        ))
-        dispatch = await lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(
-            agent_name=settings.livekit_agent_name,
-            room=room,
-            metadata=metadata.model_dump_json(),
-        ))
-
-    sip = bool(settings.livekit_sip_trunk_id and metadata.phone)
-    return CallResponse(
-        room=room,
-        livekit_url=settings.livekit_url,
-        operator_token=_operator_token(room),
-        dispatch_id=dispatch.id,
-        dial_mode="sip" if sip else "bridge",
-    )
+    _pending[stream_id] = (time.monotonic() + _PENDING_TTL, room, request.model_copy(deep=True))
+    return CallResponse(room=room, livekit_url="", operator_token="", dispatch_id="",
+                        dial_mode="bridge", transport="pipecat", stream_path="/voice_followup/stream",
+                        stream_id=stream_id, expires_in_seconds=_PENDING_TTL)

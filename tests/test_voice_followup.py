@@ -20,12 +20,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-# الـ agent worker تبعيته بـ requirements-gpu.txt؛ بدونه تُتخطى هذه الاختبارات.
-pytest.importorskip("livekit.agents")
-from livekit.agents import ToolError  # noqa: E402
-
 from app import main  # noqa: E402
-from app.features.voice_followup import agent as agent_module  # noqa: E402
+from app.features.voice_followup import call_tools as agent_module, gateway  # noqa: E402
 from app.features.voice_followup import calls, operator, outcomes  # noqa: E402
 from app.features.voice_followup.prompts import (  # noqa: E402
     START_CALL_TOOL,
@@ -131,34 +127,32 @@ class RecordingSubmitter:
         return True
 
 
-class _Item:
-    def __init__(self, role, text):
-        self.role, self.text_content = role, text
-
-
 def _context():
-    session = type("S", (), {"history": type("H", (), {"items": [
-        _Item("assistant", "هل وصلك الطلب؟"), _Item("user", "اي وصل"), _Item("user", "عاجبني"),
-    ]})()})()
-    return type("Ctx", (), {"session": session})()
+    return None
 
 
 def _agent():
-    return agent_module.CallAgent(calls.agent_metadata(REQUEST), "call-ORD-1042-abcd1234")
+    ctx = agent_module.CallToolContext(room="call-ORD-1042-abcd1234", meta=calls.agent_metadata(REQUEST),
+                                      customer_transcript=lambda: "اي وصل\nعاجبني")
+
+    class Tools:
+        async def save_outcome(self, context, summary, answers=None, follow_up_needed=False):
+            return await agent_module._save_outcome(ctx, {"summary": summary, "answers": answers,
+                                                         "follow_up_needed": follow_up_needed})
+
+    return Tools()
 
 
 def test_save_outcome_tool_schema():
-    from livekit.agents.llm import utils
-
-    tool = next(t for t in _agent().tools if getattr(t, "id", "") == "save_outcome")
-    params = utils.build_legacy_openai_schema(tool)["function"]["parameters"]
+    tool = next(t for t in agent_module.openai_tools() if t["function"]["name"] == "save_outcome")
+    params = tool["function"]["parameters"]
     assert set(params["properties"]) == {"summary", "answers", "follow_up_needed"}
     assert params["required"] == ["summary"]
 
 
 def test_save_outcome_stores_once_and_forwards(monkeypatch, outcomes_dir):
     submitter = RecordingSubmitter()
-    monkeypatch.setattr(agent_module, "call_outcome_submitter", submitter)
+    monkeypatch.setattr(gateway, "call_outcome_submitter", submitter)
     agent = _agent()
 
     asyncio.run(agent.save_outcome(_context(), "الطلب وصل والزبون راضي",
@@ -175,7 +169,7 @@ def test_save_outcome_stores_once_and_forwards(monkeypatch, outcomes_dir):
 
 
 def test_backend_failure_keeps_local_outcome(monkeypatch, outcomes_dir):
-    monkeypatch.setattr(agent_module, "call_outcome_submitter", RecordingSubmitter(fail=True))
+    monkeypatch.setattr(gateway, "call_outcome_submitter", RecordingSubmitter(fail=True))
     reply = asyncio.run(_agent().save_outcome(_context(), "الزبون يريد يتواصل وياه مندوب", None, True))
     assert "انحفظت" in reply
     assert outcomes.get_outcome("call-ORD-1042-abcd1234").follow_up_needed is True
@@ -183,24 +177,24 @@ def test_backend_failure_keeps_local_outcome(monkeypatch, outcomes_dir):
 
 def test_local_store_failure_is_reported_to_the_model(monkeypatch):
     submitter = RecordingSubmitter()
-    monkeypatch.setattr(agent_module, "call_outcome_submitter", submitter)
+    monkeypatch.setattr(gateway, "call_outcome_submitter", submitter)
 
     def broken(_outcome):
         raise OSError("disk full")
 
     monkeypatch.setattr(agent_module.outcomes, "save_outcome", broken)
-    with pytest.raises(ToolError):
+    with pytest.raises(agent_module.CallToolError):
         asyncio.run(_agent().save_outcome(_context(), "ملخص"))
     assert submitter.calls == []
 
 
 def test_empty_summary_is_rejected(outcomes_dir):
-    with pytest.raises(ToolError):
+    with pytest.raises(agent_module.CallToolError):
         asyncio.run(_agent().save_outcome(_context(), "   "))
 
 
 def test_fallback_outcome_never_overwrites_saved_one(monkeypatch, outcomes_dir):
-    monkeypatch.setattr(agent_module, "call_outcome_submitter", RecordingSubmitter())
+    monkeypatch.setattr(gateway, "call_outcome_submitter", RecordingSubmitter())
     meta = calls.agent_metadata(REQUEST)
     agent_module.save_fallback_outcome(meta, "call-x-1", agent_module.NO_ANSWER_SUMMARY)
     assert outcomes.get_outcome("call-x-1").summary == agent_module.NO_ANSWER_SUMMARY
@@ -352,10 +346,11 @@ def test_operator_cleans_leaked_template_channels():
 CALL_BODY = {"company_name": "X", "goal": "تابع الزبون", "contact": {"phone": "0770"}}
 
 
-def test_calls_endpoint_reports_missing_livekit_config(monkeypatch):
-    monkeypatch.setattr(calls, "settings", replace(calls.settings, livekit_url="", livekit_api_key="", livekit_api_secret=""))
+def test_calls_endpoint_uses_pipecat_without_rtc_config():
     res = TestClient(main.app).post("/voice_followup/calls", headers=VOICE_KEY, json=CALL_BODY)
-    assert res.status_code == 503
+    assert res.status_code == 200
+    assert res.json()["transport"] == "pipecat"
+    assert res.json()["stream_path"] == "/voice_followup/stream"
 
 
 def test_calls_endpoint_requires_voice_key():
@@ -368,61 +363,6 @@ def test_calls_endpoint_rejects_old_contract():
                                     json={"call_type": "followup", "order": {"order_id": "1", "status": "ملغي"}})
     assert res.status_code == 422
 
-
-def _fake_livekit(monkeypatch, sip_trunk="ST_1"):
-    configured = replace(calls.settings, livekit_url="wss://lk.example", livekit_api_key="APIkey",
-                         livekit_api_secret="secret" * 6, livekit_sip_trunk_id=sip_trunk)
-    monkeypatch.setattr(calls, "settings", configured)
-    recorded = {}
-
-    class FakeRoom:
-        async def create_room(self, req):
-            recorded["room"] = req
-
-    class FakeDispatch:
-        async def create_dispatch(self, req):
-            recorded["dispatch"] = req
-            return type("D", (), {"id": "AD_1"})()
-
-    class FakeAPI:
-        def __init__(self, *args):
-            self.room, self.agent_dispatch = FakeRoom(), FakeDispatch()
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(calls.api, "LiveKitAPI", FakeAPI)
-    return configured, recorded
-
-
-def test_start_call_creates_room_and_dispatches_agent_metadata(monkeypatch):
-    configured, recorded = _fake_livekit(monkeypatch)
-    response = asyncio.run(calls.start_call(REQUEST))
-
-    assert response.room == recorded["room"].name == recorded["dispatch"].room
-    assert response.room.startswith("call-ORD-1042-")
-    assert recorded["dispatch"].agent_name == configured.livekit_agent_name
-    meta = AgentCallMetadata.model_validate_json(recorded["dispatch"].metadata)
-    assert meta.goal == REQUEST.goal and meta.questions == REQUEST.questions
-    assert meta.phone == "07701234567" and meta.company_name == "متجر النور"
-    assert "أمير وسام" not in recorded["dispatch"].metadata
-    assert response.dial_mode == "sip"
-    assert response.dispatch_id == "AD_1"
-    assert response.operator_token.count(".") == 2  # JWT
-
-
-def test_start_call_without_phone_or_trunk_is_bridge(monkeypatch):
-    _fake_livekit(monkeypatch, sip_trunk="ST_1")
-    no_phone = REQUEST.model_copy(update={"contact": Contact(name="x")})
-    assert asyncio.run(calls.start_call(no_phone)).dial_mode == "bridge"
-    _fake_livekit(monkeypatch, sip_trunk="")
-    assert asyncio.run(calls.start_call(REQUEST)).dial_mode == "bridge"
-
-
-# ── ٦. مجمّع نسخ النطق (التزامن) ────────────────────────────────────────────
 
 class FakeVoice:
     sr = 24000
@@ -495,9 +435,9 @@ def test_pool_grows_to_size_then_waits_for_a_free_instance(monkeypatch):
     assert got == [first]
 
 
-def test_worker_load_counts_calls_against_the_cap(monkeypatch):
-    monkeypatch.setattr(agent_module, "settings", replace(agent_module.settings, voice_max_concurrent_calls=10))
-    server = type("S", (), {"active_jobs": [object()] * 9})()
-    assert agent_module._call_load(server) == 0.9 < agent_module.server._load_threshold
-    server.active_jobs = [object()] * 10
-    assert agent_module._call_load(server) >= agent_module.server._load_threshold
+def test_pending_pipecat_sessions_are_bounded(monkeypatch):
+    monkeypatch.setattr(calls, "_pending", {})
+    monkeypatch.setattr(calls, "_MAX_PENDING", 1)
+    asyncio.run(calls.start_call(REQUEST))
+    with pytest.raises(RuntimeError, match="Too many"):
+        asyncio.run(calls.start_call(REQUEST))

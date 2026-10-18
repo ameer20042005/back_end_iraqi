@@ -1,44 +1,7 @@
 #!/bin/bash
-# سكربت الإقلاع: يشغّل خادم vLLM (منفذ داخلي، بالخلفية — افتراضياً 18001،
-# انظر VLLM_PORT أدناه) + FastAPI (منفذ 8000، هو الوحيد المكشوف من RunPod).
-#
-# مصمَّم للعمل على قالب RunPod **Ubuntu 22.04 خام** (بدون Python ولا pip
-# ولا CUDA ولا PyTorch ولا vLLM مسبقاً — انظر docs/deploy/runpod.md، الطريقة
-# الوحيدة المعتمدة للنشر): قسم "تجهيز نظام التشغيل" بالأسفل يثبّت كل شي
-# لازم من الصفر بأول إقلاع (Python/pip، أدوات بناء، ffmpeg/libsndfile1)،
-# ثم يتحقق من توفر vLLM بدعم معمارية Gemma4ForConditionalGeneration
-# (PR #44429، ما صدر بعد بإصدار مستقر) ويثبّت نسخة nightly تلقائياً لو
-# ناقصة أو غير مدعومة — شوف _start_vllm أدناه. يشتغل بنفس الموثوقية لو
-# استُخدمت صورة جاهزة فيها بعض هذي المكونات مسبقاً (مثل vllm/vllm-openai
-# أو قالب PyTorch عام) — كل خطوة تتخطى نفسها لو لقت الأداة موجودة أصلاً.
-#
-# الأعلام حسب وصفة vLLM الرسمية لـ Gemma 4 (قسم Full-Featured Server Launch)،
-# مضبوطة لهدفنا: أقصى عدد طلبات متزامنة على A100/H100 80GB+ بردود قصيرة —
-#   --max-model-len قصير = KV cache يتسع لطلبات متزامنة أكثر
-#   --async-scheduling يحسّن الـ throughput (توصية الوصفة)
-#   --enable-prefix-caching أكبر مكسب سرعة بجهة الخادم عندنا: كل الطلبات
-#     تشترك بنفس البادئة الضخمة (system prompt الكامل من plane.md + مرجع
-#     المحافظات)، وبدونه تُعاد معالجة آلاف التوكنات المتطابقة بكل طلب. مع
-#     التفعيل تُحسب مرة وتُعاد من الكاش، فينزل زمن ما-قبل-التوليد (prefill)
-#     بشدة — وهو الجزء الغالب من زمن الاستجابة بردودنا القصيرة.
-#   --limit-mm-per-prompt: صورة وحدة (order_intake)، بلا صوت (الصوت عبر Whisper
-#     داخل FastAPI، ما يمر بـ vLLM)
-#
-# MAX_NUM_SEQS / GPU_MEMORY_UTILIZATION محسوبتان على A40 48GB (~44.43GB
-# فعلياً حسب nvidia-smi على Pods RunPod) — النشر الفعلي الحالي، لا A100/H100.
-# ⚠️ هذا الكرت يتقاسمه vLLM مع Whisper وChatterbox TTS (يُحمَّلان داخل عملية FastAPI
-# نفسها، انظر app/features/voice_followup) على نفس الـGPU الواحد — فحجز نسبة
-# عالية جداً لـvLLM (كانت 0.90 سابقاً) يترك عملياً VRAM شبه صفر لهذول، وأي
-# طلب توليد فعلي (مو مجرد /health) ينهار المحرك بـCUDA OOM (لاحظناه بالضبط:
-# vram_free_gb: 0.95 تقريباً صفر رغم أن 0.90 يفترض يترك ~4.4GB).
-# الحساب: الأوزان (bf16, 12B) ~24.4GB. نحجز ~6GB هامش لـWhisper/Chatterbox +
-# overhead سياقات CUDA المتعددة بنفس الكرت + أمان إضافي → 0.85 من 44.43GB
-# (~37.8GB لـvLLM) يترك ~6.6GB فعلياً. الباقي لـKV cache: 37.8-24.4≈13.4GB.
-# بنفس MAX_MODEL_LEN=10000 (٠.375MB/توكن×10000≈3.7GB/طلب بالسياق الأقصى)،
-# نفس منطق تحجيم H100 (47.6GB KV cache→~350 عملياً بأحمال إنتاج فعلية، أغلبها
-# أقصر من الأقصى وتتقاسم صفحات الكاش): 13.4/47.6×350 ≈ 98، مقرَّبة لأسفل لـ90
-# لهامش أمان إضافي (تقدير حجز Whisper/Chatterbox تقريبي لا مقيس بالضبط).
-
+# vLLM + FastAPI/Pipecat, one voice process and one lazily loaded TTS instance.
+# Native Gemma audio is enabled. See docs/pipecat-native-audio.md for memory sizing.
+# Ubuntu 22.04's Python 3.10 is upgraded into an isolated managed 3.12 environment.
 set -e
 cd "$(dirname "$0")"
 
@@ -81,6 +44,18 @@ if ! command -v python3 >/dev/null 2>&1 || ! python3 -m pip --version >/dev/null
     _apt_install_pinned git             1:2.34.1-1ubuntu1.17
 fi
 
+# Pipecat 1.12 requires Python >=3.11. Never alter /usr/bin/python3.
+if [ -f .venv-pipecat/bin/activate ]; then
+    source .venv-pipecat/bin/activate
+fi
+if ! python3 -c 'import sys; assert (3,11) <= sys.version_info[:2] < (3,14)' 2>/dev/null; then
+    echo "==> Preparing isolated Python 3.12.12 for Pipecat..."
+    python3 -m pip install --no-cache-dir -q uv==0.9.5
+    python3 -m uv python install 3.12.12
+    python3 -m uv venv --python 3.12.12 --seed .venv-pipecat
+    source .venv-pipecat/bin/activate
+fi
+
 python3 -m pip install --no-cache-dir -q -r requirements.txt -r requirements-gpu.txt
 # Chatterbox TTS بلا تبعياته المثبَّتة (torch/transformers/numpy بإصدارات
 # تتعارض مع vLLM) — تبعياته الفعلية بـ requirements-gpu.txt، انظر هناك.
@@ -116,7 +91,7 @@ if ! python3 -c "import vllm.entrypoints.openai.api_server" 2>/dev/null; then
     # torch/torchvision، ويظهر الخلل لاحقاً كـ"libcudart.so.13: cannot open
     # shared object file" بدل خطأ CUDA واضح وقت التثبيت. --force-reinstall
     # يجبر إعادة حل الشجرة كاملة بنفس نسخة CUDA (cu129) دفعة وحدة.
-    python3 -m pip install -U --force-reinstall vllm torch torchvision --pre \
+    python3 -m pip install -U --force-reinstall -c requirements.txt -c requirements-gpu.txt "vllm[audio]" torch torchvision --pre \
         --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
         --extra-index-url https://download.pytorch.org/whl/cu129
 fi
@@ -136,6 +111,7 @@ for value in (
     settings.model_name, settings.vllm_port, settings.api_port,
     settings.max_model_len, settings.gpu_memory_utilization,
     settings.max_num_seqs, settings.max_num_batched_tokens,
+    int(settings.kv_cache_memory_gb * 1024**3),
 ):
     print(value)
 ')
@@ -146,7 +122,10 @@ MAX_MODEL_LEN="${STATIC_CONFIG[3]}"
 GPU_MEMORY_UTILIZATION="${STATIC_CONFIG[4]}"
 MAX_NUM_SEQS="${STATIC_CONFIG[5]}"
 MAX_NUM_BATCHED_TOKENS="${STATIC_CONFIG[6]}"
+KV_CACHE_BYTES="${STATIC_CONFIG[7]}"
 VLLM_LOG="/tmp/vllm_boot.log"
+mapfile -t VLLM_ARGS < <(python3 -m app.core.vllm_launch)
+
 
 # يقابل CPU Thread Pool Size في LM Studio.
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
@@ -158,7 +137,7 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
 # ويرسله مع كل طلب لو لقاه. الخطر: توكن قديم/ملغى ضابطه قالب RunPod يخلّي
 # الـHub يرد 401 حتى على مستودع عام. لذلك:
 #   · unset يمسح متغيرَي التوكن من بيئة هذا السكربت — وبالتالي من vLLM
-#     وuvicorn (Whisper/Chatterbox) لأنهم يرثون البيئة منه.
+#     وuvicorn (native audio/Chatterbox) لأنهم يرثون البيئة منه.
 #   · HF_HUB_DISABLE_IMPLICIT_TOKEN=1 يمنع إرسال توكن ملف login المخزَّن
 #     ضمنياً مع طلبات القراءة/التنزيل.
 # unset HF_TOKEN HUGGING_FACE_HUB_TOKEN
@@ -253,22 +232,7 @@ _start_vllm() {
     # subshell $(...) يفقد ملكية العملية الخلفية بمجرد خروجه ببعض بيئات
     # bash، فيوصل PID لعملية ميتة بالشل الأم). النتيجة تُقرأ مباشرة من $!
     # بعد الاستدعاء عبر المتغير العالمي VLLM_LAST_PID.
-    python3 -m vllm.entrypoints.openai.api_server \
-        --model "${MODEL_NAME}" \
-        --host 127.0.0.1 \
-        --port "${VLLM_PORT}" \
-        --max-model-len "${MAX_MODEL_LEN}" \
-        --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
-        --max-num-seqs "${MAX_NUM_SEQS}" \
-        --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
-        --async-scheduling \
-        --enable-prefix-caching \
-        --enable-auto-tool-choice \
-        --tool-call-parser gemma4 \
-        --reasoning-parser gemma4 \
-        --default-chat-template-kwargs '{"enable_thinking":true}' \
-        --limit-mm-per-prompt '{"image": 1, "audio": 0}' \
-        > "${VLLM_LOG}" 2>&1 &
+    python3 -m vllm.entrypoints.openai.api_server "${VLLM_ARGS[@]}" > "${VLLM_LOG}" 2>&1 &
     VLLM_LAST_PID=$!
 }
 
@@ -281,6 +245,7 @@ _start_vllm() {
 _fix_cuda_lib_path
 _fix_cuda_nvcc_path
 
+echo "voice_memory_plan kv_cache_bytes=${KV_CACHE_BYTES} auto_gpu_fraction=${GPU_MEMORY_UTILIZATION} max_sequences=${MAX_NUM_SEQS} tts_instances=${TTS_POOL_SIZE:-1}"
 echo "==> Starting vLLM on port ${VLLM_PORT} (model: ${MODEL_NAME}, gpu_memory_utilization=${GPU_MEMORY_UTILIZATION})..."
 _start_vllm
 VLLM_PID=${VLLM_LAST_PID}
@@ -293,7 +258,7 @@ if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
     tail -n 40 "${VLLM_LOG}"
     if grep -qi "Gemma4ForConditionalGeneration\|is not supported for now\|ValueError: Model architectures\|ModuleNotFoundError\|No module named\|different CUDA major versions" "${VLLM_LOG}"; then
         echo "==> Cause: the current vllm version doesn't support the Gemma4 architecture (or isn't installed) — installing nightly wheel..."
-        python3 -m pip install -U --force-reinstall vllm torch torchvision --pre \
+        python3 -m pip install -U --force-reinstall -c requirements.txt -c requirements-gpu.txt "vllm[audio]" torch torchvision --pre \
             --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
             --extra-index-url https://download.pytorch.org/whl/cu129
         _ensure_torchaudio
@@ -319,20 +284,7 @@ echo "==> vLLM is running (PID ${VLLM_PID}) on port ${VLLM_PORT}, still loading 
 # لو انطفت عملية vLLM ينطفي الـ container كامل (أوضح من خدمة نص ميتة جزئياً)
 trap 'kill "${VLLM_PID}" 2>/dev/null || true' EXIT
 
-# الـ agent worker للمكالمات الحية (LiveKit) — عملية منفصلة تتصل بخادم LiveKit
-# (LiveKit Cloud أو VPS، مو على الـ Pod لأنه يحتاج UDP). يشتغل فقط لو
-# LIVEKIT_URL/LIVEKIT_API_KEY/LIVEKIT_API_SECRET مضبوطة بالبيئة.
-AGENT_LOG=/tmp/agent.log
-if [ -n "${LIVEKIT_URL:-}" ] && [ -n "${LIVEKIT_API_KEY:-}" ] && [ -n "${LIVEKIT_API_SECRET:-}" ]; then
-    pkill -f "app.features.voice_followup.agent" 2>/dev/null || true
-    python3 -m app.features.voice_followup.agent download-files >> "${AGENT_LOG}" 2>&1 || true
-    echo "==> Starting LiveKit agent worker (log: ${AGENT_LOG})..."
-    nohup python3 -m app.features.voice_followup.agent start >> "${AGENT_LOG}" 2>&1 &
-    AGENT_PID=$!
-    trap 'kill "${VLLM_PID}" "${AGENT_PID}" 2>/dev/null || true' EXIT
-else
-    echo "==> LIVEKIT_* not set — live voice calls disabled (agent worker not started)"
-fi
+# Pipecat runs inside FastAPI over /voice_followup/stream; no separate worker.
 
 echo "==> Starting FastAPI on port ${API_PORT}..."
 echo "    (features run immediately in fallback mode; the readiness check in app/core/engine.py"

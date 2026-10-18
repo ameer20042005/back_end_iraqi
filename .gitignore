@@ -18,3 +18,4 @@ training/models/
 
 # Voice call outcomes (polled by the desktop app)
 data/call_outcomes/
+.venv-pipecat/
