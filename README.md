@@ -87,9 +87,19 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 دليل كامل خطوة بخطوة مع حل المشاكل: [docs/deploy/runpod.md](docs/deploy/runpod.md). باختصار:
 
 1. Pod بصورة **`ubuntu:22.04`**، Container Disk **60GB+**، وأضف `8000` إلى **Expose HTTP Ports**.
-2. انسخ المشروع إلى `/workspace/back_end_iraqi` وعدّل `app/config.py` عند الحاجة (لا يلزم توكن Hugging Face).
-3. `cd /workspace/back_end_iraqi && bash start.sh`
-4. الرابط: `https://<POD_ID>-8000.proxy.runpod.net`
+2. انسخ المشروع إلى `/workspace/app` وعدّل `app/config.py` عند الحاجة. جهّز `git` و`tmux` و`curl` على الصورة الخام حسب الدليل.
+3. شغّل سكربت الإقلاع داخل tmux حتى يستمر بعد غلق الطرفية:
+
+   ```bash
+   cd /workspace/app || exit 1
+   tmux kill-session -t api 2>/dev/null || true
+   tmux new-session -d -s api -c /workspace/app 'HF_HUB_ENABLE_HF_TRANSFER=0 bash start.sh > /tmp/api.log 2>&1'
+   tail -f /tmp/api.log
+   ```
+
+4. افحص `/health` و`/health/llm`، ثم افتح `https://<POD_ID>-8000.proxy.runpod.net/test`.
+
+لتحديث نسخة الـ Pod اتبع [تحديث الكود لاحقاً](docs/deploy/runpod.md#تحديث-الكود-لاحقاً). السكربت المصحّح يولّد قيود تثبيت vLLM تلقائياً لتجنب `Constraints cannot have extras`؛ لا تحتاج تعديل المتطلبات أو إنشاء قيود يدوياً. السيرفر وصفحة التيست يبدأان بعد مرحلة تثبيت المتطلبات وبدء عملية vLLM.
 
 ## الاختبارات
 

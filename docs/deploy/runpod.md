@@ -23,6 +23,13 @@
 
 **Connect** → **Start Web Terminal**.
 
+على صورة Ubuntu الخام، جهّز أدوات تنزيل المشروع وتشغيله بالخلفية أولاً (الطرفية بصلاحية root):
+
+```bash
+apt-get update
+apt-get install -y git tmux curl ca-certificates
+```
+
 ### 3) نزّل المشروع
 
 ```bash
@@ -34,10 +41,9 @@ cd /workspace/app
 ### 4) شغّل السيرفر (يضل شغال بعد غلق الطرفية)
 
 ```bash
-cd /workspace/app
-export HF_HUB_ENABLE_HF_TRANSFER=0
-tmux kill-session -t api 2>/dev/null
-tmux new-session -d -s api 'bash start.sh > /tmp/api.log 2>&1'
+cd /workspace/app || exit 1
+tmux kill-session -t api 2>/dev/null || true
+tmux new-session -d -s api -c /workspace/app 'HF_HUB_ENABLE_HF_TRANSFER=0 bash start.sh > /tmp/api.log 2>&1'
 ```
 
 ### 5) راقب لحد ما يجهز
@@ -51,10 +57,12 @@ tail -f /tmp/api.log
 ### 6) تأكد إنه جاهز
 
 ```bash
-curl -s http://127.0.0.1:8000/gpu | python3 -m json.tool
+curl --max-time 10 -i http://127.0.0.1:8000/health
+curl --max-time 15 -i http://127.0.0.1:8000/health/llm
+curl --max-time 10 -sS -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8000/test
 ```
 
-انتظر حتى يصير `"vllm_ready": true`.
+نجاح `/health` و`/test` بحالة HTTP `200` يعني أن السيرفر والصفحة جاهزان. انتظر أيضاً حتى يرجع `/health/llm` حالة `200` و`"status":"healthy"` قبل اختبار التوليد. إذا تعذّر الاتصال بالمنفذ 8000، راجع `/tmp/api.log`؛ قد يكون السكربت ما زال يثبّت المتطلبات أو توقّف بسبب خطأ.
 
 ### 7) جرّب أول رد
 
@@ -85,10 +93,10 @@ https://<POD_ID>-8000.proxy.runpod.net/test
 | تريد | الأمر |
 |---|---|
 | تشوف السيرفر شغال؟ | `tmux ls` و `curl -s http://127.0.0.1:8000/health` |
-| تشوف اللوج حي | `tmux attach -t api` (اطلع: `Ctrl+B` ثم `D`) |
-| تشوف اللوج بدون دخول | `tail -f /tmp/api.log` |
+| تشوف لوج الإقلاع والسيرفر حي | `tail -f /tmp/api.log` |
+| تشوف لوج النموذج | `tail -f /tmp/vllm_boot.log` |
 | توقف السيرفر | `tmux kill-session -t api` |
-| تعيد التشغيل | `cd /workspace/app && tmux kill-session -t api 2>/dev/null && tmux new-session -d -s api 'bash start.sh > /tmp/api.log 2>&1'` |
+| تعيد التشغيل | نفّذ أوامر [الخطوة 4](#runpod-start)؛ تعمل أيضاً إذا لم توجد جلسة `api` |
 | تحدّث الكود وتعيد التشغيل | انظر [تحديث الكود لاحقاً](#تحديث-الكود-لاحقاً) |
 
 ---
@@ -138,22 +146,23 @@ nano app/config.py
 
 لا يلزم توكن Hugging Face — كل الموديلات المستعملة عامة وتُنزَّل بلا مصادقة. وكل القيم (`model_name`، `vllm_port`، `max_model_len`، `gpu_memory_utilization`...) ثابتة في `Settings` داخل الملف نفسه؛ عدّلها هناك فقط عند الحاجة.
 
+<a id="runpod-start"></a>
+
 ### الخطوة 4 — التشغيل (بـ tmux حتى يضل شغال بعد غلق الطرفية)
 
 انسخ هذي الأوامر كما هي:
 
 ```bash
-cd /workspace/app
-export HF_HUB_ENABLE_HF_TRANSFER=0
-tmux kill-session -t api 2>/dev/null
-tmux new-session -d -s api 'bash start.sh > /tmp/api.log 2>&1'
+cd /workspace/app || exit 1
+tmux kill-session -t api 2>/dev/null || true
+tmux new-session -d -s api -c /workspace/app 'HF_HUB_ENABLE_HF_TRANSFER=0 bash start.sh > /tmp/api.log 2>&1'
 ```
 
-خلص — السيرفر يشتغل بالخلفية ويضل شغال حتى لو غلقت الطرفية.
+هذا يبدأ سكربت الإقلاع بالخلفية ويخليه يستمر بعد غلق الطرفية. نجاح أمر `tmux new-session` يعني أن الجلسة بدأت؛ تحقّق من اللوج ونقاط الصحة حتى تتأكد أن التطبيق اشتغل فعلاً. الخيار `-c /workspace/app` يحدد مجلد المشروع، و`|| true` يسمح بالتشغيل حتى لو ما كانت جلسة `api` موجودة.
 
 **ليش هيك مو `tmux new -s api` بعدين `bash start.sh`؟** لأن `new-session -d` تبدأ الجلسة **منفصلة أصلاً**، فما تحتاج تضغط `Ctrl+B` ثم `D` للخروج — وهذي الضغطة أكثر خطوة تنكسر بالعادة (لو انضغطت غلط تظهر كنص `^B^B` والسيرفر يموت مع الطرفية).
 
-**ليش `HF_HUB_ENABLE_HF_TRANSFER=0`؟** بعض قوالب RunPod تضبط هذا المتغير على `1` بدون ما تكون حزمة `hf_transfer` مثبّتة، فيفشل **أي** تحميل من Hugging Face بخطأ:
+**ليش `HF_HUB_ENABLE_HF_TRANSFER=0` داخل أمر الجلسة؟** نمرّره مباشرة إلى `start.sh` حتى يستلمه أيضاً لو خادم tmux كان شغّالاً من قبل. بعض قوالب RunPod تضبطه على `1` بدون ما تكون حزمة `hf_transfer` مثبّتة، فيفشل التحميل بخطأ:
 ```
 ValueError: Fast download using 'hf_transfer' is enabled ... but 'hf_transfer' package is not available
 ```
@@ -170,17 +179,16 @@ tail -f /tmp/vllm_boot.log    # لوج خادم vLLM نفسه (تحميل الأ
 
 اخرج من المتابعة بـ `Ctrl+C` — هذا يوقف `tail` فقط، ما يمس السيرفر داخل tmux.
 
-الـ API يشتغل فوراً بوضع fallback ويتحول تلقائياً لوضع الموديل أول ما يجهز vLLM — راقب حتى تشوف:
-```
-✅ vLLM ready at http://127.0.0.1:18001/v1
-```
+السكربت يجهّز Python والمتطلبات أولاً، ثم يبدأ vLLM ويتأكد أن عمليته لم تتوقف مباشرة، وبعدها يشغّل FastAPI. لذلك `/health` و`/test` لا يستجيبان أثناء مرحلة التثبيت أو إذا فشلت. بعد بدء FastAPI قد تبقى خدمة النموذج غير جاهزة إلى أن يكتمل تحميل الأوزان؛ افحص `/health/llm` كما في [الخطوة 6](#6-تأكد-إنه-جاهز).
+
+عند الحاجة إلى Python 3.12، ينشئ السكربت بيئة `.venv-pipecat` ويستخدمها دون تغيير Python النظام. وفي تثبيت vLLM يولّد ملف قيود مؤقتاً من `requirements.txt` و`requirements-gpu.txt`، ويحذف منه أسماء الإضافات مثل `[standard]` فقط، مع الحفاظ على الإصدارات. تثبيت المتطلبات العادي يبقي `uvicorn[standard]` وميزاته مفعّلة. لا تحتاج إنشاء ملف قيود يدوياً مع السكربت المحدّث.
 
 #### أوامر tmux اللي تحتاجها
 
 | الأمر | الفايدة |
 |---|---|
 | `tmux ls` | يعرض الجلسات الشغالة (لازم تشوف `api`) |
-| `tmux attach -t api` | تدخل الجلسة وتشوف اللوج حي |
+| `tmux attach -t api` | تدخل جلسة التشغيل؛ لعرض اللوج استخدم `tail -f /tmp/api.log` لأن الخرج محوّل إلى ملف |
 | `Ctrl+B` ثم `D` | تطلع من الجلسة **بدون** ما توقف السيرفر (اضغطهن بالتتابع، مو سوية) |
 | `tmux kill-session -t api` | توقف السيرفر نهائياً |
 
@@ -201,14 +209,37 @@ curl -s http://127.0.0.1:8000/health
 
 #### تحديث الكود لاحقاً
 
+ارفع إصلاح `start.sh` إلى فرع `main` في GitHub أولاً؛ أوامر الـ Pod التالية تسحب النسخة المنشورة هناك. استعملها بعد حفظ أي تعديلات محلية تريد الاحتفاظ بها:
+
 ```bash
-cd /workspace/app
-git fetch origin && git checkout main && git reset --hard origin/main
-tmux kill-session -t api 2>/dev/null
-tmux new-session -d -s api 'bash start.sh > /tmp/api.log 2>&1'
+(
+  set -e
+  cd /workspace/app
+  git fetch origin
+  git checkout main
+  git reset --hard origin/main
+  tmux kill-session -t api 2>/dev/null || true
+  tmux new-session -d -s api -c /workspace/app 'HF_HUB_ENABLE_HF_TRANSFER=0 bash start.sh > /tmp/api.log 2>&1'
+)
 ```
 
 > ⚠️ `git reset --hard` يمحي أي تعديل محلي بالـ Pod. لو عندك تعديلات تريد تحتفظ بيها، شغّل `git stash` قبله.
+
+كتلة `set -e` توقف التحديث عند فشل Git، قبل إيقاف الجلسة وإعادة التشغيل. بعدها راقب `/tmp/api.log` وأعد فحوص `/health` و`/health/llm` و`/test` في الخطوة 6. مع النسخة المصحّحة من `start.sh` لا تحتاج أوامر `sed` المؤقتة؛ `git reset --hard` يستبدلها بنسخة المستودع.
+
+#### تشخيص توقف الإقلاع
+
+إذا اختفت جلسة `api` أو ظهر `Connection refused` أو كانت صفحة البروكسي غير متاحة، نفّذ داخل الـ Pod:
+
+```bash
+cd /workspace/app || exit 1
+tmux ls
+curl --max-time 5 -i http://127.0.0.1:8000/health
+tail -n 100 /tmp/api.log
+tail -n 100 /tmp/vllm_boot.log
+```
+
+ابدأ بخطأ `/tmp/api.log`. سجل vLLM قد يكون من تشغيل سابق إذا توقّف السكربت قبل بدء النموذج، وقد لا يوجد في أول تشغيل. إذا ظهر `ERROR: Constraints cannot have extras`، فالنسخة التي تعمل ما زالت تمرّر ملف المتطلبات مباشرة كقيود pip؛ حدّثها إلى `start.sh` الذي يحتوي الدالة `_install_vllm`. لا تحذف `[standard]` من المتطلبات ولا تغيّر إصدارات الحزم لمعالجة هذا الخطأ.
 
 ### الخطوة 5 — الوصول للسيرفر
 
@@ -240,7 +271,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test   (على RunPod)
 
 صفحة HTML/CSS/JS ثابتة (بدون أي تبعيات خارجية أو مكتبات) مبنية داخل المشروع (`static/index.html`)، تسمح باختبار كل نقاط الـ API من المتصفح مباشرة بدون Postman أو `curl`:
 
-- **حقل رابط السيرفر** أعلى الشريط الجانبي — معبّأ تلقائياً برابط الصفحة الحالية، وتكدر تبدّله لأي رابط ثاني (مفيد لو فتحت الصفحة محلياً بس تريد تختبر Pod شغال على RunPod).
+- **حقل رابط السيرفر** أعلى الشريط الجانبي — يستعمل آخر رابط محفوظ في المتصفح، أو رابط الصفحة الحالية إذا لم يوجد رابط محفوظ. على RunPod تأكد أنه `https://<POD_ID>-8000.proxy.runpod.net` إذا كانت الصفحة تفتح لكن لا تتصل بالسيرفر.
 - **مؤشر حالة الاتصال** — يفحص `/health` و`/gpu` ويوضح إذا الموديل شغال فعلاً (`vLLM`) أو بوضع fallback بدون GPU.
 - **خانات مفاتيح API** (مبيعات/دعم/إنشاء طلبات/متابعة صوتية) تحت مؤشر الحالة — معبّأة مسبقاً بنفس القيم الثابتة بـ`app/config.py`، وتُحفظ بمتصفحك (`localStorage`) فتقدر تعدّلها بعد تغيير المفاتيح بالملف. كل نقطة بالقائمة ترسل تلقائياً هيدر `X-API-Key` بالمفتاح المطابق لخدمتها.
 - **كل نقطة براوترها الخاص** بالقائمة الجانبية:
