@@ -982,13 +982,13 @@
 
     switch (path) {
       case "/health": return json({ status: "healthy" });
-      case "/health/llm": return json({ status: "healthy", model: "google/gemma-4-E4B-it", reachable: true, loaded: true,
+      case "/health/llm": return json({ status: "healthy", model: "Qwen/Qwen3.5-9B", reachable: true, loaded: true,
         backend: "vllm", base_url: "http://127.0.0.1:18001/v1" });
       case "/health/voice": return json(DEMO_VOICE_HEALTH);
       case "/": return json({ status: "ok", service: "back_end_iraqi", docs: "/docs" });
       case "/gpu": return json({ torch: "2.8.0", cuda: true, vllm_ready: true, device_count: 1, device_name: "NVIDIA A40 (تجريبي)",
         cuda_version: "12.9", vram_total_gb: 44.43, vram_free_gb: 6.6 });
-      case "/metrics": return json({ mode: "vllm_openai_client", vllm_base_url: "http://localhost:1234/v1", model: "google/gemma-4-E4B-it",
+      case "/metrics": return json({ mode: "vllm_openai_client", vllm_base_url: "http://localhost:1234/v1", model: "Qwen/Qwen3.5-9B",
         vllm_ready: true, vllm_inflight: 0, requests_served: 42, errors: 1, request_latency_ms_p50: 1840.5, request_latency_ms_p95: 4210.2 });
       case "/sales/chat":
       case "/sales/chat/completions":
@@ -1148,7 +1148,7 @@
     { id: "ordersCreate", group: "الطلبات", name: "إنشاء طلب", method: "POST", path: "/orders/create", key: "orders",
       short: "نص أو صوت أو صورة ← JSON طلب مؤكَّد مباشرة، بلا محادثة.",
       title: "إنشاء طلب من نص أو صوت أو صورة",
-      desc: "مدخل واحد فقط بكل طلب (multipart): نص رسالة الزبون، أو ملف صوتي (Gemma يسمعه مباشرة وينسخه)، أو صورة (لقطة شاشة أو طلب مكتوب). يرجع طلباً مؤكَّداً مطابقاً للكتالوج.",
+      desc: "مدخل واحد فقط بكل طلب (multipart): نص رسالة الزبون، أو ملف صوتي (Whisper يسمعه مباشرة وينسخه)، أو صورة (لقطة شاشة أو طلب مكتوب). يرجع طلباً مؤكَّداً مطابقاً للكتالوج.",
       render: renderOrders },
 
     { id: "districtReady", group: "تصحيح المناطق", name: "جاهزية الكتالوج", method: "GET", path: "/v1/district-correction/ready",
@@ -1179,7 +1179,7 @@
     { id: "voiceHealth", group: "المكالمات", name: "صحة الصوت", method: "GET", path: "/health/voice",
       short: "النطق والصوت الأصلي جاهزين؟ الذاكرة، وتشخيص ليش آخر مكالمة ما سمعت الزبون.",
       title: "صحة صوت المكالمات (Pipecat)",
-      desc: "بلا مفتاح، وما يحمّل أي نموذج. Chatterbox (النطق) وGemma (يسمع صوت الزبون مباشرة)، التحميل المسبق، ذاكرة الـ GPU، ونتيجة آخر نطق. last_call أرقام صوت آخر مكالمة (بلا نص) مع diagnosis يسمّي سبب عدم سماع الزبون. 503 لو شي ناقص أو آخر نطق فشل.",
+      desc: "بلا مفتاح، وما يحمّل أي نموذج. Chatterbox (النطق) وWhisper (يسمع صوت الزبون مباشرة)، التحميل المسبق، ذاكرة الـ GPU، ونتيجة آخر نطق. last_call أرقام صوت آخر مكالمة (بلا نص) مع diagnosis يسمّي سبب عدم سماع الزبون. 503 لو شي ناقص أو آخر نطق فشل.",
       render: renderVoiceHealth },
 
     { id: "loadTest", group: "الأداء", name: "اختبار الحمل", method: "POST", path: "/sales/chat/completions ×N", key: "sales",
@@ -1999,17 +1999,17 @@
   const VOICE_CALL_EXAMPLE = {"company_name":"شركة تجريبية","goal":"اسأل عن وصول الطلب","questions":["هل وصل الطلب؟"],"contact":{},"reference_id":"DEMO-1","language":"ar"};
 
   const DEMO_VOICE_HEALTH = {
-    status: "healthy", engine: "pipecat", input_mode: "native", stt_required: false,
+    status: "healthy", engine: "pipecat", input_mode: "whisper", stt_required: true,
     tts: { installed: true, import_error: null, loaded: true, instances: 1, pool_size: 1,
       last_synthesis: { ok: true, at: "2026-10-17T09:12:03+00:00", seconds: 0.84, reason: null, error_type: null } },
-    native_audio: { engine: "native_audio", model: "google/gemma-4-E4B-it", local_model: false, ready: true },
+    stt: { engine: "whisper", model: "ayoubkirouane/whisper-small-ar", local_model: true, ready: true },
     gpu: { cuda: true, vram_free_gb: 2.1, vram_total_gb: 44.43, process_allocated_gb: 3.2, process_reserved_gb: 3.9, process_cached_unused_gb: 0.7 },
     warmup: { enabled: true, state: "done", tts: true, seconds: 41.7 },
     memory_plan: { kv_cache_gb: 8, gpu_fraction: 0.8, max_sequences: 90, tts_pool_size: 1 },
     last_call: { active: false, started_at: "2026-10-17T09:10:00+00:00", duration_s: 48.2, sample_rate: 16000, measured_sample_rate: 16000,
       vad: "silero", agc: true, audio_bytes: 1536000, audio_seconds: 48, ignored_bytes: 0, level_dbfs_mean: -52.3, level_dbfs_max: -18.9,
       agc_gain_db_mean: 3.1, agc_gain_db_max: 12.4, vad_windows: 1500, vad_speech_windows: 412, turn_starts: 5,
-      segments_to_model: 4, segment_seconds: 13.6, native_empty: 0, native_errors: 0, native_error_type: null,
+      segments_to_model: 4, segment_seconds: 13.6, stt_empty: 0, stt_errors: 0, stt_error_type: null,
       user_transcripts: 4, interrupts: 1, protocol_errors: 0, diagnosis: "ok" }
   };
 
@@ -2021,8 +2021,8 @@
     sample_rate_mismatch: ["معدل الصوت الفعلي بعيد عن sample_rate المعلن بـ start", "err"],
     too_quiet: ["الصوت واطي جداً (أقل من ‎-50 dBFS) وVAD ما لگى كلام", "warn"],
     vad_no_speech: ["الصوت مسموع بس VAD ما صنّفه كلام", "warn"],
-    native_error: ["Gemma رمى خطأ لكل مقطع — راجع لوق الخادم", "err"],
-    native_empty: ["مقاطع وصلت Gemma ورجعت بلا نص", "warn"]
+    stt_error: ["Whisper رمى خطأ لكل مقطع — راجع لوق الخادم", "err"],
+    stt_empty: ["مقاطع وصلت Whisper ورجعت بلا نص", "warn"]
   };
   const TTS_REASONS = { cuda_oom: "نفاد ذاكرة GPU", not_installed: "chatterbox غير مثبّت", load_failed: "فشل تحميل النموذج", generation_failed: "فشل التوليد" };
   const WARMUP_STATES = { disabled: "معطّل", pending: "ينتظر vLLM", running: "جاري التحميل", done: "جاهز", failed: "فشل" };
@@ -2033,8 +2033,8 @@
     ["level_dbfs_mean", "متوسط المستوى dBFS"], ["level_dbfs_max", "أعلى مستوى dBFS"],
     ["agc_gain_db_mean", "متوسط رفع AGC dB"], ["agc_gain_db_max", "أعلى رفع AGC dB"],
     ["vad_windows", "نوافذ VAD"], ["vad_speech_windows", "نوافذ مصنّفة كلام"], ["turn_starts", "بدايات أدوار"],
-    ["segments_to_model", "مقاطع أُرسلت لـ Gemma"], ["segment_seconds", "ثواني المقاطع"],
-    ["native_empty", "مقاطع رجعت فارغة"], ["native_errors", "أخطاء Gemma"], ["native_error_type", "نوع آخر خطأ"],
+    ["segments_to_model", "مقاطع أُرسلت لـ Whisper"], ["segment_seconds", "ثواني المقاطع"],
+    ["stt_empty", "مقاطع رجعت فارغة"], ["stt_errors", "أخطاء Whisper"], ["stt_error_type", "نوع آخر خطأ"],
     ["user_transcripts", "نصوص الزبون"], ["interrupts", "مقاطعات"], ["protocol_errors", "رسائل غير مفهومة"]
   ];
 
@@ -2045,13 +2045,13 @@
 
   // ملخّص /health/voice — مشترك بين النظرة العامة وصفحة صحة الصوت.
   function voiceSummary(v) {
-    const tts = v.tts || {}, nat = v.native_audio || {}, g = v.gpu || {}, w = v.warmup || {}, mp = v.memory_plan || {};
+    const tts = v.tts || {}, nat = v.stt || {}, g = v.gpu || {}, w = v.warmup || {}, mp = v.memory_plan || {};
     const last = tts.last_synthesis;
     const lc = v.last_call;
     return h("dl", { class: "kv" },
       h("dt", { text: "الحالة" }), h("dd", {}, pill(v.status === "healthy" ? "سليم" : "غير سليم", v.status === "healthy" ? "ok" : "err"),
         " ", pill([v.engine, v.input_mode].filter(Boolean).join(" · ") || "—", "mono outline")),
-      h("dt", { text: "سماع الزبون (Gemma)" }), h("dd", {}, pill(nat.ready ? "جاهز" : "غير جاهز", nat.ready ? "ok" : "err"),
+      h("dt", { text: "سماع الزبون (Whisper)" }), h("dd", {}, pill(nat.ready ? "جاهز" : "غير جاهز", nat.ready ? "ok" : "err"),
         nat.model ? " " : null, nat.model ? pill(nat.model, "mono outline") : null),
       h("dt", { text: "النطق (Chatterbox)" }), h("dd", {},
         pill(!tts.installed ? "غير مثبّت" + (tts.import_error ? " (" + tts.import_error + ")" : "") : tts.loaded ? "محمّل" : "مثبّت، غير محمّل",
@@ -2085,7 +2085,7 @@
     const callPanel = panel("آخر مكالمة — أرقام صوت الزبون");
     callPanel.append(callBody, h("div", { class: "callout", html:
       "الأرقام بلا نص ولا رقم هاتف. <code>diagnosis</code> يسمّي السبب: <code>no_audio</code> التطبيق ما يبث، " +
-      "<code>too_quiet</code>/<code>vad_no_speech</code> الكاشف ما لگى كلام، <code>native_empty</code>/<code>native_error</code> Gemma ما رجّع نص. " +
+      "<code>too_quiet</code>/<code>vad_no_speech</code> الكاشف ما لگى كلام، <code>stt_empty</code>/<code>stt_error</code> Whisper ما رجّع نص. " +
       "نفس الأرقام تنكتب بلوق الخادم كل 5 ثوانٍ بسطر يبدأ بـ «إحصاءات صوت المكالمة»." }));
     const raw = h("div");
     container.append(summary, callPanel, raw);

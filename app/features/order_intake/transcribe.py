@@ -1,8 +1,4 @@
-"""Transcribe uploaded voice notes using the already-running multimodal LLM.
-
-No speech model is loaded in FastAPI. Decode on CPU, then submit chunks under
-Gemma's 30-second audio limit. Overlap protects words crossing chunk boundaries.
-"""
+"""Decode voice notes and transcribe chunks with the shared Arabic Whisper."""
 
 import asyncio
 import io
@@ -13,9 +9,7 @@ import time
 import numpy as np
 import soundfile as sf
 
-from app.core.engine import llm_engine
-from app.features.voice_followup import vad
-from app.features.voice_followup.audio_input import audio_content
+from app.features.voice_followup import vad, stt
 
 logger = logging.getLogger(__name__)
 MAX_FILE_BYTES = 25 * 1024 * 1024
@@ -79,21 +73,7 @@ async def transcribe(audio_bytes: bytes) -> str:
         step = (CHUNK_SECONDS - OVERLAP_SECONDS) * vad.SAMPLE_RATE
         for start in range(0, samples.size, step):
             part = samples[start:start + size]
-            # Reuse the native WAV encoder without the live-call envelope prompt.
-            content = audio_content(part)[:1] + [{"type": "text", "text": (
-                "انسخ الكلام المسموع حرفياً بلغته الأصلية، بدون ترجمة أو إجابة عليه. "
-                "أخرج نص النسخ فقط، بلا شرح وبلا وسوم. عند الصمت أخرج نصاً فارغاً.")}]
-            response = await llm_engine.create_chat_completion(
-                [{"role": "user", "content": content}], max_tokens=1024,
-                generation_options={"temperature": 0, "reasoning_effort": "none",
-                                    "chat_template_kwargs": {"enable_thinking": False}},
-            )
-            choices = response.get("choices") or []
-            if not choices or choices[0].get("finish_reason") == "length":
-                raise ValueError("تعذّر نسخ المقطع كاملاً؛ جرّب رسالة صوتية أقصر")
-            text = (choices[0].get("message") or {}).get("content")
-            if not isinstance(text, str):
-                raise ValueError("النموذج لم يُرجع نص النسخ الصوتي")
+            text = await stt.transcribe(part, vad.SAMPLE_RATE)
             transcript = merge_transcript(transcript, text.strip())
             chunks += 1
             if start + size >= samples.size:
@@ -101,5 +81,5 @@ async def transcribe(audio_bytes: bytes) -> str:
         status = "ok" if transcript else "empty"
         return transcript
     finally:
-        logger.info("audio_transcription_end engine=native_audio status=%s chunks=%d elapsed_ms=%d",
+        logger.info("audio_transcription_end engine=whisper status=%s chunks=%d elapsed_ms=%d",
                     status, chunks, int((time.monotonic() - started) * 1000))

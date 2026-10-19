@@ -55,8 +55,8 @@ export DISTRICT_LLM_TIMEOUT_SECONDS="${DISTRICT_LLM_TIMEOUT_SECONDS:-300}"
 # ── فحص الخادم واكتشاف اسم الموديل ───────────────────────────────────────
 # app/core/engine.py يرسل اسم الموديل بحقل "model" بكل طلب، والخادم المحلي يتوقع
 # معرّف الموديل المحمَّل فيه فعلاً لا اسم مستودع Hugging Face الثابت. فلو ما
-# حددت LLM_MODEL نسأل GET /models وناخذ أول موديل محادثة — نتخطى موديلات
-# الـembedding لأن LM Studio يعرضها بنفس القائمة. urllib (مكتبة قياسية) بدل
+# حددت LLM_MODEL نسأل GET /models ونختار نسخة Qwen3.5-9B المحلية إن وُجدت.
+# بقية الموديلات تحتاج LLM_MODEL صريحاً. urllib (مكتبة قياسية) بدل
 # curl + jq حتى ما نعتمد على أدوات ممكن ما تكون مثبَّتة على Windows.
 # لو الخادم ما رد ما نوقف الإقلاع: engine.py يعيد الفحص كل 10 ثوانٍ.
 if [ -z "${LLM_MODEL}" ]; then
@@ -66,7 +66,7 @@ url = os.environ["LLM_BASE_URL"].rstrip("/") + "/models"
 try:
     with urllib.request.urlopen(url, timeout=5) as resp:
         ids = [m["id"] for m in json.load(resp)["data"]]
-    print(next(i for i in ids if "embed" not in i.lower()))
+    print(next((i for i in ids if "qwen3.5-9b" in i.lower()), "Qwen/Qwen3.5-9B"))
 except Exception:
     pass
 ')

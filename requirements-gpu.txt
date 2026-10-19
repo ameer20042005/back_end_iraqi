@@ -1,5 +1,5 @@
 # متطلبات GPU — **صارت شبه فارغة عمداً**: محرك التوليد الآن خادم vLLM منفصل
-# (يثبّته start.sh تلقائياً — نسخة nightly بدعم Gemma4، تجيب معها torch
+# (يثبّته start.sh تلقائياً — نسخة nightly بدعم Qwen3.5، تجيب معها torch
 # المتوافق — عند أول إقلاع على Ubuntu 22.04 خام، انظر docs/deploy/runpod.md)،
 # والباك اند عميل HTTP رفيع فقط (httpx بـ requirements.txt).
 #
@@ -7,8 +7,7 @@
 # من app/core/engine.py، ومعها peft (دمج LoRA صار بالنوتبوك حصراً — الموديل
 # المرفوع مدموج جاهز) وbitsandbytes (كانت للتكميم، غير مستخدمة).
 #
-# transformers remains a Chatterbox/vLLM dependency, never an ASR model loader.
-# All audio understanding is served by the existing multimodal LLM.
+# transformers loads the shared Arabic Whisper ASR alongside Chatterbox/vLLM.
 #
 # ⚠️ كل الإصدارات أدناه مثبَّتة (==) بالضبط، لا حدود دنيا/عليا (>=/<) —
 # لا تفتحها مرة ثانية. السبب (عطل حقيقي وقع 2026-07-26): سقف مفتوح خلّى
@@ -22,7 +21,7 @@
 # محلي كامل (فحص المُرمِّز أدناه بـ docs/deploy/runpod.md)، لا تفتح السقف.
 #
 # ملاحظة توافق: vllm 0.26.0 يشترط transformers>=5.5.3 (والإصدار 4.x ما
-# يعرف معمارية Gemma4UnifiedForConditionalGeneration أصلاً) — الإصدار
+# يعرف معمارية Qwen3_5ForConditionalGeneration أصلاً) — الإصدار
 # المثبَّت أدناه داخل هذا المدى، ومُختبَر توافقه مع بقية الحزم هنا فعلياً
 # (pip install --dry-run بلا أي تعارض).
 transformers==5.14.1

@@ -16,12 +16,15 @@ import torch
 from fastapi.testclient import TestClient
 
 from app import config, main
-from app.features.voice_followup import tts, voice_health
+from app.features.voice_followup import tts, stt, voice_health
 
 
 @pytest.fixture(autouse=True)
 def native_model_ready(monkeypatch):
     monkeypatch.setattr(main.llm_engine, "_ready", True)
+    monkeypatch.setattr(stt, "status", lambda: {"engine": "whisper", "model": config.settings.stt_model,
+                                               "installed": True, "loaded": False, "last_transcription": None})
+    monkeypatch.setattr(stt, "warmup", lambda: True)
 
 
 # ── ١. تصنيف الأسباب ───────────────────────────────────────────────────────
@@ -219,8 +222,9 @@ def warm_state(monkeypatch):
 def test_warmup_loads_both_models(warm_state, monkeypatch):
     calls = []
     monkeypatch.setattr(tts, "warmup", lambda: calls.append("tts") or True)
+    monkeypatch.setattr(stt, "warmup", lambda: calls.append("stt") or True)
     result = voice_health.warmup_voice_models()
-    assert calls == ["tts"]
+    assert calls == ["stt", "tts"]
     assert result["state"] == "done" and result["tts"] is True
     assert voice_health.warmup_state()["enabled"] is True
 

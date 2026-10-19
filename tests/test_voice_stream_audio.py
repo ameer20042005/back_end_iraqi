@@ -3,7 +3,7 @@
 والتشخيص، AGC، القطع ذات البايتات الفردية، والنسخ وقت كلام الـ agent.
 
   ١. إحصاءات كل مكالمة: باللوق كل STATS_LOG_SECONDS وبالنهاية، وبـ /health/voice (last_call) بلا نص.
-  ٢. التشخيص: no_audio / too_quiet / native_empty / native_error / ok.
+  ٢. التشخيص: no_audio / too_quiet / stt_empty / stt_error / ok.
   ٣. AGC: الصوت الواطي يوصل لـ VAD وWhisper؛ بلا خفض وبسقف رفع.
   ٤. الصوت وقت كلام الـ agent يتنسخ (مو بس يقاطع)، وقطع بعدد بايتات فردي ما تخرّب العينات.
 """
@@ -56,7 +56,7 @@ def test_stats_are_logged_periodically_and_at_the_end_without_text(env, monkeypa
     last = voice_health.last_call()
     assert last["active"] is False and last["diagnosis"] == "ok"
     assert last["audio_bytes"] == len(SPEECH) + len(SILENCE)
-    assert last["segments_to_model"] == 1 and last["user_transcripts"] == 1 and last["native_empty"] == 0
+    assert last["segments_to_model"] == 1 and last["user_transcripts"] == 1 and last["stt_empty"] == 0
     assert last["vad_speech_windows"] > 0 and last["turn_starts"] == 1
     assert last["level_dbfs_max"] == pytest.approx(-6.0, abs=0.2)  # SPEECH = 0.5
     assert "أمير" not in json.dumps(last, ensure_ascii=False)
@@ -65,20 +65,29 @@ def test_stats_are_logged_periodically_and_at_the_end_without_text(env, monkeypa
     assert body["last_call"] == last
 
 
-def test_native_empty_is_diagnosed(env):
-    env(ScriptedLLM([{"text": "هلا بيك."}]), stt=FakeSTT(""))
+def test_stt_empty_is_diagnosed(env):
+    import threading
+    copied = threading.Event()
+
+    async def empty(samples, rate):
+        copied.set()
+        return ""
+
+    llm = ScriptedLLM([{"text": "هلا بيك."}])
+    env(llm, stt=empty)
     with connect(TestClient(main.app)) as ws:
         accept_and_wait_for_agent(ws)
         ws.send_bytes(SPEECH)
         ws.send_bytes(SILENCE)
-        collect_until(ws, lambda e: e.get("role") == "agent")
+        assert copied.wait(3)
         hang_up(ws)
+    assert len(llm.calls) == 1
     last = voice_health.last_call()
-    assert last["segments_to_model"] == 1 and last["native_empty"] == 1
-    assert last["diagnosis"] == "native_empty"
+    assert last["segments_to_model"] == 1 and last["stt_empty"] == 1
+    assert last["diagnosis"] == "stt_empty"
 
 
-def test_native_error_is_diagnosed(env):
+def test_stt_error_is_diagnosed(env):
     async def broken(samples, rate):
         raise ValueError("generation config is outdated")
 
@@ -87,10 +96,10 @@ def test_native_error_is_diagnosed(env):
         accept_and_wait_for_agent(ws)
         ws.send_bytes(SPEECH)
         ws.send_bytes(SILENCE)
-        assert collect_until(ws, is_type("error"))[0][-1]["code"] == "llm"
+        assert collect_until(ws, is_type("error"))[0][-1]["code"] == "stt"
         hang_up(ws)
     last = voice_health.last_call()
-    assert last["diagnosis"] == "native_error" and last["native_error_type"] == "ValueError"
+    assert last["diagnosis"] == "stt_error" and last["stt_error_type"] == "ValueError"
 
 
 def test_audio_before_accept_is_counted_as_ignored(env):
@@ -117,8 +126,8 @@ def test_diagnosis_rules():
     assert _stats().diagnosis() == "no_audio"
     assert _stats(audio_bytes=10, vad_windows=100, vad_speech_windows=0, level_max=-62.0).diagnosis() == "too_quiet"
     assert _stats(audio_bytes=10, vad_windows=100, vad_speech_windows=0, level_max=-25.0).diagnosis() == "vad_no_speech"
-    assert _stats(audio_bytes=10, segments=2, native_empty=2).diagnosis() == "native_empty"
-    assert _stats(audio_bytes=10, segments=2, native_errors=2).diagnosis() == "native_error"
+    assert _stats(audio_bytes=10, segments=2, stt_empty=2).diagnosis() == "stt_empty"
+    assert _stats(audio_bytes=10, segments=2, stt_errors=2).diagnosis() == "stt_error"
     assert _stats(audio_bytes=10, vad_windows=5, vad_speech_windows=0, user_transcripts=1).diagnosis() == "ok"
     assert _stats(audio_bytes=10, vad_windows=5, vad_speech_windows=3).diagnosis() == "no_speech_yet"
 

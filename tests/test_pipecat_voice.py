@@ -1,27 +1,17 @@
 import asyncio
-import base64
 import io
-import wave
 
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from app import main
-from app.features.voice_followup import audio_input, calls, pipecat_voice, stream, vad
+from app.features.voice_followup import calls, pipecat_voice, stream, vad
 from app.features.voice_followup.schema import CallRequest
 from tests.test_voice_followup_stream import (
     CALL, ScriptedLLM, collect_until, connect, env, event, fake_tts,
     hang_up, is_type, recv, start,
 )
-
-
-def test_audio_input_is_real_16k_mono_pcm_wav():
-    samples = np.linspace(-0.5, 0.5, 16000, dtype=np.float32)
-    content = audio_input.audio_content(samples)
-    with wave.open(io.BytesIO(base64.b64decode(content[0]["input_audio"]["data"]))) as wav:
-        assert (wav.getnchannels(), wav.getsampwidth(), wav.getframerate(), wav.getnframes()) == (1, 2, 16000, 16000)
-        assert np.allclose(vad.pcm16_to_float(wav.readframes(16000)), samples, atol=1e-4)
 
 
 def test_voice_summaries_are_visible_without_root_logging_and_not_duplicated(monkeypatch):
@@ -53,17 +43,6 @@ def test_console_example_is_accepted_by_the_real_api(monkeypatch):
     response = TestClient(main.app).post("/voice_followup/calls", json=sample,
                                        headers={"X-API-Key": stream.settings.voice_followup_api_key})
     assert response.status_code == 200 and response.json()["transport"] == "pipecat"
-
-
-def test_native_transcript_never_reaches_tts_at_any_token_boundary():
-    text = "<customer_transcript>اي وصل الطلب</customer_transcript>زين، شكراً إلك."
-    for split in range(1, len(text)):
-        parser = audio_input.NativeTranscriptFilter()
-        spoken = parser.feed(text[:split]) + parser.feed(text[split:])
-        parser.finish()
-        assert spoken == "زين، شكراً إلك." and parser.transcript == "اي وصل الطلب"
-    with pytest.raises(ValueError, match="native_transcript_missing"):
-        audio_input.NativeTranscriptFilter().feed("جواب بلا نسخ")
 
 
 def test_first_phrase_starts_before_a_long_sentence_finishes():
@@ -287,4 +266,18 @@ def test_real_dependencies_are_checked_before_rust_is_told_to_dial(monkeypatch, 
         ws.send_json({"type": "start", "call": CALL, "sample_rate": 16000})
         first = event(recv(ws))
         assert first["type"] == "error" and first["code"] == code
+        assert recv(ws)["code"] == 1013
+
+
+@pytest.mark.parametrize("installed,code", [(False, "stt_unavailable"), (True, "voice_warming")])
+def test_whisper_is_checked_before_the_customer_is_dialed(monkeypatch, installed, code):
+    from app.features.voice_followup import stt, tts, voice_health
+    monkeypatch.setattr(stream, "deps", None)
+    monkeypatch.setattr(main.llm_engine, "_ready", True)
+    monkeypatch.setattr(tts, "status", lambda: {"installed": True, "loaded": True})
+    monkeypatch.setattr(stt, "status", lambda: {"installed": installed, "loaded": False})
+    monkeypatch.setattr(voice_health, "warmup_enabled", lambda: True)
+    with connect(TestClient(main.app)) as ws:
+        ws.send_json({"type": "start", "call": CALL, "sample_rate": 16000})
+        assert event(recv(ws))["code"] == code
         assert recv(ws)["code"] == 1013

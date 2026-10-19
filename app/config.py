@@ -39,9 +39,8 @@ class TextToSpeechModel:
 
 @dataclass(frozen=True)
 class Settings:
-    # الموديل — النسخة المدموجة (base + LoRA اللهجة العراقية مندمجين بالأوزان
-    # فعلياً عبر merge_and_unload، انظر gemma_iraqi_merge_fixed.ipynb) تشمل
-    # أبراج الرؤية/الصوت كاملة. يخدمه خادم vLLM منفصل (انظر start.sh) —
+    # Qwen3.5-9B للنص والصور؛ Whisper مستقل لفهم الصوت.
+    # يخدم Qwen خادم vLLM منفصل (انظر start.sh) —
     # القيمة هنا تُستخدم باسم الموديل بطلبات /v1/chat/completions ويقرأها
     # start.sh لتمريرها لـ `vllm serve`.
     # start.sh يقرأ هذه القيمة مباشرة، لذلك لا يوجد مصدر ثانٍ قد يختلف عنها.
@@ -50,7 +49,7 @@ class Settings:
     # LLM_MODEL وLLM_BASE_URL (افتراضياً http://localhost:1234/v1). start.sh ما
     # يضبطهما أبداً، فتبقى القيم الثابتة على RunPod. `or` بدل قيمة getenv
     # الافتراضية حتى ما تصير القيمة فارغة لو صُدِّر المتغير فارغاً.
-    model_name: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "google/gemma-4-E4B-it")
+    model_name: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "Qwen/Qwen3.5-9B")
 
     # عنوان خادم vLLM OpenAI-متوافق — الباك اند عميل HTTP رفيع فقط (انظر
     # app/core/engine.py). محلياً بدون أي خادم يبقى ready=False وكل الميزات ترجع
@@ -63,13 +62,12 @@ class Settings:
     llm_request_timeout_seconds: float = field(
         default_factory=lambda: float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS") or "120"))
 
-    # لا يوجد توكن Hugging Face: كل مستودعات الموديلات هنا (Gemma المدموج،
-    # Chatterbox) عامة وغير gated، فتُنزَّل بلا مصادقة (انظر start.sh).
+    # Qwen وWhisper وChatterbox مستودعات عامة؛ لا تحتاج توكن للتنزيل.
 
     # vLLM weights, activations and KV are separate allocations. By default
     # reserve 4 GiB for KV, rather than allocating a fraction of the whole GPU.
     # GPU_MEMORY_UTILIZATION applies only when KV_CACHE_MEMORY_GB=0.
-    # The rest is left for Chatterbox and CUDA runtime/encoder overhead.
+    # The rest is left for Whisper, Chatterbox and CUDA runtime/encoder overhead.
     gpu_memory_utilization: float = field(default_factory=_gpu_memory_utilization)
     max_model_len: int = 32768
     max_num_seqs: int = field(default_factory=lambda: max(1, int(os.getenv("VLLM_MAX_NUM_SEQS") or "16")))
@@ -202,12 +200,17 @@ class Settings:
     tts_pool_size: int = field(default_factory=lambda: max(1, int(os.getenv("TTS_POOL_SIZE") or "1")))
     # الوكيل المحلي عبر WebSocket (app/features/voice_followup/stream.py):
     # تطبيق سطح المكتب يتصل بالزبون من رقم الواتساب مالته ويبث صوت المكالمة
-    # لـ WS /voice_followup/stream، والحوار (صوت Gemma ← Pipecat ← Chatterbox)
+    # لـ WS /voice_followup/stream، والحوار عبر Whisper ثم Qwen ثم Chatterbox.
     # يعيش بعملية uvicorn نفسها عبر Pipecat.
     # أقصى مكالمات WebSocket متزامنة؛ بعدها الاتصال يُرفض بـ busy (4429).
     voice_stream_max_calls: int = field(default_factory=lambda: max(1, int(
         os.getenv("VOICE_STREAM_MAX_CALLS") or os.getenv("VOICE_MAX_CALLS") or "10")))
-    # Native multimodal audio is the only speech input path.
+    # Shared Whisper instance for live calls and uploaded voice notes.
+    stt_model: str = "ayoubkirouane/whisper-small-ar"
+    stt_device: str = field(default_factory=lambda: os.getenv("STT_DEVICE") or "auto")
+    stt_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("STT_TIMEOUT_SECONDS") or "30"))
+    call_outcome_submit_timeout_seconds: float = 2.0
+
     voice_stream_first_phrase_chars: int = field(default_factory=lambda: max(16, min(200, int(
         os.getenv("VOICE_STREAM_FIRST_PHRASE_CHARS") or "56"))))
     # كاشف الكلام: "silero" (ONNX، أدق)، "energy" (طاقة الصوت، بلا تبعيات)،
@@ -230,7 +233,9 @@ class Settings:
         default_factory=lambda: float(os.getenv("VOICE_STREAM_MAX_CALL_SECONDS") or "900"))
     # كم يسبق إرسال صوت الـ agent وقت تشغيله عند التطبيق: أقل = مقاطعة أنظف.
     voice_stream_tts_lead_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_TTS_LEAD_MS") or "1500"))
-    voice_stream_llm_max_tokens: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_LLM_MAX_TOKENS") or "256"))
+    # Allow complete save_outcome JSON for multi-question calls. Spoken replies
+    # stay short through the prompt; this cap does not delay streamed phrases.
+    voice_stream_llm_max_tokens: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_LLM_MAX_TOKENS") or "1024"))
     # تطبيع مستوى صوت الزبون (AGC) قبل VAD والنموذج: يرفع الصوت الواطي لحد
     # الهدف بسقف رفع، بلا خفض. 0 يعطّله.
     voice_stream_agc: bool = field(default_factory=lambda: _env_flag("VOICE_STREAM_AGC") is not False)

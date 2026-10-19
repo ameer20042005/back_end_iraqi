@@ -1,5 +1,5 @@
 # ملاحظة: لا نثبّت torch/vllm هنا — start.sh يثبّتهم تلقائياً (نسخة vLLM
-# nightly بدعم Gemma4، تجيب معها torch المتوافق) عند أول إقلاع على Ubuntu
+# nightly بدعم Qwen3.5، تجيب معها torch المتوافق) عند أول إقلاع على Ubuntu
 # 22.04 خام (انظر docs/deploy/runpod.md). httpx أدناه هو قناة الاتصال بخادم vLLM
 # (app/core/engine.py).
 #

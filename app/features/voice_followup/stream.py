@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Pipecat native-audio voice agent over the desktop WhatsApp PCM WebSocket contract.
+"""Whisper -> Qwen -> Pipecat/Chatterbox over the WhatsApp PCM WebSocket contract.
 
-Gemma understands audio and emits a transcript envelope plus spoken response.
+Whisper transcribes once; Qwen receives text and manages the dialogue and tools.
 Pipecat pipelines LLM tokens, phrase aggregation, Chatterbox TTS and paced PCM.
 Only accepted WhatsApp calls receive speech; opening synthesis can run while ringing.
 """
@@ -25,7 +25,7 @@ from app.features.voice_followup import call_stats, call_tools, vad, voice_healt
 from app.features.voice_followup.calls import agent_metadata, room_name, consume_stream_id
 from app.features.voice_followup.prompts import build_call_instructions, build_opening_instruction
 from app.features.voice_followup.schema import CallRequest
-from app.features.voice_followup import audio_input, pipecat_voice
+from app.features.voice_followup import stt, pipecat_voice
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,7 @@ TTS_UNAVAILABLE_SUMMARY = "تعذّر توليد صوت الـ agent فانته�
 # يرجع أحداث {"text": "..."} أثناء التوليد، و{"tool_calls": [...]} مرة بالنهاية.
 LlmFn = Callable[[List[dict], List[dict]], AsyncIterator[Dict[str, Any]]]
 TtsFn = Callable[[str], Awaitable[Optional[Tuple[np.ndarray, int]]]]
+SttFn = Callable[[np.ndarray, int], Awaitable[str]]
 
 
 @dataclass
@@ -68,6 +69,7 @@ class StreamDeps:
     tts: TtsFn
     vad: Callable[[], Any]
     prewarm_opening: bool = False
+    stt: SttFn = stt.transcribe
 
 
 async def chatterbox_tts(text: str) -> Optional[Tuple[np.ndarray, int]]:
@@ -93,15 +95,12 @@ async def vllm_stream(messages: List[dict], tools: List[dict]) -> AsyncIterator[
     client = llm_engine._client
     if client is None or not llm_engine.ready:
         raise LLMUpstreamError("خادم النموذج غير متاح حالياً", code=LM_STUDIO_UNAVAILABLE)
-    native_audio = any(isinstance(m.get("content"), list) and any(
-        isinstance(p, dict) and p.get("type") == "input_audio" for p in m["content"]) for m in messages)
     body = {
         "model": settings.model_name,
         "messages": messages,
-        "max_tokens": settings.voice_stream_llm_max_tokens + (256 if native_audio else 0),
+        "max_tokens": settings.voice_stream_llm_max_tokens,
         "temperature": 0.0,
         "stream": True,
-        "reasoning_effort": "none",
         "chat_template_kwargs": {"enable_thinking": False},
     }
     if tools:
@@ -266,15 +265,19 @@ class StreamCall:
         self._sent_outcome = False
         self._tts_failures = 0
         self._fallback_summary: Optional[str] = None
-        self.input_mode = "native"
-        self._native_segments: List[np.ndarray] = []
+        self.input_mode = "whisper"
+        self._transcribing = False
+        self._input_revision = 0
+        self._stt_failures = 0
+        self._stt_ms = 0
+        self._pending_transcript = False
         self._turn_started = self._started_at
         self._token_ms: Optional[int] = None
         self._first_sent_ms: Optional[int] = None
         self._ever_sent_audio = False
         self._tts_ms = 0
         self._response_count = 0
-        self._native_turns = 0
+        self._stt_turns = 0
         self._response_errors = 0
         self._turn_origin: Optional[float] = None
 
@@ -370,9 +373,9 @@ class StreamCall:
             await self._send({"type": "outcome", **fallback.model_dump()})
         logger.info("انتهت مكالمة WebSocket %s (%s)", self.trace_id, self.end_reason or "cancelled")
         logger.info("voice_call_end trace=%s engine=pipecat input=%s reason=%s duration_ms=%d responses=%d "
-                    "native_turns=%d response_errors=%d interrupts=%d", self.trace_id, self.input_mode,
+                    "stt_turns=%d response_errors=%d interrupts=%d", self.trace_id, self.input_mode,
                     self.end_reason or "cancelled", int((time.monotonic() - self._started_at) * 1000),
-                    self._response_count, self._native_turns, self._response_errors, self.stats.interrupts)
+                    self._response_count, self._stt_turns, self._response_errors, self.stats.interrupts)
         if not self.disconnected:
             try:
                 await self.ws.close(code=1000)
@@ -463,7 +466,7 @@ class StreamCall:
             if now - self._started_at > settings.voice_stream_max_call_seconds:
                 await self._server_end("max_duration")
                 return
-            busy = (self.endpointer.in_speech or not self._audio_queue.empty()
+            busy = (self._transcribing or self.endpointer.in_speech or not self._audio_queue.empty()
                     or (self._response is not None and not self._response.done()))
             quiet_since = max(self._last_activity, self._playback_until)
             if (self.accepted and not self.ending and not busy
@@ -481,9 +484,10 @@ class StreamCall:
     async def _barge_in(self) -> None:
         if self.ending:
             return
+        self._input_revision += 1
         generating = self._response is not None and not self._response.done()
         playing = time.monotonic() < self._playback_until
-        if generating:
+        if generating and not self._response.cancelling():
             self._response.cancel()
         if (generating and self._turn_audio_sent) or playing:
             self._playback_until = 0.0
@@ -493,35 +497,49 @@ class StreamCall:
     async def _audio_worker(self) -> None:
         while True:
             segment = await self._audio_queue.get()
-            self._native_segments.append(segment)
-            if sum(s.size for s in self._native_segments) > vad.SAMPLE_RATE * audio_input.MAX_AUDIO_SECONDS:
-                self._native_segments.clear()
-                await self._send({"type": "error", "code": "audio_turn_too_long",
-                                  "message": "المقطع الصوتي تجاوز 30 ثانية؛ أعد الكلام بجمل أقصر"})
-                self._response_errors += 1
-                await self._server_end("audio_turn_too_long")
+            if self.ending:
                 continue
-            if self._audio_queue.empty() and not self.endpointer.in_speech and not self.ending:
-                samples = np.concatenate(self._native_segments)
-                # The previous response records its spoken tail during
-                # cancellation. Finish that before appending the new user turn.
-                await self._cancel_response()
-                pending = next((m for m in reversed(self.history)
-                                if m["role"] == "user" and isinstance(m.get("content"), list)), None)
-                if pending is not None:
-                    pending["content"] = audio_input.audio_content(samples)
-                else:
-                    self.history.append({"role": "user", "content": audio_input.audio_content(samples)})
-                self._native_turns += 1
+            await self._cancel_response()
+            if self.ending or self._stop.is_set():
+                continue
+            revision = self._input_revision
+            self._transcribing = True
+            started = time.monotonic()
+            try:
+                transcript = (await self.deps.stt(segment, vad.SAMPLE_RATE)).strip()
+                self._stt_failures = 0
+                self.stats.on_transcript(transcript)
+            except Exception as exc:
+                self.stats.on_stt_error(exc)
+                self._stt_failures += 1
+                self._response_errors += 1
+                await self._send({"type": "error", "code": "stt",
+                                  "message": "تعذّر فهم المقطع الصوتي", "reason": voice_health.classify_error(exc)})
+                if self._stt_failures >= 2:
+                    await self._server_end("stt_unavailable")
+                continue
+            finally:
+                self._transcribing = False
+                self._stt_ms = int((time.monotonic() - started) * 1000)
+                self._last_activity = time.monotonic()
+            self._stt_turns += 1
+            if transcript:
+                self._pending_transcript = True
+                self.customer_lines.append(transcript)
+                self.history.append({"role": "user", "content": transcript})
+                await self._send({"type": "transcript", "role": "user", "text": transcript})
+            if (self._pending_transcript and revision == self._input_revision and self._audio_queue.empty()
+                    and not self.endpointer.in_speech and not self.ending):
+                self._pending_transcript = False
                 await self._start_response()
-            continue
 
     # ── رد الـ agent ────────────────────────────────────────────────────────
 
     async def _cancel_response(self) -> None:
         old = self._response
         if old is not None and not old.done():
-            old.cancel()
+            if not old.cancelling():
+                old.cancel()
             await asyncio.gather(old, return_exceptions=True)
 
     async def _start_response(self, opening: bool = False) -> None:
@@ -538,8 +556,8 @@ class StreamCall:
         try:
             if opening:
                 self.history.append({"role": "user", "content": OPENING_PREFIX + build_opening_instruction(self.meta)})
-            # end_call ممنوعة بأول جملة.
-            tools = call_tools.openai_tools(exclude={call_tools.END_CALL} if opening else ())
+            # Opening cannot save invented answers or end a call before listening.
+            tools = [] if opening else call_tools.openai_tools()
             for _ in range(MAX_TOOL_ROUNDS):
                 messages = [{"role": "system", "content": self.instructions}, *self.history]
                 tool_calls = await pipecat_voice.speak_turn(
@@ -554,11 +572,19 @@ class StreamCall:
                     break
                 # الأدوات تكمل وتنحفظ بالتاريخ حتى لو قاطع الزبون بنصها.
                 await self._accepted_event.wait()
-                await asyncio.shield(self._run_tools(text, tool_calls))
-                if self.tools.end_requested:
+                tool_task = asyncio.create_task(self._run_tools(text, tool_calls))
+                try:
+                    await asyncio.shield(tool_task)
+                except asyncio.CancelledError:
+                    # Own the shielded task: a barge-in during persistence must
+                    # not orphan a save or leave a completed call listening.
+                    await tool_task
+                    if not self._stop.is_set() and not self.disconnected and (self.tools.saved or self.tools.end_requested):
+                        await self._finish_call(text, spoken)
+                    raise
+                if self.tools.saved or self.tools.end_requested:
+                    await self._finish_call(text, spoken)
                     break
-            if self.tools.end_requested:
-                await self._agent_end()
         except asyncio.CancelledError:
             status = "interrupted"
             if spoken:
@@ -577,48 +603,44 @@ class StreamCall:
             status = "error"
             self._response_errors += 1
             logger.exception("فشل رد الـ agent بالمكالمة %s", self.room)
-            native_contract = isinstance(exc, ValueError) and str(exc).startswith("native_transcript_")
-            await self._send({"type": "error", "code": "native_transcript" if native_contract else "llm",
+            await self._send({"type": "error", "code": "llm",
                               "message": "تعذّر توليد رد الـ agent"})
-            if native_contract:
-                await self._server_end("native_transcript_missing")
+            if self.tools.saved or self.tools.end_requested:
+                await self._agent_end()
         finally:
             logger.info("voice_turn_end trace=%s engine=pipecat input=%s opening=%s status=%s "
-                        "first_token_ms=%s first_audio_ms=%s tts_ms=%d total_ms=%d",
+                        "first_token_ms=%s first_audio_ms=%s stt_ms=%d tts_ms=%d total_ms=%d",
                         self.trace_id, self.input_mode, opening, status, self._token_ms, self._first_sent_ms,
-                        self._tts_ms, int((time.monotonic() - self._turn_started) * 1000))
+                        self._stt_ms, self._tts_ms, int((time.monotonic() - self._turn_started) * 1000))
 
     def _first_token(self) -> None:
         if self._token_ms is None:
             self._token_ms = int((time.monotonic() - self._turn_started) * 1000)
 
+    async def _finish_call(self, text: str, spoken: List[str]) -> None:
+        self.ending = True
+        try:
+            if self.tools.saved or not text:
+                closing = ("Thank you for your time. Goodbye." if self.meta.language.lower().startswith("en")
+                           else "شكراً لوقتك، مع السلامة.")
+                payload = await self._synthesize(closing)
+                if payload is not None:
+                    await self._play_speech(payload, spoken)
+        except Exception:
+            self._response_errors += 1
+            logger.exception("تعذّر نطق الوداع بالمكالمة %s", self.trace_id)
+        finally:
+            # A failed goodbye must never prevent hangup after a saved outcome.
+            if not self.disconnected:
+                await self._agent_end()
+
     async def _model_events(self, messages, tools):
-        native = next((m for m in reversed(self.history)
-                       if m["role"] == "user" and isinstance(m.get("content"), list)), None)
-        transcript_filter = audio_input.NativeTranscriptFilter() if native else None
         events = self.deps.llm(messages, tools)
         try:
             async for event in events:
                 if event.get("text"):
                     self._first_token()
-                    if transcript_filter:
-                        text = transcript_filter.feed(event["text"])
-                        if transcript_filter.transcript is not None and isinstance(native["content"], list):
-                            transcript = transcript_filter.transcript
-                            native["content"] = transcript or "[صوت غير واضح]"
-                            self._native_segments.clear()
-                            self.stats.on_transcript(transcript)
-                            if transcript:
-                                self.customer_lines.append(transcript)
-                                await self._send({"type": "transcript", "role": "user", "text": transcript})
-                        event = {**event, "text": text}
                 yield event
-            if transcript_filter:
-                transcript_filter.finish()
-        except Exception as exc:
-            if native:
-                self.stats.on_native_error(exc)
-            raise
         finally:
             await events.aclose()
 
@@ -632,7 +654,7 @@ class StreamCall:
             if name == call_tools.SAVE_OUTCOME and self.tools.outcome is not None and not self._sent_outcome:
                 self._sent_outcome = True
                 await self._send({"type": "outcome", **self.tools.outcome.model_dump()})
-        if self.tools.end_requested:
+        if self.tools.saved or self.tools.end_requested:
             self.ending = True
 
     async def _synthesize(self, sentence: str):
@@ -691,9 +713,11 @@ class StreamCall:
         """الجملة الأخيرة انرسلت كاملة: نبلّغ التطبيق يقفل الخط، وننتظره يأكد
         (call_state ended أو يسكّر الاتصال) لحد مهلة، ثم ننهي من جهتنا."""
         self.ending = True
-        await self._send({"type": "end_call", "reason": "agent"})
         remaining = max(0.0, self._playback_until - time.monotonic())
-        await asyncio.sleep(remaining + END_GRACE_SECONDS)
+        # Send hangup only after the final PCM has had time to play on the client.
+        await asyncio.sleep(remaining)
+        await self._send({"type": "end_call", "reason": "agent"})
+        await asyncio.sleep(END_GRACE_SECONDS)
         self.stop("agent_end")
 
 
@@ -780,6 +804,13 @@ async def serve(ws: WebSocket) -> None:
             return
         if voice_health.warmup_enabled() and not tts_status["loaded"]:
             await _reject(ws, CLOSE_UNAVAILABLE, "voice_warming", "الخادم يجهّز صوت الوكيل؛ أعد المحاولة بعد اكتمال التحميل")
+            return
+        stt_status = stt.status()
+        if not stt_status["installed"]:
+            await _reject(ws, CLOSE_UNAVAILABLE, "stt_unavailable", "خدمة التعرف على الصوت غير متوفرة على الخادم")
+            return
+        if voice_health.warmup_enabled() and not stt_status["loaded"]:
+            await _reject(ws, CLOSE_UNAVAILABLE, "voice_warming", "الخادم يجهّز Whisper؛ أعد المحاولة بعد اكتمال التحميل")
             return
     _active_calls += 1
     try:

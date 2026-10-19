@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import io
 import wave
 
@@ -21,34 +20,34 @@ def wav(seconds):
 
 
 def test_single_model_audio_and_tts_memory_defaults(monkeypatch):
-    for name in ("TTS_POOL_SIZE", "KV_CACHE_MEMORY_GB", "VLLM_MAX_NUM_SEQS"):
+    for name in ("LLM_MODEL", "TTS_POOL_SIZE", "KV_CACHE_MEMORY_GB", "VLLM_MAX_NUM_SEQS"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings()
     assert settings.tts_model().repository == "ResembleAI/chatterbox"
+    assert settings.model_name == "Qwen/Qwen3.5-9B"
+    assert settings.stt_model == "ayoubkirouane/whisper-small-ar"
     assert settings.tts_pool_size == 1 and settings.kv_cache_memory_gb == 4 and settings.max_num_seqs == 16
 
 
-def test_voice_notes_use_native_audio_and_keep_all_long_recording_chunks(monkeypatch):
+def test_voice_notes_share_whisper_and_keep_all_long_recording_chunks(monkeypatch):
     seen = []
 
-    async def completion(messages, **kwargs):
-        encoded = messages[0]["content"][0]["input_audio"]["data"]
-        with wave.open(io.BytesIO(base64.b64decode(encoded))) as audio:
-            seen.append(audio.getnframes())
-        assert kwargs["generation_options"]["chat_template_kwargs"] == {"enable_thinking": False}
+    async def transcription(samples, sample_rate):
+        assert sample_rate == 16000
+        seen.append(samples.size)
         text = "الطلب وصل" if len(seen) == 1 else "وصل والزبون راضي"
-        return {"choices": [{"finish_reason": "stop", "message": {"content": text}}]}
+        return text
 
-    monkeypatch.setattr(module.llm_engine, "create_chat_completion", completion)
+    monkeypatch.setattr(module.stt, "transcribe", transcription)
     assert asyncio.run(module.transcribe(wav(45))) == "الطلب وصل والزبون راضي"
     assert seen == [28 * 16000, 18 * 16000]
 
 
 def test_voice_note_invalid_audio_and_truncation_fail_explicitly(monkeypatch):
     async def truncated(*args, **kwargs):
-        return {"choices": [{"finish_reason": "length", "message": {"content": "partial"}}]}
+        raise ValueError("تعذّر نسخ المقطع كاملاً")
 
-    monkeypatch.setattr(module.llm_engine, "create_chat_completion", truncated)
+    monkeypatch.setattr(module.stt, "transcribe", truncated)
     with pytest.raises(ValueError, match="كاملاً"):
         asyncio.run(module.transcribe(wav(1)))
     with pytest.raises(ValueError):
@@ -57,10 +56,10 @@ def test_voice_note_invalid_audio_and_truncation_fail_explicitly(monkeypatch):
         asyncio.run(module.decode_audio(wav(601)))
 
 
-def test_native_transcription_errors_propagate(monkeypatch):
+def test_whisper_transcription_errors_propagate(monkeypatch):
     async def broken(*args, **kwargs):
         raise RuntimeError("model_unavailable")
 
-    monkeypatch.setattr(module.llm_engine, "create_chat_completion", broken)
+    monkeypatch.setattr(module.stt, "transcribe", broken)
     with pytest.raises(RuntimeError, match="model_unavailable"):
         asyncio.run(module.transcribe(wav(1)))

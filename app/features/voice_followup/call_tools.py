@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Shared business tools for the Pipecat call agent and persisted call outcomes."""
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -74,7 +75,8 @@ async def store_outcome(
             "ما انحفظت النتيجة بسبب خلل بالنظام. اعتذر وگول إن الفريق راح يتابع، ثم أنهِ المكالمة."
         ) from exc
     try:
-        await (submitter or gateway.call_outcome_submitter).submit(outcome, settings.voice_followup_api_key)
+        async with asyncio.timeout(settings.call_outcome_submit_timeout_seconds):
+            await (submitter or gateway.call_outcome_submitter).submit(outcome, settings.voice_followup_api_key)
     except Exception:
         # النتيجة محفوظة محلياً والتطبيق يسحبها؛ الإرسال لباك اند السستم إضافي.
         logger.warning("تعذّر إرسال نتيجة المكالمة %s لباك اند السستم", room, exc_info=True)
@@ -186,7 +188,7 @@ async def _save_outcome(ctx: CallToolContext, args: Dict[str, Any]) -> str:
         args.get("follow_up_needed", False), ctx.customer_transcript(),
     )
     ctx.saved = True
-    return "انحفظت النتيجة. اشكر الزبون بجملة قصيرة وأنهِ المكالمة."
+    return "انحفظت النتيجة. النظام سيشكر الزبون وينهي المكالمة تلقائياً."
 
 
 async def _end_call(ctx: CallToolContext, args: Dict[str, Any]) -> str:
@@ -197,7 +199,9 @@ async def _end_call(ctx: CallToolContext, args: Dict[str, Any]) -> str:
 register(CallTool(
     name=SAVE_OUTCOME,
     description=(
-        "Save the call outcome once the goal is achieved or the customer declines. Call it only once."
+        "Finish the call by saving the outcome once all requested information is collected, "
+        "or the customer declines. The server says goodbye and hangs up automatically after success. "
+        "Never call before hearing the customer. Summarize only actual customer answers."
     ),
     parameters={
         "type": "object",

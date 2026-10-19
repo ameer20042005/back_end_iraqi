@@ -11,10 +11,10 @@ def launch_args(config=settings) -> list[str]:
         "--max-num-seqs", str(config.max_num_seqs),
         "--max-num-batched-tokens", str(config.max_num_batched_tokens),
         "--async-scheduling", "--enable-prefix-caching",
-        "--enable-auto-tool-choice", "--tool-call-parser", "gemma4",
-        "--reasoning-parser", "gemma4",
-        "--default-chat-template-kwargs", '{"enable_thinking":true}',
-        "--limit-mm-per-prompt", '{"image":1,"audio":1}',
+        "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_coder",
+        "--reasoning-parser", "qwen3",
+        "--default-chat-template-kwargs", '{"enable_thinking":false}',
+        "--limit-mm-per-prompt", '{"image":1,"video":0}',
     ]
     if config.kv_cache_memory_gb > 0:
         args += ["--kv-cache-memory-bytes", str(int(config.kv_cache_memory_gb * 1024**3))]

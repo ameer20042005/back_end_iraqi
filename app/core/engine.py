@@ -2,15 +2,14 @@
 """عميل vLLM — الباك اند يتصل بخادم vLLM OpenAI-متوافق منفصل (نفس الموديل
 على نفس كارت GPU) بدل تحميل الموديل داخل عملية FastAPI.
 
-**البنية** (حسب وصفة vLLM الرسمية لـ Gemma 4):
+**البنية** (Qwen3.5 عبر vLLM):
     ┌─────────────────────┐  HTTP   ┌──────────────────────────────┐
     │ FastAPI (منفذ 8000) │ ──────► │ vLLM serve (منفذ 18001)      │
     │ راوترات + RAG الطلب │         │ الموديل المحدد في config.py   │
     └─────────────────────┘         └──────────────────────────────┘
 
-دعم Gemma4ForConditionalGeneration وصل لـ vLLM عبر PR #44429 (نسخة nightly
-يثبّتها start.sh تلقائياً على Ubuntu 22.04 خام، أو صورة vllm/vllm-openai:
-gemma4-unified الجاهزة) — انظر start.sh وdocs/deploy/runpod.md.
+يثبّت start.sh نسخة vLLM تدعم Qwen3.5، مع محلّل qwen3_coder للأدوات.
+فهم الصوت مستقل عبر Whisper داخل FastAPI — انظر docs/pipecat-native-audio.md.
 هذا يستبدل آلية transformers.generate() + micro-batching اليدوي السابقة
 بالكامل: vLLM يدير PagedAttention وcontinuous batching داخلياً، فمئات
 الطلبات المتزامنة تتقاسم الـ GPU تلقائياً بدون طوابير يدوية.
@@ -249,8 +248,8 @@ class LLMEngine:
         if tools:
             # Native OpenAI tool calling. This is intentionally separate from
             # guided_json, which remains the protocol used by the legacy
-            # in-process tool loops. vLLM parses Gemma 4 tool tokens when the
-            # server starts with --tool-call-parser gemma4.
+            # in-process tool loops. vLLM parses Qwen tool tokens when the
+            # server starts with --tool-call-parser qwen3_coder.
             body["tools"] = tools
             body["tool_choice"] = tool_choice if tool_choice is not None else "auto"
         return body

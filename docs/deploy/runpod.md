@@ -1,6 +1,6 @@
 # خطوات الرفع على RunPod
 
-هذا الملف دليل تفصيلي خطوة بخطوة لرفع `back_end_iraqi` على RunPod عبر **Pod مباشر بصورة Ubuntu 22.04 خام** (الطريقة الوحيدة المعتمدة — لا حاجة لبناء أي صورة Docker مخصصة ولا حتى صورة vLLM جاهزة: `start.sh` يثبّت كل شي لازم من الصفر بأول إقلاع — Python/pip، vLLM nightly بدعم Gemma 4 مع torch المتوافق، ffmpeg/libsndfile1 — انظر [start.sh](../../start.sh)). للتوثيق المرجعي لنقاط الـ API نفسها انظر [docs/api/](../api/overview.md)، وللوحة اختبار تفاعلية بالمتصفح انظر قسم [لوحة اختبار API](#لوحة-اختبار-api-test-console) بالأسفل.
+هذا الملف دليل تفصيلي خطوة بخطوة لرفع `back_end_iraqi` على RunPod عبر **Pod مباشر بصورة Ubuntu 22.04 خام** (الطريقة الوحيدة المعتمدة — لا حاجة لبناء أي صورة Docker مخصصة ولا حتى صورة vLLM جاهزة: `start.sh` يثبّت كل شي لازم من الصفر بأول إقلاع — Python/pip، vLLM nightly بدعم Qwen3.5 مع torch المتوافق، ffmpeg/libsndfile1 — انظر [start.sh](../../start.sh)). للتوثيق المرجعي لنقاط الـ API نفسها انظر [docs/api/](../api/overview.md)، وللوحة اختبار تفاعلية بالمتصفح انظر قسم [لوحة اختبار API](#لوحة-اختبار-api-test-console) بالأسفل.
 
 ---
 
@@ -109,7 +109,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test
 
 ### توصية اختيار GPU
 
-الموديل المدموج `gemma-iraqi-finetune-v2` (Gemma 4 12B) يحتاج ~24GB VRAM لأوزانه بـ `bfloat16` + مساحة KV cache للطلبات المتزامنة — GPU بذاكرة **40GB+** موصى به. **A40 (48GB)** خيار ممتاز من ناحية السعر/الأداء: الأوزان + ~19GB KV cache تكفي لمئات الطلبات المتزامنة القصيرة عبر continuous batching.
+الموديل الافتراضي `Qwen/Qwen3.5-9B` يستخدم نحو 18GB عشرية للأوزان ذات البايتين، إضافة إلى KV (4GiB افتراضياً) وCUDA والرؤية وWhisper وChatterbox. احسب مجموع هذه الحجوزات قبل اختيار الذاكرة؛ 24GB ليست ضماناً للكفاية. راجع [بنية الصوت وميزانية الذاكرة](../pipecat-native-audio.md).
 
 ---
 
@@ -118,7 +118,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test
 ### الخطوة 1 — إنشاء الـ Pod
 
 1. من لوحة RunPod، اضغط **Deploy** → **GPU Pod**.
-2. قالب بصورة **`ubuntu:22.04`** خام (بدون Python ولا CUDA ولا PyTorch مسبقاً) — `start.sh` يبني كل شي لازم من الصفر بأول إقلاع: Python/pip، أدوات بناء، ffmpeg/libsndfile1، ثم vLLM nightly بدعم Gemma 4 مع torch المتوافق (دعم Gemma 4 لم يصدر بعد بإصدار vLLM مستقر). أي قالب ثاني فيه بعض هذي المكونات مسبقاً (صورة vLLM الرسمية، قالب PyTorch) يشتغل بنفس الموثوقية — كل خطوة تتخطى نفسها لو لقت الأداة موجودة أصلاً.
+2. قالب بصورة **`ubuntu:22.04`** خام (بدون Python ولا CUDA ولا PyTorch مسبقاً) — `start.sh` يبني كل شي لازم من الصفر بأول إقلاع: Python/pip، أدوات بناء، ffmpeg/libsndfile1، ثم vLLM nightly بدعم Qwen3.5 مع torch المتوافق (يلزم إصدار vLLM يدعم Qwen3.5). أي قالب ثاني فيه بعض هذي المكونات مسبقاً (صورة vLLM الرسمية، قالب PyTorch) يشتغل بنفس الموثوقية — كل خطوة تتخطى نفسها لو لقت الأداة موجودة أصلاً.
 3. اختر GPU مناسب (انظر التوصية أعلاه).
 4. تحت **Edit Template** (أو أثناء الإنشاء):
    - أضف `8000` إلى حقل **Expose HTTP Ports**.
@@ -291,59 +291,31 @@ https://<POD_ID>-8000.proxy.runpod.net/test   (على RunPod)
 | المشكلة | السبب المحتمل | الحل |
 |---|---|---|
 | الإقلاع يتوقف عند `ERROR: Constraints cannot have extras` | استعمال `requirements.txt` كملف قيود pip مع وجود `uvicorn[standard]` | حدّث `start.sh` إلى النسخة التي تولّد ملف قيود مؤقتاً بلا extras؛ تبقى الإصدارات المثبّتة كما هي، وتبقى extras مفعّلة عند تثبيت المتطلبات العادية |
-| **كل الردود صارت جملة وحدة ثابتة** (مثل «عفواً حبيبي، ما وصلتني زين») مهما كان السؤال — عربي أو إنجليزي | المُرمِّز (tokenizer) محمّل فاضي: `vocab_size=5` بدل 262144، فكل نص يتحول `<unk>` والموديل ما يشوف رسالة العميل أصلاً. يصير لو `tokenizer.json` ناقص من مستودع الموديل + نسخة `transformers` جديدة (5.x ما عاد يبني المفردات ضمنياً من `tokenizer_config.json` وحده) | افحص بالأمر أدناه؛ لو `vocab` مو 262144 لازم ترفع `tokenizer.json` لمستودع الموديل من الأساس (`google/gemma-4-12B-it`). النسخ مثبّتة بـ `requirements-gpu.txt` حتى ما تتكرر ترقية صامتة |
+| **الردود ثابتة أو غير مفهومة** | نموذج قديم محمّل أو مُرمّز غير مطابق | تأكد أن `/health/llm` يعرض `Qwen/Qwen3.5-9B` وأن المُرمّز من المستودع نفسه؛ افحصه بالأمر أدناه |
 | فشل أي تحميل من Hugging Face بخطأ `hf_transfer` | قالب الـ Pod ضابط `HF_HUB_ENABLE_HF_TRANSFER=1` بدون الحزمة مثبّتة | `export HF_HUB_ENABLE_HF_TRANSFER=0` (أو `pip install hf_transfer`) — انظر الخطوة 4 |
 | السيرفر يموت أول ما تغلق الطرفية | ما اشتغل داخل tmux فعلياً (شائع: `Ctrl+B` `D` انضغطت غلط فظهرت كنص `^B^B`) | استخدم `tmux new-session -d` بالخطوة 4 — تبدأ منفصلة أصلاً بلا أي اختصار |
 | `git pull` يفشل بـ `no such ref was fetched` | الـ Pod على فرع محذوف من الريموت | `git fetch origin && git checkout main && git reset --hard origin/main` |
 | `bash start.sh` يطلع Nginx/SSH/Jupyter و«Pod is ready to use» | شغّلت سكربت إقلاع RunPod مو سكربت المشروع (كنت بمسار غلط) | `cd /workspace/app` أولاً، بعدين `bash start.sh` |
 | خطأ 401 عند تنزيل الموديل رغم أنه عام | قالب الـ Pod ضابط `HF_TOKEN` قديم/ملغى، فيُرسَل مع الطلب ويرفضه الـ Hub | فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ `start.sh`، أو احذف المتغير من إعدادات الـ Pod |
-| `/gpu` يرجع `vllm_ready: false` باستمرار | خادم vLLM لسا يحمّل الموديل (~24GB أول مرة)، أو لسا بمرحلة تثبيت vLLM/torch nightly على Ubuntu الخام (أول إقلاع فقط)، أو فشل إقلاعه | راقب لوج الـ Pod (`tail -f /tmp/api.log`)؛ تأكد أن نسخة vLLM المثبَّتة تدعم Gemma 4 (الإصدارات المستقرة الحالية لا تدعمه — لازم nightly) |
+| `/gpu` يرجع `vllm_ready: false` باستمرار | خادم vLLM لسا يحمّل الموديل (أوزان Qwen أول مرة)، أو لسا بمرحلة تثبيت vLLM/torch nightly على Ubuntu الخام (أول إقلاع فقط)، أو فشل إقلاعه | راقب لوج الـ Pod (`tail -f /tmp/api.log`)؛ تأكد أن نسخة vLLM المثبَّتة تدعم Qwen3.5 (المثبّت هنا nightly) |
 | نفاد ذاكرة GPU (CUDA OOM) | GPU المختار صغير جداً، أو `gpu_memory_utilization`/`max_model_len` مرتفعة جداً | اختر GPU أكبر (40GB+)، أو قلّل القيم في `app/config.py` |
 | الصفحة `/test` ما تتصل بالسيرفر (CORS) | نادراً — الـ CORS مفتوح للجميع افتراضياً بـ `app/main.py` | تأكد إن رابط السيرفر بحقل "رابط السيرفر" صحيح ويتضمن `https://` |
 | أول طلب بطيء جداً | طبيعي — تحميل الموديل والمحوّل أول مرة | انتظر اكتمال التحميل (راقب اللوج)؛ الطلبات اللاحقة أسرع بكثير |
 
 ### فحص صحة المُرمِّز (tokenizer)
 
-أول شي تفحصه لو الردود فاضية أو جملة ثابتة مكررة — الفحص ياخذ ثانية ويحسم إذا العطل بالموديل أو بالكود:
+استخدم معرّف النموذج نفسه الموجود في `app/config.py`، دون نسخ مُرمّز من معمارية أخرى أو رفع أي ملفات:
 
 ```bash
 python3 -c "
-from transformers import AutoProcessor
-p = AutoProcessor.from_pretrained('ameer4wisam/gemma-iraqi-finetune-v2')
-print('vocab:', p.tokenizer.vocab_size, '(المطلوب 262144)')
-ids = p.tokenizer.encode('شكد سعر لابتوب؟')
-print(ids[:10], '→', repr(p.tokenizer.decode(ids)))
-"
-```
-
-**سليم** — مفردات كاملة والنص العربي يرجع كما هو:
-```
-vocab: 262144 (المطلوب 262144)
-[236977, 68501, 178761, ...] → 'شكد سعر لابتوب؟'
-```
-
-**معطوب** — المفردات فاضية وكل النص صار `<unk>`:
-```
-vocab: 5 (المطلوب 262144)
-[3] → '<unk>'
-```
-
-بحالة العطل، ارفع `tokenizer.json` من الموديل الأساس لمستودعك (هذي الصيانة اليدوية الوحيدة اللي تحتاج توكن — بصلاحية **Write**، يُمرَّر لهذا الأمر فقط ولا يلزم للتشغيل):
-
-```bash
-export HF_HUB_ENABLE_HF_TRANSFER=0
-HF_WRITE_TOKEN=hf_xxx python3 -c "
-import os
 from transformers import AutoTokenizer
-from huggingface_hub import upload_file
-tok = os.environ['HF_WRITE_TOKEN']
-t = AutoTokenizer.from_pretrained('google/gemma-4-12B-it', token=tok)
-assert t.vocab_size == 262144, t.vocab_size
-t.save_pretrained('/tmp/tk')
-upload_file(path_or_fileobj='/tmp/tk/tokenizer.json', path_in_repo='tokenizer.json',
-            repo_id='ameer4wisam/gemma-iraqi-finetune-v2', token=tok)
-print('✅ رُفع tokenizer.json')
+from app.config import settings
+t = AutoTokenizer.from_pretrained(settings.model_name)
+text = 'شكد سعر لابتوب؟'
+print('model:', settings.model_name, 'vocabulary:', len(t))
+print(t.decode(t.encode(text), skip_special_tokens=True))
+assert len(t) > 100000
 "
 ```
 
-> **مهم**: `tokenizer.json` ملف مفردات ثابت من الموديل الأساس — التدريب/الدمج (`merge_and_unload`) ما يمسّه أبداً، فرفعه ما يأثر على أوزانك المدرَّبة إطلاقاً. الشرط الوحيد: `vocab_size` لازم يطابق `text_config.vocab_size` بـ `config.json` مالتك (262144) — مفردات من أساس مختلف تعطي كلام مشوّش بدل فراغ. ولا ترفع `tokenizer_config.json` من الأساس — الموجود بمستودعك جاي من عملية الدمج.
+للتأكد من الصوت: افتح `/health/voice` وتحقق من `stt.model: ayoubkirouane/whisper-small-ar` ومن `stt.loaded` و`tts.loaded` بعد التحميل المسبق. `STT_DEVICE=cpu` يتيح نقل Whisper إلى CPU عند الحاجة، لكن زمنه يحتاج قياساً على جهازك. التفاصيل في [بنية الصوت](../pipecat-native-audio.md).

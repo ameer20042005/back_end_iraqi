@@ -2,20 +2,19 @@ import asyncio
 import json
 
 import httpx
-import numpy as np
 import pytest
 
 from app.core.engine import llm_engine
-from app.features.voice_followup import audio_input, stream
+from app.features.voice_followup import stream
 
 
-def test_native_audio_reaches_vllm_without_asr_or_thinking(monkeypatch):
+def test_qwen_receives_transcribed_text_without_audio_or_thinking(monkeypatch):
     body = {}
 
     def handle(request):
         body.update(json.loads(request.content))
         chunks = [
-            {"choices": [{"delta": {"content": "<customer_transcript>اي</customer_transcript>تمام."}}]},
+            {"choices": [{"delta": {"content": "تمام."}}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         ]
         return httpx.Response(200, text="\n".join("data: " + json.dumps(c) + "\n" for c in chunks) + "data: [DONE]\n")
@@ -25,13 +24,13 @@ def test_native_audio_reaches_vllm_without_asr_or_thinking(monkeypatch):
             monkeypatch.setattr(llm_engine, "_client", client)
             monkeypatch.setattr(llm_engine, "_ready", True)
             result = [e async for e in stream.vllm_stream([
-                {"role": "user", "content": audio_input.audio_content(np.zeros(16000, dtype=np.float32))}], [])]
-            assert result[0]["text"].startswith("<customer_transcript>")
+                {"role": "user", "content": "اي وصل الطلب"}], [])]
+            assert result[0]["text"] == "تمام."
 
     asyncio.run(check())
-    assert body["messages"][0]["content"][0]["type"] == "input_audio"
+    assert body["messages"][0]["content"] == "اي وصل الطلب"
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
-    assert body["max_tokens"] == stream.settings.voice_stream_llm_max_tokens + 256
+    assert body["max_tokens"] == stream.settings.voice_stream_llm_max_tokens
 
 
 @pytest.mark.parametrize("response, error", [

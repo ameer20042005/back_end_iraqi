@@ -1,6 +1,6 @@
 #!/bin/bash
 # vLLM + FastAPI/Pipecat, one voice process and one lazily loaded TTS instance.
-# Native Gemma audio is enabled. See docs/pipecat-native-audio.md for memory sizing.
+# Arabic Whisper handles speech; Qwen3.5 handles dialogue. See docs/pipecat-native-audio.md for memory sizing.
 # Ubuntu 22.04's Python 3.10 is upgraded into an isolated managed 3.12 environment.
 set -e
 cd "$(dirname "$0")"
@@ -13,7 +13,7 @@ _install_vllm() (
     trap 'rm -f -- "${constraints}"' EXIT
     sed -E 's/^([[:space:]]*[[:alnum:]_.-]+)\[[^]]+\]/\1/' \
         requirements.txt requirements-gpu.txt > "${constraints}"
-    python3 -m pip install -U --force-reinstall -c "${constraints}" "vllm[audio]" torch torchvision --pre \
+    python3 -m pip install -U --force-reinstall -c "${constraints}" "vllm" torch torchvision --pre \
         --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
         --extra-index-url https://download.pytorch.org/whl/cu129
 )
@@ -87,14 +87,14 @@ ldconfig -p 2>/dev/null | grep -q libsndfile.so || {
     _apt_install_pinned libsndfile1 1.0.31-2ubuntu0.2
 }
 
-# فحص مبكر: هل vLLM (بدعم Gemma4) موجود أصلاً؟ على Ubuntu خام الجواب دائماً
+# فحص مبكر: هل vLLM (بدعم Qwen3.5) موجود أصلاً؟ على Ubuntu خام الجواب دائماً
 # لأ (ماكو vLLM إطلاقاً)، فنثبّت نسخة nightly مباشرة بدل الانتظار لمحاولة
 # إقلاع فاشلة أولاً (تخمين مسبق مقصود هنا، بعكس بقية السكربت — الفحص نفسه
 # رخيص وأسرع من محاولة تشغيل فعلية). حلقة _start_vllm بالأسفل تبقى شبكة أمان
 # ثانية لو الفحص أعطى نتيجة خاطئة (مثلاً vLLM مستورد لكن معماريته لا تدعم
-# Gemma4 فعلياً — لا يظهر إلا وقت التشغيل الحقيقي).
+# Qwen3.5 فعلياً — لا يظهر إلا وقت التشغيل الحقيقي).
 if ! python3 -c "import vllm.entrypoints.openai.api_server" 2>/dev/null; then
-    echo "==> vLLM (with Gemma4 support) not found — installing the nightly wheel before first launch..."
+    echo "==> vLLM (with Qwen3.5 support) not found — installing the nightly wheel before first launch..."
     # --force-reinstall لكل شجرة الاعتماديات، لا فقط vllm/torch/torchvision:
     # الصورة الأساسية أحياناً فيها torch مثبَّت مسبقاً ببناء CUDA مختلف (مثلاً
     # cu130) عن مؤشر cu129 المستخدَم هنا. لو تركنا pip على وضعه الافتراضي، أي
@@ -267,8 +267,8 @@ sleep 8
 if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
     echo "🛑 vLLM died immediately — boot log:"
     tail -n 40 "${VLLM_LOG}"
-    if grep -qi "Gemma4ForConditionalGeneration\|is not supported for now\|ValueError: Model architectures\|ModuleNotFoundError\|No module named\|different CUDA major versions" "${VLLM_LOG}"; then
-        echo "==> Cause: the current vllm version doesn't support the Gemma4 architecture (or isn't installed) — installing nightly wheel..."
+    if grep -qi "Qwen3_5ForConditionalGeneration\|is not supported for now\|ValueError: Model architectures\|ModuleNotFoundError\|No module named\|different CUDA major versions" "${VLLM_LOG}"; then
+        echo "==> Cause: the current vllm version doesn't support the Qwen3.5 architecture (or isn't installed) — installing nightly wheel..."
         _install_vllm
         _ensure_torchaudio
     elif grep -qi "libcudart\|libcublas\|cannot open shared object file" "${VLLM_LOG}"; then

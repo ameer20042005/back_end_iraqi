@@ -11,9 +11,6 @@
 """
 
 import asyncio
-import base64
-import io
-import wave
 import json
 import time
 from dataclasses import replace
@@ -106,24 +103,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(gateway, "call_outcome_submitter", submitter)
 
     def install(llm, stt=None, **overrides):
-        async def native_model(messages, tools):
-            # Fake model's audio input + transcript output, not a production ASR stage.
-            events = llm(messages, tools)
-            audio = next((m for m in reversed(messages) if isinstance(m.get("content"), list)), None)
-            try:
-                if audio:
-                    wav = base64.b64decode(audio["content"][0]["input_audio"]["data"])
-                    with wave.open(io.BytesIO(wav), "rb") as source:
-                        samples = vad.pcm16_to_float(source.readframes(source.getnframes()))
-                    transcript = await (stt or FakeSTT())(samples, SR)
-                    yield {"text": "<customer_transcript>" + transcript + "</customer_transcript>"}
-                async for event in events:
-                    yield event
-            finally:
-                await events.aclose()
-
         monkeypatch.setattr(stream, "deps", stream.StreamDeps(
-            llm=native_model, tts=fake_tts, vad=vad.make_classifier))
+            llm=llm, tts=fake_tts, vad=vad.make_classifier, stt=stt or FakeSTT()))
         if overrides:
             monkeypatch.setattr(stream, "settings", replace(stream.settings, **overrides))
             monkeypatch.setattr(vad, "settings", stream.settings)
@@ -262,10 +243,10 @@ def test_full_turn_ready_accepted_speech_transcript_audio(env):
 
     opening_messages, opening_tools = llm.calls[0]
     assert opening_messages[0]["role"] == "system" and "متجر النور" in opening_messages[0]["content"]
-    assert "end_call" not in opening_tools and "save_outcome" in opening_tools
+    assert opening_tools == []
     turn_messages, turn_tools = llm.calls[1]
     assert turn_messages[-1]["role"] == "user"
-    assert turn_messages[-1]["content"][0]["type"] == "input_audio"
+    assert turn_messages[-1]["content"] == "اي وصل"
     assert turn_messages[-2]["role"] == "assistant"
     assert "end_call" in turn_tools
     # الخصوصية: اسم الزبون ورقمه ما يدخلان سياق النموذج.
@@ -299,7 +280,6 @@ def test_save_outcome_emits_event_and_outcome_is_done(env):
         [{"text": "هلا بيك، هل وصلك الطلب؟"}],
         [tool_call("save_outcome", {"summary": "الطلب وصل والزبون راضي",
                                     "answers": [{"question": "هل وصلك الطلب؟", "answer": "اي وصل"}]})],
-        [{"text": "شكراً إلك، مع السلامة."}, tool_call("end_call", {}, "call_2")],
     )
     env(llm, stt=FakeSTT("اي وصل وعاجبني"))
     client = TestClient(main.app)
@@ -316,17 +296,15 @@ def test_save_outcome_emits_event_and_outcome_is_done(env):
 
         events, frames = collect_until(ws, is_type("end_call"))
         assert frames > 0 and events[-1]["reason"] == "agent"
-        assert {"type": "transcript", "role": "agent", "text": "شكراً إلك، مع السلامة."} in events
+        assert {"type": "transcript", "role": "agent", "text": "شكراً لوقتك، مع السلامة."} in events
         ws.send_json({"type": "call_state", "state": "ended"})
         assert collect_until(ws, is_type("__close__"))[0][-1]["code"] == 1000
 
     body = client.get(f"/voice_followup/calls/{room}/outcome", headers={"X-API-Key": KEY}).json()
     assert body["status"] == "done" and body["summary"] == "الطلب وصل والزبون راضي"
     assert len(env.submitter.calls) == 1
-    # نتيجة الأداة رجعت للنموذج برسالة tool.
-    third = llm.calls[2][0]
-    assert third[-1]["role"] == "tool" and "انحفظت" in third[-1]["content"]
-    assert third[-2]["tool_calls"][0]["function"]["name"] == "save_outcome"
+    # No extra model request is needed to close after a successful save.
+    assert len(llm.calls) == 2
 
 
 def test_wrong_number_end_call_without_outcome_falls_back(env):

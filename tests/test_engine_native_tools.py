@@ -44,7 +44,8 @@ def test_chat_completion_body_disables_reasoning_for_all_request_shapes():
                               tools=tools, tool_choice="auto"),
     ]
     for body in bodies:
-        assert body["reasoning_effort"] == "none"
+        # Qwen disables thinking through the template switch, not the
+        # provider-specific reasoning_effort="none" value used by Gemma.
         assert body["chat_template_kwargs"] == {"enable_thinking": False}
 
 

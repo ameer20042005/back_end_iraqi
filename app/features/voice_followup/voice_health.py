@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""صحة موديلات الصوت (Gemma audio + Chatterbox) بعملية uvicorn: تصنيف أسباب الفشل،
+"""صحة موديلات الصوت (Whisper + Chatterbox) بعملية uvicorn: تصنيف أسباب الفشل،
 ذاكرة الـ GPU، حالة التحميل المسبق، وملخّص GET /health/voice.
 
 **ما يحمّل أي موديل:** `voice_status()` تقرأ الحالة بس. التحميل الوحيد هنا
@@ -111,25 +111,26 @@ def warmup_enabled() -> bool:
 
 
 _warmup_lock = threading.Lock()
-_warmup = {"state": "pending", "tts": None, "seconds": None}
+_warmup = {"state": "pending", "tts": None, "stt": None, "seconds": None}
 
 
 def warmup_voice_models() -> dict:
-    """يحمّل Chatterbox ويولّد جملة قصيرة، ويسجّل أي فشل بوضوح."""
-    from app.features.voice_followup import tts
+    """يجهّز Whisper وChatterbox قبل أول مكالمة، ويسجّل الفشل بوضوح."""
+    from app.features.voice_followup import tts, stt
 
     with _warmup_lock:
-        _warmup.update(state="running", tts=None, seconds=None)
+        _warmup.update(state="running", tts=None, stt=None, seconds=None)
         started = time.monotonic()
-        mode = "native"
+        mode = "whisper"
+        stt_ok = stt.warmup()
         tts_ok = tts.warmup()
-        _warmup.update(state="done" if tts_ok else "failed", tts=tts_ok,
+        _warmup.update(state="done" if tts_ok and stt_ok else "failed", tts=tts_ok, stt=stt_ok,
                        seconds=round(time.monotonic() - started, 1))
-        if tts_ok:
+        if tts_ok and stt_ok:
             logger.info("✅ موديلات صوت المكالمات جاهزة (%.1f ثانية)", _warmup["seconds"])
         else:
-            logger.error("🛑 فشل التحميل المسبق لموديلات صوت المكالمات: chatterbox=%s %s — "
-                         "التفاصيل بـ GET /health/voice", tts_ok, gpu_memory())
+            logger.error("🛑 فشل التحميل المسبق لموديلات صوت المكالمات: chatterbox=%s whisper=%s %s — "
+                         "التفاصيل بـ GET /health/voice", tts_ok, stt_ok, gpu_memory())
         return {**_warmup, "input_mode": mode}
 
 
@@ -155,27 +156,29 @@ def last_call() -> Optional[dict]:
 
 def voice_status() -> dict:
     """ملخّص GET /health/voice — يقرأ الحالة بس، ما يحمّل موديل."""
-    from app.features.voice_followup import tts
+    from app.features.voice_followup import tts, stt
 
     tts_status, warm = tts.status(), warmup_state()
-    stt_status = {"engine": "native_audio", "model": settings.model_name, "local_model": False}
-    mode = "native"
+    stt_status = stt.status()
+    mode = "whisper"
     last = tts_status.get("last_synthesis") or {}
     from app.core.engine import llm_engine
 
-    stt_status["ready"] = llm_engine.ready
-    healthy = (tts_status["installed"] and llm_engine.ready
+    stt_status["ready"] = (stt_status["installed"] and (stt_status["loaded"] or not warm["enabled"])
+                           and (stt_status.get("last_transcription") or {}).get("ok") is not False)
+    healthy = (tts_status["installed"] and llm_engine.ready and stt_status["ready"]
                and last.get("ok") is not False and warm["state"] != "failed")
     return {
         "status": "healthy" if healthy else "unhealthy",
         "tts": tts_status,
-        "native_audio": stt_status,
+        "stt": stt_status,
+        "llm": {"model": settings.model_name, "ready": llm_engine.ready},
         "gpu": gpu_memory(),
         "warmup": warm,
         "last_call": last_call(),
         "engine": "pipecat",
         "input_mode": mode,
-        "stt_required": False,
+        "stt_required": True,
         "memory_plan": {"kv_cache_gb": settings.kv_cache_memory_gb,
                         "gpu_fraction": settings.gpu_memory_utilization,
                         "max_sequences": settings.max_num_seqs, "tts_pool_size": settings.tts_pool_size},

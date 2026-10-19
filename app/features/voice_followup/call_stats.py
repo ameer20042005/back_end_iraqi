@@ -8,8 +8,8 @@
     sample_rate_mismatch  معدل الصوت الفعلي بعيد عن sample_rate المعلن
     too_quiet             الصوت واصل بس مستواه واطي جداً وVAD ما لگى كلام
     vad_no_speech         الصوت مسموع (مستوى معقول) بس VAD ما صنّف ولا نافذة كلام
-    native_error             Gemma يرمي استثناء لكل مقطع
-    native_empty         مقاطع تروح لـ Gemma وترجع نص فارغ
+    stt_error             Whisper يرمي استثناء لكل مقطع
+    stt_empty         مقاطع تروح لـ Whisper وترجع نص فارغ
     no_speech_yet         المكالمة بعدها، ماكو كلام لحد الآن
     ok                    وصل نص من الزبون
 """
@@ -54,9 +54,9 @@ class CallAudioStats:
         self.turn_starts = 0
         self.segments = 0
         self.segment_samples = 0
-        self.native_empty = 0
-        self.native_errors = 0
-        self.native_error_type: Optional[str] = None
+        self.stt_empty = 0
+        self.stt_errors = 0
+        self.stt_error_type: Optional[str] = None
         self.user_transcripts = 0
         self.interrupts = 0
         self.protocol_errors = 0
@@ -102,11 +102,11 @@ class CallAudioStats:
         if text:
             self.user_transcripts += 1
         else:
-            self.native_empty += 1
+            self.stt_empty += 1
 
-    def on_native_error(self, exc: BaseException) -> None:
-        self.native_errors += 1
-        self.native_error_type = type(exc).__name__
+    def on_stt_error(self, exc: BaseException) -> None:
+        self.stt_errors += 1
+        self.stt_error_type = type(exc).__name__
 
     # ── القراءة ────────────────────────────────────────────────────────────
 
@@ -127,10 +127,10 @@ class CallAudioStats:
         measured = self.measured_sample_rate()
         if measured and abs(measured - self.sample_rate) > 0.25 * self.sample_rate:
             return "sample_rate_mismatch"
-        if self.segments and self.native_errors >= self.segments:
-            return "native_error"
-        if self.segments and self.native_empty:
-            return "native_empty"
+        if self.segments and self.stt_errors >= self.segments:
+            return "stt_error"
+        if self.segments and self.stt_empty:
+            return "stt_empty"
         if self.vad_windows and self.vad_speech_windows == 0:
             if self.level_max is not None and self.level_max < TOO_QUIET_DBFS:
                 return "too_quiet"
@@ -158,9 +158,9 @@ class CallAudioStats:
             "turn_starts": self.turn_starts,
             "segments_to_model": self.segments,
             "segment_seconds": _round(self.segment_samples / 16000),
-            "native_empty": self.native_empty,
-            "native_errors": self.native_errors,
-            "native_error_type": self.native_error_type,
+            "stt_empty": self.stt_empty,
+            "stt_errors": self.stt_errors,
+            "stt_error_type": self.stt_error_type,
             "user_transcripts": self.user_transcripts,
             "interrupts": self.interrupts,
             "protocol_errors": self.protocol_errors,

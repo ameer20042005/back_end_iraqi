@@ -5,8 +5,8 @@ OpenAI متوافقة، استخراج طلب من نص/صوت/صورة، مكا
 التوصيل. لا يخزّن بيانات أعمال — البيانات عند باك اند السستم، وتنفيذ الأدوات عند العميل.
 
 يشتغل محلياً، وعلى RunPod بصورة `ubuntu:22.04` خام: `start.sh` يبني كل شي من
-الصفر بأول إقلاع (Python/pip، vLLM nightly بدعم Gemma 4 مع torch المتوافق،
-ffmpeg/libsndfile1، Chatterbox مع فهم الصوت الأصلي بواسطة Gemma TTS).
+الصفر بأول إقلاع (Python/pip، vLLM nightly بدعم Qwen3.5 مع torch المتوافق،
+ffmpeg/libsndfile1، Whisper للنسخ وChatterbox للنطق).
 
 ## الميزات
 
@@ -64,7 +64,7 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 
 السكربت يكتشف الموديل المحمَّل من `/v1/models` ويمرّر `LLM_BASE_URL` و`LLM_MODEL` لـ `app/config.py`. لوحة الاختبار على http://127.0.0.1:8000/test تعرض الرابط والموديل المستعملين فعلياً.
 
-> ⚠️ LM Studio يعرض بـ `/v1/models` **كل** الموديلات المنزَّلة، محمَّلة أم لا. إذا اكتشف السكربت موديلاً غير محمَّل يرد `/v1/chat/completions` بـ `AI_MODEL_NOT_LOADED`؛ حدّد الموديل صراحةً بـ `LLM_MODEL=<id>` (مثل `google/gemma-4-e4b`). `GET /health/llm` يكشف الحالة الحقيقية.
+> ⚠️ LM Studio يعرض بـ `/v1/models` **كل** الموديلات المنزَّلة، محمَّلة أم لا. إذا اكتشف السكربت موديلاً غير محمَّل يرد `/v1/chat/completions` بـ `AI_MODEL_NOT_LOADED`؛ حدّد الموديل صراحةً بـ `LLM_MODEL=<id>` (مثل `Qwen/Qwen3.5-9B`). `GET /health/llm` يكشف الحالة الحقيقية.
 
 | المتغيّر | الافتراضي | الوصف |
 |---|---|---|
@@ -75,8 +75,8 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 | `CATALOG_PATH_*` | مسارات `ai_agent` | كل مسار Catalog قابل للتغيير (`CATALOG_PATH_CALL_OUTCOME` فارغ = ما ترسل النتيجة) |
 | `SYSTEM_BACKEND_CALL_OUTCOME_PATH` | `/calls/outcome` | فارغ = ما ترسل نتيجة المكالمة لباك اند السستم |
 | `VOICE_STREAM_*` | انظر التوثيق | الوكيل المحلي عبر WebSocket (`/voice_followup/stream`): السقف، VAD، المهلات |
-| `VOICE_STREAM_AGC` | `1` | تطبيع مستوى صوت الزبون قبل VAD وGemma (`VOICE_STREAM_AGC_TARGET_DBFS`=-20، `VOICE_STREAM_AGC_MAX_GAIN_DB`=20) |
-| `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1`/`0`: تحميل Chatterbox مع فهم الصوت الأصلي بواسطة Gemma عند إقلاع uvicorn (بعد جاهزية vLLM) بدل أول مكالمة |
+| `VOICE_STREAM_AGC` | `1` | تطبيع مستوى صوت الزبون قبل VAD وWhisper (`VOICE_STREAM_AGC_TARGET_DBFS`=-20، `VOICE_STREAM_AGC_MAX_GAIN_DB`=20) |
+| `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1`/`0`: تحميل Whisper وChatterbox عند إقلاع uvicorn (بعد جاهزية vLLM) بدل أول مكالمة |
 | `GPU_MEMORY_UTILIZATION` | `0.85` | حصة vLLM من ذاكرة الكرت؛ الباقي لموديلات الصوت. `start.sh` يحترمه (انظر ميزانية الذاكرة بـ [voice-followup.md](docs/api/voice-followup.md)) |
 | `TTS_POOL_SIZE` | `2` | عدد نسخ Chatterbox (~3–4.5GB لكل نسخة)؛ على A40 مشترك مع vLLM `1` |
 

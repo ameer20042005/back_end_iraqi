@@ -67,7 +67,7 @@ _install_vllm
     assert [(req.name, str(req.specifier), req.marker) for req in constraints] == [
         (req.name, str(req.specifier), req.marker) for req in original
     ]
-    assert "vllm[audio]" in (tmp_path / "pip-args.txt").read_text()
+    assert "vllm" in (tmp_path / "pip-args.txt").read_text()
 
     if pip_status == 0:
         # Let the real pip resolver validate the constraints, fully offline.

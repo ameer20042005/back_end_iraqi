@@ -108,13 +108,13 @@ def understanding_block(user_text: str = "") -> str:
     return "\n\n" + IRAQI_UNDERSTANDING_EXAMPLES + dialect_reference(user_text) + "\n\n" + MSA_REPLY_RULE
 
 
-def call_understanding_block() -> str:
+def call_understanding_block(include_reply_rule: bool = True) -> str:
     """للمكالمات الصوتية: فهم اللهجة ومفرداتها، والرد بالفصحى المبسطة."""
     lines = [f"- {word}: {meaning}" for word, meaning, category in COMMERCE_TERMS if category in CALL_CATEGORIES]
     return (
         "\n\n# فهم كلام الزبون\n" + IRAQI_UNDERSTANDING_EXAMPLES
         + "\n\nمفردات قد تسمعها بالمكالمة ومعناها:\n" + "\n".join(lines)
-        + "\n\n" + MSA_REPLY_RULE
+        + ("\n\n" + MSA_REPLY_RULE if include_reply_rule else "")
     )
 
 

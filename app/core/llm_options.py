@@ -2,16 +2,14 @@
 
 
 def normal_generation_options() -> dict:
-    """Sampling profile matching the requested Gemma 4 runner settings.
+    """Qwen3.5 direct-response profile shared by text clients.
 
-    التفكير (chain-of-thought) معطّل: مع reasoning_effort="high" كلّف رد من
-    كلمتين ~794 توكن و17 ثانية على LM Studio، مقابل أقل من ثانيتين بدونه.
+    التفكير معطّل عبر chat_template_kwargs لتقليل زمن الرد.
     """
     return {
         "top_p": 0.8,
-        "top_k": 64,
-        "min_p": 0.05,
-        "repetition_penalty": 1.1,
-        "reasoning_effort": "none",
+        "top_k": 20,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
         "chat_template_kwargs": {"enable_thinking": False},
     }
