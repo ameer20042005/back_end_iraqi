@@ -2,8 +2,46 @@
 # vLLM + FastAPI/Pipecat, one voice process and one lazily loaded TTS instance.
 # Arabic Whisper handles speech; Qwen3.5 handles dialogue. See docs/pipecat-native-audio.md for memory sizing.
 # Ubuntu 22.04's Python 3.10 is upgraded into an isolated managed 3.12 environment.
-set -e
+set -Ee
 cd "$(dirname "$0")"
+export PYTHONUNBUFFERED=1
+BOOT_STAGE="initializing"
+
+_boot_stage() {
+    BOOT_STAGE="$1"
+    printf '[boot %s] %s\n' "$(date -u +%FT%TZ)" "${BOOT_STAGE}"
+}
+
+_startup_error() {
+    local status="$1" line="$2"
+    # Do not print BASH_COMMAND: commands can contain credentials.
+    printf '[boot ERROR] stage=%s line=%s exit=%s\n' "${BOOT_STAGE}" "${line}" "${status}" >&2
+    exit "${status}"
+}
+trap '_startup_error "$?" "$LINENO"' ERR
+
+_cleanup_services() {
+    local pid
+    for pid in "${API_PID:-}" "${VLLM_PID:-}"; do
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            kill "${pid}" 2>/dev/null || true
+        fi
+    done
+}
+
+_supervise_services() {
+    local status
+    if wait -n "${VLLM_PID}" "${API_PID}"; then
+        status=0
+    else
+        status=$?
+    fi
+    printf '[boot] A service exited (exit=%s); stopping the other service. See /tmp/api.log and %s\n' \
+        "${status}" "${VLLM_LOG}" >&2
+    return "${status}"
+}
+
+_boot_stage "Checking system packages"
 
 # Requirements can contain extras (uvicorn[standard]); pip constraints cannot.
 # Keep every version pin while removing extras only from the temporary constraints.
@@ -58,6 +96,7 @@ if ! command -v python3 >/dev/null 2>&1 || ! python3 -m pip --version >/dev/null
 fi
 
 # Pipecat 1.12 requires Python >=3.11. Never alter /usr/bin/python3.
+_boot_stage "Selecting the Python runtime"
 if [ -f .venv-pipecat/bin/activate ]; then
     source .venv-pipecat/bin/activate
 fi
@@ -69,10 +108,13 @@ if ! python3 -c 'import sys; assert (3,11) <= sys.version_info[:2] < (3,14)' 2>/
     source .venv-pipecat/bin/activate
 fi
 
-python3 -m pip install --no-cache-dir -q -r requirements.txt -r requirements-gpu.txt
+_boot_stage "Installing Python requirements (downloads may take several minutes)"
+python3 -m pip install --no-cache-dir --progress-bar off -r requirements.txt -r requirements-gpu.txt
 # Chatterbox TTS بلا تبعياته المثبَّتة (torch/transformers/numpy بإصدارات
 # تتعارض مع vLLM) — تبعياته الفعلية بـ requirements-gpu.txt، انظر هناك.
-python3 -m pip install --no-cache-dir -q --no-deps chatterbox-tts==0.1.7
+_boot_stage "Installing Chatterbox"
+python3 -m pip install --no-cache-dir --progress-bar off --no-deps chatterbox-tts==0.1.7
+_boot_stage "Checking audio system libraries"
 command -v ffmpeg >/dev/null 2>&1 || {
     echo "==> Installing ffmpeg (required for the speech-to-text feature)..."
     apt-get update -qq
@@ -93,6 +135,7 @@ ldconfig -p 2>/dev/null | grep -q libsndfile.so || {
 # رخيص وأسرع من محاولة تشغيل فعلية). حلقة _start_vllm بالأسفل تبقى شبكة أمان
 # ثانية لو الفحص أعطى نتيجة خاطئة (مثلاً vLLM مستورد لكن معماريته لا تدعم
 # Qwen3.5 فعلياً — لا يظهر إلا وقت التشغيل الحقيقي).
+_boot_stage "Checking vLLM and torch dependencies"
 if ! python3 -c "import vllm.entrypoints.openai.api_server" 2>/dev/null; then
     echo "==> vLLM (with Qwen3.5 support) not found — installing the nightly wheel before first launch..."
     # --force-reinstall لكل شجرة الاعتماديات، لا فقط vllm/torch/torchvision:
@@ -116,7 +159,9 @@ _ensure_torchaudio
 # الاسم والمنفذ وحدود vLLM متطابقة دائماً بين FastAPI وسكربت التشغيل.
 # GPU_MEMORY_UTILIZATION بالبيئة (مثل GPU_MEMORY_UTILIZATION=0.80 bash start.sh)
 # يتجاوز 0.85: config.py يقرأه، فالقيمة اللي تطلع هنا هي نفسها اللي يشوفها FastAPI.
-mapfile -t STATIC_CONFIG < <(python3 -c '
+_boot_stage "Reading model and port configuration"
+# A process substitution hides Python's exit status from set -e/mapfile.
+STATIC_CONFIG_TEXT=$(python3 -c '
 from app.config import settings
 for value in (
     settings.model_name, settings.vllm_port, settings.api_port,
@@ -126,6 +171,7 @@ for value in (
 ):
     print(value)
 ')
+mapfile -t STATIC_CONFIG <<< "${STATIC_CONFIG_TEXT}"
 MODEL_NAME="${STATIC_CONFIG[0]}"
 VLLM_PORT="${STATIC_CONFIG[1]}"
 API_PORT="${STATIC_CONFIG[2]}"
@@ -135,7 +181,8 @@ MAX_NUM_SEQS="${STATIC_CONFIG[5]}"
 MAX_NUM_BATCHED_TOKENS="${STATIC_CONFIG[6]}"
 KV_CACHE_BYTES="${STATIC_CONFIG[7]}"
 VLLM_LOG="/tmp/vllm_boot.log"
-mapfile -t VLLM_ARGS < <(python3 -m app.core.vllm_launch)
+VLLM_ARGS_TEXT=$(python3 -m app.core.vllm_launch)
+mapfile -t VLLM_ARGS <<< "${VLLM_ARGS_TEXT}"
 
 
 # يقابل CPU Thread Pool Size في LM Studio.
@@ -192,7 +239,7 @@ _fix_cuda_lib_path() {
     # نسأل Python نفسه أين مثبَّتة حزمة nvidia بدل find من الجذر (أسرع، وما
     # يعتمد على تخمين maxdepth صحيح).
     local nvidia_pkg_dir dirs
-    nvidia_pkg_dir=$(python3 -c "import nvidia, os; print(os.path.dirname(nvidia.__path__[0]))" 2>/dev/null)
+    nvidia_pkg_dir=$(python3 -c "import nvidia, os; print(os.path.dirname(nvidia.__path__[0]))" 2>/dev/null) || nvidia_pkg_dir=""
     if [ -z "${nvidia_pkg_dir}" ] || [ ! -d "${nvidia_pkg_dir}" ]; then
         echo "==> nvidia pip package not found — skipping CUDA path fix"
         return
@@ -222,7 +269,7 @@ import importlib.util, os
 spec = importlib.util.find_spec('nvidia.cuda_nvcc')
 if spec and spec.submodule_search_locations:
     print(spec.submodule_search_locations[0])
-" 2>/dev/null)
+" 2>/dev/null) || nvcc_path=""
     if [ -z "${nvcc_path}" ]; then
         echo "==> nvidia-cuda-nvcc-cu12 pip package not found — skipping nvcc path fix"
         return
@@ -253,9 +300,16 @@ _start_vllm() {
 # بالكامل وبعد ما start.sh يكون تجاوز نافذة فحص "مات فوراً" أدناه ويعتبر
 # vLLM شغّالاً — فما يُكتشف تلقائياً لو انتظرنا رد فعل بعد الانهيار فقط.
 # كل من الدالتين آمنة تماماً لو ما احتاجتها البيئة (تتحقق وتخرج بصمت).
+_boot_stage "Checking optional CUDA library and compiler paths"
 _fix_cuda_lib_path
 _fix_cuda_nvcc_path
 
+_boot_stage "Starting vLLM"
+# Keep this shell alive as supervisor. exec uvicorn would discard the EXIT
+# trap and leave the vLLM process behind when the API stops.
+trap _cleanup_services EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 echo "voice_memory_plan kv_cache_bytes=${KV_CACHE_BYTES} auto_gpu_fraction=${GPU_MEMORY_UTILIZATION} max_sequences=${MAX_NUM_SEQS} tts_instances=${TTS_POOL_SIZE:-1}"
 echo "==> Starting vLLM on port ${VLLM_PORT} (model: ${MODEL_NAME}, gpu_memory_utilization=${GPU_MEMORY_UTILIZATION})..."
 _start_vllm
@@ -290,12 +344,12 @@ if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
 fi
 echo "==> vLLM is running (PID ${VLLM_PID}) on port ${VLLM_PORT}, still loading weights in the background — watch ${VLLM_LOG}"
 
-# لو انطفت عملية vLLM ينطفي الـ container كامل (أوضح من خدمة نص ميتة جزئياً)
-trap 'kill "${VLLM_PID}" 2>/dev/null || true' EXIT
-
 # Pipecat runs inside FastAPI over /voice_followup/stream; no separate worker.
 
 echo "==> Starting FastAPI on port ${API_PORT}..."
 echo "    (features run immediately in fallback mode; the readiness check in app/core/engine.py"
 echo "     switches them to model mode automatically once vLLM finishes loading weights)"
-exec uvicorn app.main:app --host 0.0.0.0 --port "${API_PORT}" --workers 1
+_boot_stage "Starting FastAPI (loading application imports)"
+python3 -u -m uvicorn app.main:app --host 0.0.0.0 --port "${API_PORT}" --workers 1 &
+API_PID=$!
+_supervise_services
