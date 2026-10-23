@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 # exaggeration ثابتة بكل المكالمات حتى تبقى البصمة المحسوبة صالحة (أي قيمة
 # مختلفة تخلي المكتبة تعيد بناء جزء من البصمة بكل جملة).
 _EXAGGERATION = 0.5
-# cfg_weight أقل من الافتراضي (0.5) يبطّئ الإلقاء شوي فيصير أهدأ وأوضح بالمكالمة.
-_CFG_WEIGHT = 0.4
+# Voice-agent defaults: avoid deliberately slowing every utterance.
+_CFG_WEIGHT = 0.5
 
 
 def _load_kwargs(device: str, checkpoint: str) -> dict:

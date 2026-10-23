@@ -47,13 +47,29 @@ def test_console_example_is_accepted_by_the_real_api(monkeypatch):
 
 def test_first_phrase_starts_before_a_long_sentence_finishes():
     splitter = stream.SentenceSplitter(first_chars=56)
-    assert splitter.feed("مرحبا بيك،") == ["مرحبا بيك،"]
+    assert splitter.feed("مرحبا بيك،") == []
+    assert splitter.feed(" وياك سارة من متجر النور،") == ["مرحبا بيك، وياك سارة من متجر النور،"]
     assert splitter.feed(" نريد نسألك عن الطلب") == []
     assert splitter.flush() == ["نريد نسألك عن الطلب"]
     text = "كلمة " * 40 + "."
     phrases = stream.SentenceSplitter(first_chars=56).feed(text)
     assert len(phrases[0]) <= 56
     assert " ".join(phrases).replace(" ", "") == text.replace(" ", "")
+
+
+def test_splitter_does_not_send_a_partial_word_to_tts():
+    splitter = stream.SentenceSplitter(first_chars=16)
+    word = "ا" * 25
+    assert splitter.feed(word[:18]) == []
+    assert splitter.feed(word[18:]) == []
+    assert splitter.feed(" ") == [word]
+    assert splitter.flush() == []
+
+
+def test_splitter_keeps_a_streamed_decimal_together():
+    splitter = stream.SentenceSplitter()
+    assert splitter.feed("السعر هو 12.") == []
+    assert splitter.feed("5 دينار.") == ["السعر هو 12.5 دينار."]
 
 
 def test_pipecat_reads_llm_and_synthesizes_while_playback_is_blocked():

@@ -164,7 +164,7 @@ def get_deps() -> StreamDeps:
 # تقطيع رد النموذج لجمل
 # ---------------------------------------------------------------------------
 
-_SENTENCE_END = re.compile(r"[.!?؟؛…\n]+")
+_SENTENCE_END = re.compile(r"\.(?!\d)|[!?؟؛…\n]+")
 _SOFT_BREAK = re.compile(r"[،,:]\s|\s")
 
 
@@ -185,16 +185,28 @@ class SentenceSplitter:
             cut = None
             limit = self._first or self._max
             if self._first:
-                clause = re.search(r"[,،؛]", self._buf)
-                if clause and self._min <= clause.end() <= limit:
-                    cut = clause.end()
+                # A tiny greeting alone forces another TTS generation before
+                # the caller hears who is calling. Keep it with the introduction.
+                for clause in re.finditer(r"[,،؛]", self._buf):
+                    if max(self._min, 24) <= clause.end() <= limit:
+                        cut = clause.end()
+                        break
             for m in _SENTENCE_END.finditer(self._buf):
+                if (m.group() == "." and m.end() == len(self._buf)
+                        and m.start() > 0 and self._buf[m.start() - 1].isdigit()):
+                    continue  # A decimal may arrive in the next token.
                 if cut is None and m.end() <= limit and len(self._buf[:m.end()].strip()) >= self._min:
                     cut = m.end()
                     break
             if cut is None and len(self._buf) > limit:
-                breaks = [m.end() for m in _SOFT_BREAK.finditer(self._buf, 0, limit)]
-                cut = breaks[-1] if breaks else limit
+                breaks = [m.end() for m in _SOFT_BREAK.finditer(self._buf, 0, limit + 1)]
+                # Do not synthesize half a word when its token arrives in pieces.
+                # Wait for a boundary, with a hard cap for malformed long tokens.
+                if breaks:
+                    cut = breaks[-1]
+                else:
+                    boundary = _SOFT_BREAK.search(self._buf, limit, self._max)
+                    cut = boundary.end() if boundary else (self._max if len(self._buf) > self._max else None)
             if cut is None:
                 return out
             sentence = self._buf[:cut].strip()
@@ -280,6 +292,7 @@ class StreamCall:
         self._stt_turns = 0
         self._response_errors = 0
         self._turn_origin: Optional[float] = None
+        self._turn_phrases = set()
 
     # ── الإرسال ─────────────────────────────────────────────────────────────
 
@@ -548,6 +561,7 @@ class StreamCall:
 
     async def _respond(self, opening: bool) -> None:
         self._turn_audio_sent = False
+        self._turn_phrases.clear()
         spoken: List[str] = []
         self._turn_started = self._turn_origin or time.monotonic()
         self._token_ms, self._first_sent_ms, self._tts_ms = None, None, 0
@@ -661,6 +675,9 @@ class StreamCall:
         text = clean_sentence(sentence)
         if not text:
             return
+        key = re.sub(r"[\W_]+", "", text).casefold()
+        if len(key) >= 12 and key in self._turn_phrases:
+            return
         failure: Optional[BaseException] = None
         tts_started = time.monotonic()
         try:
@@ -679,9 +696,11 @@ class StreamCall:
             return
         self._tts_failures = 0
         audio, rate = result
-        pcm = vad.float_to_pcm16(vad.resample(np.asarray(audio, dtype=np.float32), rate, vad.SAMPLE_RATE))
+        audio = vad.trim_tts_padding(np.asarray(audio, dtype=np.float32), rate)
+        pcm = vad.float_to_pcm16(vad.resample(audio, rate, vad.SAMPLE_RATE))
         if not pcm:
             raise TtsUnavailable("empty_tts_audio")
+        self._turn_phrases.add(key)
         return text, pcm
 
     async def _play_speech(self, payload, spoken: List[str]) -> None:
@@ -691,23 +710,36 @@ class StreamCall:
         await self._accepted_event.wait()
         chunk = vad.SAMPLE_RATE * CHUNK_MS // 1000 * 2
         lead = settings.voice_stream_tts_lead_ms / 1000.0
-        for i in range(0, len(pcm), chunk):
-            piece = pcm[i:i + chunk]
-            ahead = self._playback_until - time.monotonic()
-            if ahead > lead:
-                await asyncio.sleep(ahead - lead)
-            await self._send(piece)
-            if self._first_sent_ms is None:
-                self._first_sent_ms = int((time.monotonic() - self._turn_started) * 1000)
-                if not self._ever_sent_audio and self._accepted_at is not None:
-                    logger.info("voice_first_audio trace=%s accepted_to_audio_ms=%d input=%s prewarmed=%s",
-                                self.trace_id, int((time.monotonic() - self._accepted_at) * 1000),
-                                self.input_mode, self.deps.prewarm_opening)
-                self._ever_sent_audio = True
-            self._turn_audio_sent = True
-            self._playback_until = max(self._playback_until, time.monotonic()) + len(piece) / 2 / vad.SAMPLE_RATE
-        spoken.append(text)
+        recorded = False
+        try:
+            for i in range(0, len(pcm), chunk):
+                piece = pcm[i:i + chunk]
+                ahead = self._playback_until - time.monotonic()
+                if ahead > lead:
+                    await asyncio.sleep(ahead - lead)
+                await self._send(piece)
+                if not recorded:
+                    # Keep the introduction in history even when playback is
+                    # interrupted halfway; otherwise the model greets again.
+                    spoken.append(text)
+                    recorded = True
+                self._on_audio_sent(piece)
+        except asyncio.CancelledError:
+            if recorded:
+                spoken[-1] += " [قوطع الكلام قبل اكتماله؛ قد لا يكون الزبون سمع آخر العبارة]"
+            raise
         await self._send({"type": "transcript", "role": "agent", "text": text})
+
+    def _on_audio_sent(self, piece: bytes) -> None:
+        if self._first_sent_ms is None:
+            self._first_sent_ms = int((time.monotonic() - self._turn_started) * 1000)
+            if not self._ever_sent_audio and self._accepted_at is not None:
+                logger.info("voice_first_audio trace=%s accepted_to_audio_ms=%d input=%s prewarmed=%s",
+                            self.trace_id, int((time.monotonic() - self._accepted_at) * 1000),
+                            self.input_mode, self.deps.prewarm_opening)
+            self._ever_sent_audio = True
+        self._turn_audio_sent = True
+        self._playback_until = max(self._playback_until, time.monotonic()) + len(piece) / 2 / vad.SAMPLE_RATE
 
     async def _agent_end(self) -> None:
         """الجملة الأخيرة انرسلت كاملة: نبلّغ التطبيق يقفل الخط، وننتظره يأكد

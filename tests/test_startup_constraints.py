@@ -67,7 +67,12 @@ _install_vllm
     assert [(req.name, str(req.specifier), req.marker) for req in constraints] == [
         (req.name, str(req.specifier), req.marker) for req in original
     ]
-    assert "vllm" in (tmp_path / "pip-args.txt").read_text()
+    args = (tmp_path / "pip-args.txt").read_text().splitlines()
+    assert "vllm" in args
+    # Constraints do not activate Pipecat's transitive requirements. Both app
+    # requirement sets must participate in the same resolution as vLLM.
+    requested_files = [args[i + 1] for i, arg in enumerate(args) if arg == "-r"]
+    assert requested_files == ["requirements.txt", "requirements-gpu.txt"]
 
     if pip_status == 0:
         # Let the real pip resolver validate the constraints, fully offline.

@@ -51,7 +51,11 @@ _install_vllm() (
     trap 'rm -f -- "${constraints}"' EXIT
     sed -E 's/^([[:space:]]*[[:alnum:]_.-]+)\[[^]]+\]/\1/' \
         requirements.txt requirements-gpu.txt > "${constraints}"
+    # Constraints alone do not include Pipecat's dependency graph. Resolve the
+    # app requirements alongside vLLM so shared packages (e.g. protobuf) remain
+    # compatible instead of silently replacing them with incompatible releases.
     python3 -m pip install -U --force-reinstall -c "${constraints}" "vllm" torch torchvision --pre \
+        -r requirements.txt -r requirements-gpu.txt \
         --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
         --extra-index-url https://download.pytorch.org/whl/cu129
 )

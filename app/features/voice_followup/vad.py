@@ -33,6 +33,25 @@ def float_to_pcm16(samples: np.ndarray) -> bytes:
     return (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
 
 
+def trim_tts_padding(samples: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Remove excess edge silence, retaining consonant margins and a short pause.
+
+    Only the edges are trimmed; pauses inside an utterance remain untouched.
+    Relative and absolute thresholds keep quiet speech from being chopped off.
+    """
+    if samples.ndim != 1 or sample_rate <= 0 or not np.isfinite(samples).all():
+        raise ValueError("TTS requires finite mono audio and a positive sample rate")
+    if samples.size == 0:
+        return samples
+    threshold = min(0.003, float(np.max(np.abs(samples))) * 0.01)
+    active = np.flatnonzero(np.abs(samples) > max(threshold, 1e-7))
+    if not active.size:
+        return samples[:0]
+    start = max(0, int(active[0]) - int(sample_rate * 0.04))
+    end = min(samples.size, int(active[-1]) + 1 + int(sample_rate * 0.12))
+    return samples[start:end]
+
+
 def resample(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
     """تحويل معدل العينات بنسبة كسرية (up/down) مع فلتر تمرير منخفض (windowed
     sinc) قبل التنعيم حتى ما يصير aliasing — بديل numpy عن scipy.resample_poly."""
