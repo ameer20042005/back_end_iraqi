@@ -54,11 +54,62 @@ _install_vllm() (
     # Constraints alone do not include Pipecat's dependency graph. Resolve the
     # app requirements alongside vLLM so shared packages (e.g. protobuf) remain
     # compatible instead of silently replacing them with incompatible releases.
-    python3 -m pip install -U --force-reinstall -c "${constraints}" "vllm" torch torchvision --pre \
+    # Reuse satisfied packages, including large CUDA wheels. A failed import is
+    # not evidence that the entire environment needs reinstalling.
+    python3 -m pip install --no-cache-dir --progress-bar off -c "${constraints}" "vllm" torch torchvision --pre \
         -r requirements.txt -r requirements-gpu.txt \
         --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
         --extra-index-url https://download.pytorch.org/whl/cu129
 )
+
+_ensure_python_dependencies() {
+    _boot_stage "Checking installed Python requirements (offline)"
+    if python3 scripts/check_requirements.py requirements.txt requirements-gpu.txt \
+        --require vllm --require torch --require torchvision; then
+        echo "==> Python requirements already satisfied — skipping installation"
+    else
+        _boot_stage "Installing missing or incompatible Python requirements"
+        _install_vllm
+        # Do not launch a half-installed environment after a resolver warning.
+        python3 scripts/check_requirements.py requirements.txt requirements-gpu.txt \
+            --require vllm --require torch --require torchvision
+    fi
+    if python3 scripts/check_requirements.py --no-deps --require chatterbox-tts==0.1.7; then
+        echo "==> Chatterbox already installed — skipping installation"
+    else
+        _boot_stage "Installing Chatterbox"
+        python3 -m pip install --no-cache-dir --progress-bar off --no-deps chatterbox-tts==0.1.7
+    fi
+}
+
+_prepare_model_cache() {
+    # Set these before any transformers/huggingface_hub import. /workspace is
+    # the RunPod volume; completed model shards must survive container restarts.
+    local old_cache cache_parent
+    if [ -z "${HF_HOME:-}" ]; then
+        old_cache="${XDG_CACHE_HOME:-${HOME}/.cache}/huggingface"
+        cache_parent="${PWD}/.cache"
+        if [ -d /workspace ] && [ -w /workspace ]; then
+            cache_parent=/workspace/.cache
+        fi
+        export HF_HOME="${cache_parent}/huggingface"
+        if [ "${old_cache}" != "${HF_HOME}" ] && [ -d "${old_cache}" ] && [ ! -e "${HF_HOME}" ]; then
+            echo "==> Moving existing model cache to ${HF_HOME} (preserving downloaded files)..."
+            mkdir -p -- "${cache_parent}"
+            mv -- "${old_cache}" "${HF_HOME}"
+            # Keep older tools pointing at the same files rather than a second copy.
+            ln -s -- "${HF_HOME}" "${old_cache}"
+        elif [ "${old_cache}" != "${HF_HOME}" ] && [ -d "${old_cache}" ] && [ ! -L "${old_cache}" ]; then
+            # Never silently discard an existing cache if both locations exist.
+            echo "==> Both model cache locations exist; reusing ${old_cache}. Set HF_HOME to choose another location."
+            export HF_HOME="${old_cache}"
+        fi
+    fi
+    export HF_HUB_CACHE="${HF_HUB_CACHE:-${HUGGINGFACE_HUB_CACHE:-${TRANSFORMERS_CACHE:-${HF_HOME}/hub}}}"
+    export HF_XET_CACHE="${HF_XET_CACHE:-${HF_HOME}/xet}"
+    mkdir -p -- "${HF_HUB_CACHE}" "${HF_XET_CACHE}"
+    echo "==> Model cache: ${HF_HUB_CACHE} — reusing completed files; downloading only missing files"
+}
 
 # torchaudio (تبعية Chatterbox TTS) لازم يطابق إصدار torch حرفياً، وvLLM ما
 # يجيبه. نثبّته بعد أي تثبيت/إعادة تثبيت لـ torch، بلا تبعيات حتى ما يسحب
@@ -104,7 +155,7 @@ _boot_stage "Selecting the Python runtime"
 if [ -f .venv-pipecat/bin/activate ]; then
     source .venv-pipecat/bin/activate
 fi
-if ! python3 -c 'import sys; assert (3,11) <= sys.version_info[:2] < (3,14)' 2>/dev/null; then
+if [ ! -f .venv-pipecat/bin/activate ] || ! python3 -c 'import sys; assert (3,11) <= sys.version_info[:2] < (3,14)' 2>/dev/null; then
     echo "==> Preparing isolated Python 3.12.12 for Pipecat..."
     python3 -m pip install --no-cache-dir -q uv==0.9.5
     python3 -m uv python install 3.12.12
@@ -112,12 +163,11 @@ if ! python3 -c 'import sys; assert (3,11) <= sys.version_info[:2] < (3,14)' 2>/
     source .venv-pipecat/bin/activate
 fi
 
-_boot_stage "Installing Python requirements (downloads may take several minutes)"
-python3 -m pip install --no-cache-dir --progress-bar off -r requirements.txt -r requirements-gpu.txt
-# Chatterbox TTS بلا تبعياته المثبَّتة (torch/transformers/numpy بإصدارات
-# تتعارض مع vLLM) — تبعياته الفعلية بـ requirements-gpu.txt، انظر هناك.
-_boot_stage "Installing Chatterbox"
-python3 -m pip install --no-cache-dir --progress-bar off --no-deps chatterbox-tts==0.1.7
+_boot_stage "Removing cached pip downloads (installed packages and models are preserved)"
+python3 -m pip cache purge >/dev/null 2>&1 || true
+_boot_stage "Preparing persistent model storage"
+_prepare_model_cache
+_ensure_python_dependencies
 _boot_stage "Checking audio system libraries"
 command -v ffmpeg >/dev/null 2>&1 || {
     echo "==> Installing ffmpeg (required for the speech-to-text feature)..."
@@ -132,28 +182,6 @@ ldconfig -p 2>/dev/null | grep -q libsndfile.so || {
     apt-get update -qq
     _apt_install_pinned libsndfile1 1.0.31-2ubuntu0.2
 }
-
-# فحص مبكر: هل vLLM (بدعم Qwen3.5) موجود أصلاً؟ على Ubuntu خام الجواب دائماً
-# لأ (ماكو vLLM إطلاقاً)، فنثبّت نسخة nightly مباشرة بدل الانتظار لمحاولة
-# إقلاع فاشلة أولاً (تخمين مسبق مقصود هنا، بعكس بقية السكربت — الفحص نفسه
-# رخيص وأسرع من محاولة تشغيل فعلية). حلقة _start_vllm بالأسفل تبقى شبكة أمان
-# ثانية لو الفحص أعطى نتيجة خاطئة (مثلاً vLLM مستورد لكن معماريته لا تدعم
-# Qwen3.5 فعلياً — لا يظهر إلا وقت التشغيل الحقيقي).
-_boot_stage "Checking vLLM and torch dependencies"
-if ! python3 -c "import vllm.entrypoints.openai.api_server" 2>/dev/null; then
-    echo "==> vLLM (with Qwen3.5 support) not found — installing the nightly wheel before first launch..."
-    # --force-reinstall لكل شجرة الاعتماديات، لا فقط vllm/torch/torchvision:
-    # الصورة الأساسية أحياناً فيها torch مثبَّت مسبقاً ببناء CUDA مختلف (مثلاً
-    # cu130) عن مؤشر cu129 المستخدَم هنا. لو تركنا pip على وضعه الافتراضي، أي
-    # حزمة تابعة لـvllm (flashinfer-python، xgrammar, compressed-tensors،
-    # apache-tvm-ffi...) تكون "already satisfied" بنسخة مبنية على CUDA القديم
-    # فما تُعاد — فتبقى مبنية على نسخة CUDA غير المثبَّتة فعلياً بعد إعادة تثبيت
-    # torch/torchvision، ويظهر الخلل لاحقاً كـ"libcudart.so.13: cannot open
-    # shared object file" بدل خطأ CUDA واضح وقت التثبيت. --force-reinstall
-    # يجبر إعادة حل الشجرة كاملة بنفس نسخة CUDA (cu129) دفعة وحدة.
-    _install_vllm
-fi
-_ensure_torchaudio
 
 # 8001 مستخدَم أحياناً من خدمة نظام على قوالب RunPod العامة (لاحظنا nginx
 # داخلي ماسكه بالفعل على بعض الـ Pods) — 18001 منفذ داخلي (بين الحاويتين
@@ -307,6 +335,9 @@ _start_vllm() {
 _boot_stage "Checking optional CUDA library and compiler paths"
 _fix_cuda_lib_path
 _fix_cuda_nvcc_path
+_ensure_torchaudio
+_boot_stage "Verifying vLLM imports with CUDA paths configured"
+python3 -c "import vllm.entrypoints.openai.api_server"
 
 _boot_stage "Starting vLLM"
 # Keep this shell alive as supervisor. exec uvicorn would discard the EXIT
@@ -325,15 +356,11 @@ sleep 8
 if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
     echo "🛑 vLLM died immediately — boot log:"
     tail -n 40 "${VLLM_LOG}"
-    if grep -qi "Qwen3_5ForConditionalGeneration\|is not supported for now\|ValueError: Model architectures\|ModuleNotFoundError\|No module named\|different CUDA major versions" "${VLLM_LOG}"; then
-        echo "==> Cause: the current vllm version doesn't support the Qwen3.5 architecture (or isn't installed) — installing nightly wheel..."
-        _install_vllm
-        _ensure_torchaudio
-    elif grep -qi "libcudart\|libcublas\|cannot open shared object file" "${VLLM_LOG}"; then
+    if grep -qi "libcudart\|libcublas\|cannot open shared object file" "${VLLM_LOG}"; then
         echo "==> Cause: CUDA runtime library path is missing — fixing LD_LIBRARY_PATH..."
         _fix_cuda_lib_path
     else
-        echo "🛑 Unknown cause — check the log above manually. Stopping."
+        echo "🛑 vLLM startup failed — check the log above. Installed packages will not be reinstalled automatically."
         exit 1
     fi
     echo "==> Retrying vLLM startup..."

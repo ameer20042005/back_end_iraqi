@@ -69,6 +69,9 @@ _install_vllm
     ]
     args = (tmp_path / "pip-args.txt").read_text().splitlines()
     assert "vllm" in args
+    assert "--no-cache-dir" in args
+    assert "--force-reinstall" not in args
+    assert "-U" not in args and "--upgrade" not in args
     # Constraints do not activate Pipecat's transitive requirements. Both app
     # requirement sets must participate in the same resolution as vLLM.
     requested_files = [args[i + 1] for i, arg in enumerate(args) if arg == "-r"]
