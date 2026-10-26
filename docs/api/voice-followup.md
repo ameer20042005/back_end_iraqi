@@ -2,7 +2,7 @@
 
 تطبيق Rust يتصل عبر `/voice_followup/stream`، ويجري اتصال واتساب من جلسة المستخدم.
 الصوت PCM s16le mono 16kHz؛ ينسخه ayoubkirouane/whisper-small-ar، ثم يرسَل النص إلى Qwen/Qwen3.5-9B للحوار والأدوات.
-Pipecat يدير التوليد وتجميع العبارات والنطق والتشغيل بالتوازي. Chatterbox يحوّل الرد النصي إلى صوت.
+Pipecat يدير التوليد وتجميع العبارات والنطق والتشغيل بالتوازي. F5-TTS العراقي (`ameer4wisam/Habibi-TTS-IRQ`) يحوّل الرد النصي إلى صوت.
 لا غرف RTC ولا SIP ولا عامل مستقل؛ عملية FastAPI واحدة (`--workers 1`).
 
 التشغيل وميزانية GPU ونتائج المراجعة: [بنية Whisper وQwen وPipecat](../pipecat-native-audio.md).
@@ -82,7 +82,7 @@ curl -X POST "$BASE/voice_followup/operator/chat/completions" \
 
 تعليمات الشركة والهدف والأسئلة والأدوات ونتائج المكالمات بقيت مشتركة من `prompts.py` و`call_tools.py`.
 الافتتاحية تُجهّز أثناء الرنين ولا يُرسل أي صوت قبل `accepted`.
-كل مكالمة تملك سياقها وقاطعها الصوتي؛ Chatterbox يملك نسخة واحدة افتراضياً لتوفير VRAM.
+كل مكالمة تملك سياقها وقاطعها الصوتي؛ F5-TTS يملك نسخة واحدة افتراضياً لتوفير VRAM.
 `VOICE_STREAM_MAX_CALLS` يحدد السعة، و`TTS_POOL_SIZE` يرفع توازي النطق على حساب الذاكرة.
 Pipecat يلغي التوليد والنطق والتشغيل عند المقاطعة، ويسجّل النص المنطوق قبل دور العميل الجديد.
 
@@ -138,8 +138,8 @@ Pipecat يلغي التوليد والنطق والتشغيل عند المقا�
 
 | `reason` | المعنى | وين تدوّر |
 |---|---|---|
-| `cuda_oom` | نفاد ذاكرة الـ GPU أثناء تحميل Chatterbox أو التوليد | `vram_free_gb` بـ `/health/voice`، وقسم ميزانية الذاكرة تحت |
-| `not_installed` | `chatterbox-tts` أو تبعية لها ما تنستورد (`tts.import_error` بـ `/health/voice`) | `python3 -c "import chatterbox.mtl_tts"` |
+| `cuda_oom` | نفاد ذاكرة الـ GPU أثناء تحميل F5-TTS أو التوليد | `vram_free_gb` بـ `/health/voice`، وقسم ميزانية الذاكرة تحت |
+| `not_installed` | `f5-tts` أو تبعية لها ما تنستورد (`tts.import_error` بـ `/health/voice`) | `python3 -c "import f5_tts.api"` |
 | `load_failed` | المكتبة موجودة بس تحميل الأوزان/بصمة الصوت فشل لسبب غير الذاكرة (تنزيل، ملف مرجعي، توافق نسخة) | لوق uvicorn: "فشل تحميل نسخة النطق" مع traceback |
 | `generation_failed` | الموديل محمَّل والتوليد نفسه فشل (أو رجع بلا صوت) | لوق uvicorn |
 
@@ -228,4 +228,4 @@ Whisper هو مسار النسخ الوحيد، بنسخة مشتركة للمك
 ## ملاحظات تشغيل
 
 - النموذج هو نفس خادم vLLM (`LLM_BASE_URL`) بلا تفكير، لأن زمن الرد بالمكالمة حساس.
-- الصوت المرجعي لـ Chatterbox: `app/features/voice_followup/reference/mazen.mp3` (أول ~10 ثوانٍ منه).
+- الصوت المرجعي لـ F5-TTS: `app/features/voice_followup/reference/IRQ.wav` ونصّه الحرفي بـ `tts_ref_text_ar` في `app/config.py`.

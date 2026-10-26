@@ -15,6 +15,8 @@ import json
 import os
 import time
 from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -365,55 +367,48 @@ def test_calls_endpoint_rejects_old_contract():
 
 
 class FakeVoice:
-    sr = 24000
     created = 0
 
-    def __init__(self):
+    def __init__(self, ckpt_file, vocab_file):
         FakeVoice.created += 1
-        self.prepared = []
+        self.files = (ckpt_file, vocab_file)
         self.generated = []
+        self.vocoder = SimpleNamespace(float=lambda: "float32-vocoder")
 
-    @classmethod
-    def from_pretrained(cls, **kwargs):
-        return cls()
-
-    def prepare_conditionals(self, path, exaggeration):
-        self.prepared.append(path)
-
-    def generate(self, text, **kwargs):
+    def infer(self, **kwargs):
         import numpy as np
 
         self.generated.append(kwargs)
-        return type("T", (), {"squeeze": lambda s, i: type("U", (), {
-            "detach": lambda u: type("V", (), {"cpu": lambda v: type("W", (), {
-                "numpy": lambda w: np.zeros(10, dtype="float32")})()})()})()})()
+        return np.zeros(10, dtype="float32"), 24000, None
 
 
 def _fake_pool(monkeypatch, size):
     import sys
-    from types import SimpleNamespace
 
     from app.features.voice_followup import tts
 
     FakeVoice.created = 0
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
-    monkeypatch.setattr(tts, "ChatterboxMultilingualTTS", FakeVoice, raising=False)
-    monkeypatch.setattr(tts, "_CHATTERBOX_AVAILABLE", True)
+    monkeypatch.setitem(sys.modules, "huggingface_hub",
+                        SimpleNamespace(hf_hub_download=lambda repo_id, filename: filename))
+    monkeypatch.setattr(tts, "F5TTS", FakeVoice, raising=False)
+    monkeypatch.setattr(tts, "_F5_TTS_AVAILABLE", True)
     monkeypatch.setattr(tts, "settings", replace(tts.settings, tts_pool_size=size))
     monkeypatch.setattr(tts, "_pool", None)
     return tts
 
 
-def test_voice_fingerprint_is_prepared_once_per_instance(monkeypatch):
+def test_iraqi_voice_loads_once_and_uses_local_reference_with_its_text(monkeypatch):
     tts = _fake_pool(monkeypatch, size=1)
     for _ in range(3):
         audio, sr = tts.synthesize_array("هلا بيك")
     inst = tts._get_pool()._free[0]
     assert FakeVoice.created == 1
-    assert len(inst.prepared) == 1 and inst.prepared[0].endswith("mazen.mp3")
-    # بلا audio_prompt_path بكل جملة — البصمة محسوبة مسبقاً.
-    assert all("audio_prompt_path" not in kw for kw in inst.generated)
-    assert sr == 24000
+    assert inst.files == (tts.settings.tts_ckpt_ar, tts.settings.tts_vocab_ar)
+    assert inst.vocoder == "float32-vocoder"
+    ref = inst.generated[0]
+    assert ref["ref_file"].endswith("IRQ.wav") and Path(ref["ref_file"]).is_file()
+    assert ref["ref_text"] == tts.settings.tts_ref_text_ar and ref["gen_text"] == "هلا بيك"
+    assert sr == 24000 and audio.dtype == "float32"
 
 
 def test_pool_grows_to_size_then_waits_for_a_free_instance(monkeypatch):

@@ -2,7 +2,7 @@
 """صحة موديلات صوت المكالمات بلا GPU ولا موديلات حقيقية.
 
   ١. تصنيف أسباب فشل النطق (cuda_oom / not_installed / load_failed / generation_failed).
-  ٢. توافق تحميل Chatterbox مع from_pretrained(device) بنسخة 0.1.7 (بلا t3_model).
+  ٢. تحميل F5-TTS العراقي (أوزان + مفردات) ونقل أخطاء التحميل/التوليد.
   ٣. GET /health/voice: الحالة بلا تحميل، ونتيجة آخر محاولة نطق.
   ٤. VOICE_STREAM_WARMUP: الافتراضي على GPU بس، والتحميل المسبق يسجّل الفشل.
 """
@@ -42,7 +42,7 @@ def test_classify_error_reasons():
 def test_classify_error_looks_through_the_load_wrapper():
     def wrapped(cause):
         try:
-            raise voice_health.ModelLoadError("تعذّر تحميل Chatterbox") from cause
+            raise voice_health.ModelLoadError("تعذّر تحميل F5-TTS") from cause
         except voice_health.ModelLoadError as exc:
             return exc
 
@@ -58,34 +58,27 @@ def test_describe_failure_is_one_line_without_cuda():
     assert line == "reason=generation_failed error=RuntimeError: boom vram_free_gb=n/a"
 
 
-# ── ٢. تحميل Chatterbox ────────────────────────────────────────────────────
+# ── ٢. تحميل F5-TTS ─────────────────────────────────────────────────────────
 
 class StrictVoice:
-    """مثل chatterbox-tts==0.1.7: from_pretrained(device) بس — أي وسيط ثاني TypeError."""
+    """مثل f5_tts.api.F5TTS: أوزان ومفردات بالمُنشئ، وinfer() يرجع (wav, sr, spec)."""
 
-    sr = 24000
     loads = []
 
-    @classmethod
-    def from_pretrained(cls, device):
-        cls.loads.append(device)
-        return cls()
+    def __init__(self, ckpt_file, vocab_file):
+        type(self).loads.append((ckpt_file, vocab_file))
 
-    def prepare_conditionals(self, path, exaggeration):
-        pass
-
-    def generate(self, text, **kwargs):
-        return torch.zeros(1, 10)
+    def infer(self, **kwargs):
+        return torch.zeros(10).numpy(), 24000, None
 
 
 class BrokenGenerateVoice(StrictVoice):
-    def generate(self, text, **kwargs):
+    def infer(self, **kwargs):
         raise torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 64.00 MiB")
 
 
 class OomLoadVoice(StrictVoice):
-    @classmethod
-    def from_pretrained(cls, device):
+    def __init__(self, ckpt_file, vocab_file):
         raise torch.cuda.OutOfMemoryError("CUDA out of memory while loading")
 
 
@@ -93,8 +86,10 @@ class OomLoadVoice(StrictVoice):
 def fake_tts(monkeypatch):
     def install(voice_cls):
         voice_cls.loads = []
-        monkeypatch.setattr(tts, "ChatterboxMultilingualTTS", voice_cls, raising=False)
-        monkeypatch.setattr(tts, "_CHATTERBOX_AVAILABLE", True)
+        monkeypatch.setitem(sys.modules, "huggingface_hub",
+                            SimpleNamespace(hf_hub_download=lambda repo_id, filename: filename))
+        monkeypatch.setattr(tts, "F5TTS", voice_cls, raising=False)
+        monkeypatch.setattr(tts, "_F5_TTS_AVAILABLE", True)
         monkeypatch.setattr(tts, "_IMPORT_ERROR", None)
         monkeypatch.setattr(tts, "settings", replace(tts.settings, tts_pool_size=1))
         monkeypatch.setattr(tts, "_pool", None)
@@ -104,24 +99,11 @@ def fake_tts(monkeypatch):
     return install
 
 
-def test_loads_with_a_library_that_rejects_t3_model(fake_tts):
+def test_loads_iraqi_checkpoint_and_vocabulary(fake_tts):
     module = fake_tts(StrictVoice)
     audio, sr = module.synthesize_array("هلا بيك")
     assert sr == 24000 and len(audio) == 10
-    assert StrictVoice.loads == ["cpu"]
-
-
-def test_passes_t3_model_when_the_library_accepts_it(fake_tts):
-    seen = {}
-
-    class NewerVoice(StrictVoice):
-        @classmethod
-        def from_pretrained(cls, device, t3_model="v2"):
-            seen["t3_model"] = t3_model
-            return cls()
-
-    fake_tts(NewerVoice).synthesize_array("هلا")
-    assert seen["t3_model"] == tts.settings.tts_ckpt_ar
+    assert StrictVoice.loads == [(tts.settings.tts_ckpt_ar, tts.settings.tts_vocab_ar)]
 
 
 def test_last_synthesis_records_success_and_failure(fake_tts):
@@ -154,7 +136,7 @@ def _no_load(*args, **kwargs):
 
 def test_health_voice_reports_without_loading_models(fake_tts, monkeypatch):
     fake_tts(StrictVoice)
-    monkeypatch.setattr(StrictVoice, "from_pretrained", classmethod(_no_load))
+    monkeypatch.setattr(StrictVoice, "__init__", _no_load)
 
     response = TestClient(main.app).get("/health/voice")  # بلا مفتاح
     assert response.status_code == 200
@@ -174,7 +156,7 @@ def test_health_voice_shows_loaded_and_last_failure(fake_tts, monkeypatch):
     assert body["tts"]["last_synthesis"]["ok"] is True
 
     # آخر نطق فشل ← 503 والسبب ظاهر بلا رسالة الخطأ نفسها.
-    monkeypatch.setattr(StrictVoice, "generate", BrokenGenerateVoice.generate)
+    monkeypatch.setattr(StrictVoice, "infer", BrokenGenerateVoice.infer)
     with pytest.raises(torch.cuda.OutOfMemoryError):
         module.synthesize_array("هلا")
     response = TestClient(main.app).get("/health/voice")
@@ -183,8 +165,8 @@ def test_health_voice_shows_loaded_and_last_failure(fake_tts, monkeypatch):
     assert last["reason"] == "cuda_oom" and "message" not in last
 
 
-def test_health_voice_unhealthy_when_chatterbox_missing(monkeypatch):
-    monkeypatch.setattr(tts, "_CHATTERBOX_AVAILABLE", False)
+def test_health_voice_unhealthy_when_f5_tts_missing(monkeypatch):
+    monkeypatch.setattr(tts, "_F5_TTS_AVAILABLE", False)
     monkeypatch.setattr(tts, "_IMPORT_ERROR", "OSError")
     monkeypatch.setattr(tts, "_pool", None)
     monkeypatch.setattr(tts, "_last_synthesis", None)
@@ -234,13 +216,13 @@ def test_warmup_failure_is_logged_and_marks_health_unhealthy(warm_state, monkeyp
     with caplog.at_level("ERROR", logger=voice_health.__name__):
         result = voice_health.warmup_voice_models()
     assert result["state"] == "failed" and result["tts"] is False
-    assert any("chatterbox=False" in r.getMessage() for r in caplog.records)
+    assert any("tts=False" in r.getMessage() for r in caplog.records)
     response = TestClient(main.app).get("/health/voice")
     assert response.status_code == 503 and response.json()["warmup"]["state"] == "failed"
 
 
 def test_real_warmup_with_strict_library_succeeds(warm_state, fake_tts, monkeypatch):
-    """التحميل المسبق الحقيقي (tts.warmup) مع مكتبة ترفض t3_model ينجح."""
+    """التحميل المسبق الحقيقي (tts.warmup) مع موديل وهمي ينجح."""
     module = fake_tts(StrictVoice)
     assert voice_health.warmup_voice_models()["state"] == "done"
     assert module.status()["loaded"] is True

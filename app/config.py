@@ -29,12 +29,13 @@ def _gpu_memory_utilization() -> float:
 
 @dataclass(frozen=True)
 class TextToSpeechModel:
-    """موديل النطق العربي ونسخته ولغته ومقطعه المرجعي، من مصدر إعداد واحد."""
+    """ملفات موديل النطق العراقي ومرجعه، من مصدر إعداد واحد."""
 
     repository: str
     checkpoint: str
-    language: str
+    vocabulary: str
     reference_audio: str
+    reference_text: str
 
 
 @dataclass(frozen=True)
@@ -62,12 +63,12 @@ class Settings:
     llm_request_timeout_seconds: float = field(
         default_factory=lambda: float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS") or "120"))
 
-    # Qwen وWhisper وChatterbox مستودعات عامة؛ لا تحتاج توكن للتنزيل.
+    # Qwen وWhisper وF5-TTS مستودعات عامة؛ لا تحتاج توكن للتنزيل.
 
     # vLLM weights, activations and KV are separate allocations. By default
     # reserve 4 GiB for KV, rather than allocating a fraction of the whole GPU.
     # GPU_MEMORY_UTILIZATION applies only when KV_CACHE_MEMORY_GB=0.
-    # The rest is left for Whisper, Chatterbox and CUDA runtime/encoder overhead.
+    # The rest is left for Whisper, F5-TTS and CUDA runtime/encoder overhead.
     gpu_memory_utilization: float = field(default_factory=_gpu_memory_utilization)
     max_model_len: int = 32768
     max_num_seqs: int = field(default_factory=lambda: max(1, int(os.getenv("VLLM_MAX_NUM_SEQS") or "16")))
@@ -185,22 +186,21 @@ class Settings:
     district_reranker_log_path: Path = field(default_factory=lambda: Path(os.getenv(
         "DISTRICT_RERANKER_LOG_PATH", str(Path(__file__).resolve().parent / "features" / "district_correction" / "data" / "reranker_shadow.jsonl"))))
 
-    # تحويل نص لصوت (app/features/voice_followup/tts.py) — صوت الـ agent
-    # بالمكالمات الحية. موديل Chatterbox Multilingual (Resemble AI) يدعم
-    # العربية (ar) مع voice cloning من مقطع مرجعي، يعيش بعملية الـ agent worker.
-    tts_model_ar: str = "ResembleAI/chatterbox"
-    # نسخة نقطة تفتيش T3 متعددة اللغات: "v2" (الافتراضي بالمكتبة) أو "v3".
-    tts_ckpt_ar: str = "v3"
-    tts_language_ar: str = "ar"
-    # Chatterbox ما يحتاج نص المرجع، ويستعمل أول ~10 ثوانٍ من المقطع فقط.
-    tts_ref_audio_ar: str = "reference/mazen.mp3"
-    # عدد نسخ Chatterbox بالـ worker: كل نسخة تنطق لمكالمة وحدة بالمرة (المكتبة
-    # مو آمنة للاستدعاء المتوازي على نفس النسخة)، فالنسخ الأكثر = مكالمات
-    # متزامنة تنتظر أقل، مقابل ~3GB VRAM تقريباً لكل نسخة. تُحمَّل عند الحاجة.
+    # تحويل نص لصوت باللهجة العراقية (app/features/voice_followup/tts.py) —
+    # صوت الـ agent بالمكالمات الحية. موديل ameer4wisam/Habibi-TTS-IRQ، نسخة
+    # عراقية من F5-TTS (voice cloning من مقطع مرجعي مع نصه الحرفي).
+    tts_model_ar: str = "ameer4wisam/Habibi-TTS-IRQ"
+    tts_ckpt_ar: str = "Specialized/IRQ/model_100000.safetensors"
+    tts_vocab_ar: str = "Specialized/IRQ/vocab.txt"
+    tts_ref_audio_ar: str = "reference/IRQ.wav"
+    tts_ref_text_ar: str = "اا ما نقدر ناخذ وقت أكثر، ااا لأنه شروط كلش يحتاجلها وقت."
+    # عدد نسخ النطق بالـ worker: كل نسخة تنطق لمكالمة وحدة بالمرة، فالنسخ
+    # الأكثر = مكالمات متزامنة تنتظر أقل، مقابل VRAM إضافي لكل نسخة.
+    # تُحمَّل عند الحاجة.
     tts_pool_size: int = field(default_factory=lambda: max(1, int(os.getenv("TTS_POOL_SIZE") or "1")))
     # الوكيل المحلي عبر WebSocket (app/features/voice_followup/stream.py):
     # تطبيق سطح المكتب يتصل بالزبون من رقم الواتساب مالته ويبث صوت المكالمة
-    # لـ WS /voice_followup/stream، والحوار عبر Whisper ثم Qwen ثم Chatterbox.
+    # لـ WS /voice_followup/stream، والحوار عبر Whisper ثم Qwen ثم F5-TTS.
     # يعيش بعملية uvicorn نفسها عبر Pipecat.
     # أقصى مكالمات WebSocket متزامنة؛ بعدها الاتصال يُرفض بـ busy (4429).
     voice_stream_max_calls: int = field(default_factory=lambda: max(1, int(
@@ -243,7 +243,7 @@ class Settings:
         default_factory=lambda: float(os.getenv("VOICE_STREAM_AGC_TARGET_DBFS") or "-20"))
     voice_stream_agc_max_gain_db: float = field(
         default_factory=lambda: float(os.getenv("VOICE_STREAM_AGC_MAX_GAIN_DB") or "20"))
-    # تحميل Chatterbox مسبقاً عند إقلاع uvicorn (بعد جاهزية vLLM حتى
+    # تحميل موديل النطق مسبقاً عند إقلاع uvicorn (بعد جاهزية vLLM حتى
     # يحجز ذاكرته أول): 1 = دائماً، 0 = أبداً (تُحمَّل بأول مكالمة)، غير مضبوط =
     # على GPU بس. يطلّع أي فشل تحميل عند البدء بدل أول مكالمة.
     voice_stream_warmup: Optional[bool] = field(default_factory=lambda: _env_flag("VOICE_STREAM_WARMUP"))
@@ -261,8 +261,9 @@ class Settings:
         return TextToSpeechModel(
             self.tts_model_ar,
             self.tts_ckpt_ar,
-            self.tts_language_ar,
+            self.tts_vocab_ar,
             self.tts_ref_audio_ar,
+            self.tts_ref_text_ar,
         )
 
 

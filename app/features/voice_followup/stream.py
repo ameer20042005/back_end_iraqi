@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Whisper -> Qwen -> Pipecat/Chatterbox over the WhatsApp PCM WebSocket contract.
+"""Whisper -> Qwen -> Pipecat/F5-TTS over the WhatsApp PCM WebSocket contract.
 
 Whisper transcribes once; Qwen receives text and manages the dialogue and tools.
-Pipecat pipelines LLM tokens, phrase aggregation, Chatterbox TTS and paced PCM.
+Pipecat pipelines LLM tokens, phrase aggregation, F5-TTS and paced PCM.
 Only accepted WhatsApp calls receive speech; opening synthesis can run while ringing.
 """
 
@@ -72,12 +72,12 @@ class StreamDeps:
     stt: SttFn = stt.transcribe
 
 
-async def chatterbox_tts(text: str) -> Optional[Tuple[np.ndarray, int]]:
-    from app.features.voice_followup import tts as chatterbox
+async def f5_tts(text: str) -> Optional[Tuple[np.ndarray, int]]:
+    from app.features.voice_followup import tts as speech
 
-    result = await asyncio.to_thread(chatterbox.synthesize_array, text)
+    result = await asyncio.to_thread(speech.synthesize_array, text)
     if result is None:
-        raise voice_health.NotInstalledError("موديل النطق غير مثبَّت (chatterbox-tts)")
+        raise voice_health.NotInstalledError("موديل النطق غير مثبَّت (f5-tts)")
     return result
 
 
@@ -149,7 +149,7 @@ async def vllm_stream(messages: List[dict], tools: List[dict]) -> AsyncIterator[
 
 
 def default_deps() -> StreamDeps:
-    return StreamDeps(llm=vllm_stream, tts=chatterbox_tts, vad=vad.make_classifier, prewarm_opening=True)
+    return StreamDeps(llm=vllm_stream, tts=f5_tts, vad=vad.make_classifier, prewarm_opening=True)
 
 
 # None = التبعيات الحقيقية؛ الاختبارات تضبطها بنسخ وهمية.
@@ -170,7 +170,7 @@ _SOFT_BREAK = re.compile(r"[،,:]\s|\s")
 
 class SentenceSplitter:
     """يجمع نص النموذج المتدفق ويطلّع جمل كاملة تنطق وحدة وحدة. الجملة الأقصر
-    من min_chars تنضم للي بعدها (Chatterbox ينطق الجمل الطويلة شوي أطبع)."""
+    من min_chars تنضم للي بعدها (موديل النطق ينطق الجمل الطويلة شوي أطبع)."""
 
     def __init__(self, min_chars: int = 8, max_chars: int = 200, first_chars: Optional[int] = None) -> None:
         self._buf = ""

@@ -1,8 +1,4 @@
-"""Check installed metadata offline, without importing GPU libraries or running pip.
-
-Chatterbox is checked with --no-deps because its upstream pins intentionally
-conflict with the shared vLLM stack; requirements-gpu.txt supplies its runtime deps.
-"""
+"""Check installed metadata offline, without importing GPU libraries or running pip."""
 
 import argparse
 from importlib import metadata

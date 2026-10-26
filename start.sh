@@ -72,12 +72,6 @@ _ensure_python_dependencies() {
         # Do not launch a half-installed environment after a resolver warning.
         python3 scripts/check_requirements.py requirements-vllm.txt requirements.txt requirements-gpu.txt
     fi
-    if python3 scripts/check_requirements.py --no-deps --require chatterbox-tts==0.1.7; then
-        echo "==> Chatterbox already installed — skipping installation"
-    else
-        _boot_stage "Installing Chatterbox"
-        python3 -m pip install --no-cache-dir --progress-bar off --no-deps chatterbox-tts==0.1.7
-    fi
 }
 
 _prepare_model_cache() {
@@ -131,8 +125,8 @@ if ! command -v python3 >/dev/null 2>&1 || ! python3 -m pip --version >/dev/null
     _apt_install_pinned python3         3.10.6-1~22.04
     _apt_install_pinned python3-pip     22.0.2+dfsg-1ubuntu0.7
     _apt_install_pinned python3-dev     3.10.6-1~22.04
-    # build-essential/git: بعض حزم requirements-gpu.txt (مثل spacy-pkuseg،
-    # تبعية chatterbox-tts) قد تُوزَّع sdist بلا wheel جاهزة فتحتاج مترجم C.
+    # build-essential/git: بعض حزم requirements-gpu.txt (مثل encodec، تبعية
+    # f5-tts) تُوزَّع sdist بلا wheel جاهزة فتحتاج مترجم C وقت التثبيت.
     _apt_install_pinned build-essential 12.9ubuntu3
     _apt_install_pinned git             1:2.34.1-1ubuntu1.17
 fi
@@ -181,7 +175,7 @@ command -v ffmpeg >/dev/null 2>&1 || {
     _apt_install_pinned ffmpeg 7:4.4.2-0ubuntu0.22.04.1
 }
 # libsndfile1 لازمة لـ soundfile (app/features/voice_followup/tts.py) — كتابة
-# مخرَج Chatterbox كملف WAV. ldconfig -p يتحقق من وجود مكتبة النظام نفسها (الحزمة
+# مخرَج F5-TTS كملف WAV. ldconfig -p يتحقق من وجود مكتبة النظام نفسها (الحزمة
 # pip منفصلة عن مكتبة C اللي تربطها)، لا حزمة python soundfile.
 ldconfig -p 2>/dev/null | grep -q libsndfile.so || {
     echo "==> Installing libsndfile1 (required for the text-to-speech feature)..."
@@ -233,7 +227,7 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
 # ويرسله مع كل طلب لو لقاه. الخطر: توكن قديم/ملغى ضابطه قالب RunPod يخلّي
 # الـHub يرد 401 حتى على مستودع عام. لذلك:
 #   · unset يمسح متغيرَي التوكن من بيئة هذا السكربت — وبالتالي من vLLM
-#     وuvicorn (native audio/Chatterbox) لأنهم يرثون البيئة منه.
+#     وuvicorn (native audio/F5-TTS) لأنهم يرثون البيئة منه.
 #   · HF_HUB_DISABLE_IMPLICIT_TOKEN=1 يمنع إرسال توكن ملف login المخزَّن
 #     ضمنياً مع طلبات القراءة/التنزيل.
 # unset HF_TOKEN HUGGING_FACE_HUB_TOKEN

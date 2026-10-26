@@ -1179,7 +1179,7 @@
     { id: "voiceHealth", group: "المكالمات", name: "صحة الصوت", method: "GET", path: "/health/voice",
       short: "النطق والصوت الأصلي جاهزين؟ الذاكرة، وتشخيص ليش آخر مكالمة ما سمعت الزبون.",
       title: "صحة صوت المكالمات (Pipecat)",
-      desc: "بلا مفتاح، وما يحمّل أي نموذج. Chatterbox (النطق) وWhisper (يسمع صوت الزبون مباشرة)، التحميل المسبق، ذاكرة الـ GPU، ونتيجة آخر نطق. last_call أرقام صوت آخر مكالمة (بلا نص) مع diagnosis يسمّي سبب عدم سماع الزبون. 503 لو شي ناقص أو آخر نطق فشل.",
+      desc: "بلا مفتاح، وما يحمّل أي نموذج. F5-TTS (النطق) وWhisper (يسمع صوت الزبون مباشرة)، التحميل المسبق، ذاكرة الـ GPU، ونتيجة آخر نطق. last_call أرقام صوت آخر مكالمة (بلا نص) مع diagnosis يسمّي سبب عدم سماع الزبون. 503 لو شي ناقص أو آخر نطق فشل.",
       render: renderVoiceHealth },
 
     { id: "loadTest", group: "الأداء", name: "اختبار الحمل", method: "POST", path: "/sales/chat/completions ×N", key: "sales",
@@ -2024,7 +2024,7 @@
     stt_error: ["Whisper رمى خطأ لكل مقطع — راجع لوق الخادم", "err"],
     stt_empty: ["مقاطع وصلت Whisper ورجعت بلا نص", "warn"]
   };
-  const TTS_REASONS = { cuda_oom: "نفاد ذاكرة GPU", not_installed: "chatterbox غير مثبّت", load_failed: "فشل تحميل النموذج", generation_failed: "فشل التوليد" };
+  const TTS_REASONS = { cuda_oom: "نفاد ذاكرة GPU", not_installed: "f5-tts غير مثبّت", load_failed: "فشل تحميل النموذج", generation_failed: "فشل التوليد" };
   const WARMUP_STATES = { disabled: "معطّل", pending: "ينتظر vLLM", running: "جاري التحميل", done: "جاهز", failed: "فشل" };
   const LAST_CALL_FIELDS = [
     ["duration_s", "المدة (ثانية)"], ["vad", "كاشف الكلام"], ["agc", "تطبيع المستوى (AGC)"],
@@ -2053,7 +2053,7 @@
         " ", pill([v.engine, v.input_mode].filter(Boolean).join(" · ") || "—", "mono outline")),
       h("dt", { text: "سماع الزبون (Whisper)" }), h("dd", {}, pill(nat.ready ? "جاهز" : "غير جاهز", nat.ready ? "ok" : "err"),
         nat.model ? " " : null, nat.model ? pill(nat.model, "mono outline") : null),
-      h("dt", { text: "النطق (Chatterbox)" }), h("dd", {},
+      h("dt", { text: "النطق (F5-TTS)" }), h("dd", {},
         pill(!tts.installed ? "غير مثبّت" + (tts.import_error ? " (" + tts.import_error + ")" : "") : tts.loaded ? "محمّل" : "مثبّت، غير محمّل",
           !tts.installed ? "err" : tts.loaded ? "ok" : "info"),
         " ", pill(ltr((tts.instances || 0) + " / " + (tts.pool_size || 0)) + " نسخة", "outline")),

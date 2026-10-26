@@ -2,7 +2,7 @@
 
 ## مسار المكالمة
 
-`PCM 16kHz → VAD → ayoubkirouane/whisper-small-ar → نص → Qwen/Qwen3.5-9B → Pipecat → Chatterbox → PCM`
+`PCM 16kHz → VAD → ayoubkirouane/whisper-small-ar → نص → Qwen/Qwen3.5-9B → Pipecat → F5-TTS (Habibi-TTS-IRQ) → PCM`
 
 Qwen مسؤول عن الحوار والأدوات والصور، وWhisper عن نسخ كلام الزبون. لا يُرسل `input_audio` إلى Qwen، ولا نطلب من نموذج الحوار إعادة نسخ الكلام قبل الإجابة.
 
@@ -23,24 +23,24 @@ Qwen مسؤول عن الحوار والأدوات والصور، وWhisper عن
 
 `start.sh` يقرأ `Qwen/Qwen3.5-9B` من `app/config.py` ويضبط vLLM بـ `qwen3_coder` للأدوات و`qwen3` لتحليل التفكير. التفكير معطّل افتراضياً وبطلبات الصوت عبر `enable_thinking: false`. دعم الصور باقٍ؛ الفيديو معطّل لتقليل الحجز.
 
-`start_local.sh` يختار معرّف Qwen3.5-9B المحلي عند وجوده؛ أي نموذج آخر يحتاج `LLM_MODEL` صريحاً. ثبّت متطلبات الصوت وChatterbox عند تجربة الصوت محلياً؛ `requirements.txt` وحده لخدمة النص.
+`start_local.sh` يختار معرّف Qwen3.5-9B المحلي عند وجوده؛ أي نموذج آخر يحتاج `LLM_MODEL` صريحاً. ثبّت متطلبات الصوت (requirements-gpu.txt) عند تجربة الصوت محلياً؛ `requirements.txt` وحده لخدمة النص.
 
 | الإعداد | الافتراضي | الوظيفة |
 |---|---|---|
 | `STT_DEVICE` | `auto` | اختيار `cpu` أو `cuda` صراحةً عند الحاجة |
 | `STT_TIMEOUT_SECONDS` | `30` | مهلة النسخ، شاملة انتظار نسخة Whisper المشتركة |
-| `VOICE_STREAM_WARMUP` | مفعّل على GPU | تحميل وتجربة Whisper وChatterbox بعد جاهزية vLLM |
+| `VOICE_STREAM_WARMUP` | مفعّل على GPU | تحميل وتجربة Whisper وF5-TTS بعد جاهزية vLLM |
 | `VOICE_STREAM_END_SILENCE_MS` | `400` | نهاية دور الزبون |
 | `VOICE_STREAM_FIRST_PHRASE_CHARS` | `56` | بدء نطق أول عبارة مبكراً |
 | `VOICE_STREAM_LLM_MAX_TOKENS` | `1024` | يتيح اكتمال JSON النتيجة لعدة أسئلة؛ طول الكلام تضبطه تعليمات الحوار |
-| `TTS_POOL_SIZE` | `1` | نسخ Chatterbox المتزامنة |
+| `TTS_POOL_SIZE` | `1` | نسخ F5-TTS المتزامنة |
 | `KV_CACHE_MEMORY_GB` | `4` | حجز KV مستقل عن بقية الذاكرة |
 
 مهلة النسخ لا توقف عملية CUDA بدأت داخل خيط؛ القفل يبقى محجوزاً حتى ينتهي الاستدلال الفعلي. تكرار فشل النسخ مرتين ينهي المكالمة بـ `stt_unavailable`.
 
 ## الذاكرة والتحقق
 
-أوزان 9 مليارات معلمة ذات بايتين تحتاج تقريباً 18GB عشرية، قبل ذاكرة الرؤية وKV وCUDA وWhisper وChatterbox. حجز KV الافتراضي 4GiB ليس حداً لذاكرة الخادم كلها. افحص الذاكرة على جهاز النشر، ولا تعتبر GPU بذاكرة 24GB مضمون الكفاية لهذه البنية.
+أوزان 9 مليارات معلمة ذات بايتين تحتاج تقريباً 18GB عشرية، قبل ذاكرة الرؤية وKV وCUDA وWhisper وF5-TTS. حجز KV الافتراضي 4GiB ليس حداً لذاكرة الخادم كلها. افحص الذاكرة على جهاز النشر، ولا تعتبر GPU بذاكرة 24GB مضمون الكفاية لهذه البنية.
 
 `GET /health/voice` لا يحمّل أي نموذج. يعرض `input_mode: whisper` و`stt` و`llm` و`tts` و`warmup` و`gpu` و`last_call`. قبل `ready` تُفحص تبعيات النسخ والنطق، ويُنتظر التحميل المسبق عند تفعيله.
 

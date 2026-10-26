@@ -40,10 +40,10 @@ def test_extras_and_platform_markers(installed):
     assert missing_requirements(["a[audio]"]) == ["b: missing"]
 
 
-def test_chatterbox_is_checked_without_upstream_conflicting_dependencies(installed):
-    installed.update(chatterbox=("0.1.7", ["torch==2.6.0"]))
-    assert missing_requirements(["chatterbox==0.1.7"], dependencies=False) == []
-    assert missing_requirements(["chatterbox==0.1.7"]) == ["torch: missing"]
+def test_dependencies_can_be_skipped(installed):
+    installed.update(pkg=("1.0", ["torch==2.6.0"]))
+    assert missing_requirements(["pkg==1.0"], dependencies=False) == []
+    assert missing_requirements(["pkg==1.0"]) == ["torch: missing"]
 
 
 @pytest.mark.skipif(not BASH, reason="Bash is required")
@@ -70,7 +70,7 @@ _install_vllm() { echo install >> installs; }
 
 
 @pytest.mark.skipif(not BASH, reason="Bash is required")
-def test_failed_install_aborts_before_chatterbox_or_service_launch(tmp_path):
+def test_failed_install_aborts_before_service_launch(tmp_path):
     result = bash(tmp_path, "\n".join([
         "set -e", "python3() { return 1; }", "_boot_stage() { :; }",
         "_install_vllm() { return 19; }", helper("_ensure_python_dependencies"),

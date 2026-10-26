@@ -408,7 +408,7 @@ def test_tts_failure_reports_reason_and_one_line_log(env, caplog):
 
 def test_tts_not_installed_reason(env):
     async def missing(text):
-        raise stream.voice_health.NotInstalledError("موديل النطق غير مثبَّت (chatterbox-tts)")
+        raise stream.voice_health.NotInstalledError("موديل النطق غير مثبَّت (f5-tts)")
 
     env(ScriptedLLM([{"text": "هلا بيك، وياك سارة من متجر النور."}]))
     stream.deps.tts = missing

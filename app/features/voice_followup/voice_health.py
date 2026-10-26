@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""صحة موديلات الصوت (Whisper + Chatterbox) بعملية uvicorn: تصنيف أسباب الفشل،
+"""صحة موديلات الصوت (Whisper + F5-TTS) بعملية uvicorn: تصنيف أسباب الفشل،
 ذاكرة الـ GPU، حالة التحميل المسبق، وملخّص GET /health/voice.
 
 **ما يحمّل أي موديل:** `voice_status()` تقرأ الحالة بس. التحميل الوحيد هنا
@@ -24,7 +24,7 @@ GENERATION_FAILED = "generation_failed"
 
 
 class NotInstalledError(RuntimeError):
-    """المكتبة (chatterbox-tts / transformers) غير مثبَّتة أو استيرادها فشل."""
+    """المكتبة (f5-tts / transformers) غير مثبَّتة أو استيرادها فشل."""
 
 
 class ModelLoadError(RuntimeError):
@@ -115,7 +115,7 @@ _warmup = {"state": "pending", "tts": None, "stt": None, "seconds": None}
 
 
 def warmup_voice_models() -> dict:
-    """يجهّز Whisper وChatterbox قبل أول مكالمة، ويسجّل الفشل بوضوح."""
+    """يجهّز Whisper وF5-TTS قبل أول مكالمة، ويسجّل الفشل بوضوح."""
     from app.features.voice_followup import tts, stt
 
     with _warmup_lock:
@@ -129,7 +129,7 @@ def warmup_voice_models() -> dict:
         if tts_ok and stt_ok:
             logger.info("✅ موديلات صوت المكالمات جاهزة (%.1f ثانية)", _warmup["seconds"])
         else:
-            logger.error("🛑 فشل التحميل المسبق لموديلات صوت المكالمات: chatterbox=%s whisper=%s %s — "
+            logger.error("🛑 فشل التحميل المسبق لموديلات صوت المكالمات: tts=%s whisper=%s %s — "
                          "التفاصيل بـ GET /health/voice", tts_ok, stt_ok, gpu_memory())
         return {**_warmup, "input_mode": mode}
 

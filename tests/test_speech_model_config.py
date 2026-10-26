@@ -23,7 +23,8 @@ def test_single_model_audio_and_tts_memory_defaults(monkeypatch):
     for name in ("LLM_MODEL", "TTS_POOL_SIZE", "KV_CACHE_MEMORY_GB", "VLLM_MAX_NUM_SEQS"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings()
-    assert settings.tts_model().repository == "ResembleAI/chatterbox"
+    assert settings.tts_model().repository == "ameer4wisam/Habibi-TTS-IRQ"
+    assert settings.tts_model().reference_audio == "reference/IRQ.wav"
     assert settings.model_name == "Qwen/Qwen3.5-9B"
     assert settings.stt_model == "ayoubkirouane/whisper-small-ar"
     assert settings.tts_pool_size == 1 and settings.kv_cache_memory_gb == 4 and settings.max_num_seqs == 16

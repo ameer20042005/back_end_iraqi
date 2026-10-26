@@ -133,7 +133,7 @@ async def llm_health():
 
 @app.get("/health/voice")
 def voice_health_check():
-    """موديلات صوت المكالمات (Chatterbox + Whisper): مثبَّتة؟ محمَّلة؟ الذاكرة
+    """موديلات صوت المكالمات (F5-TTS + Whisper): مثبَّتة؟ محمَّلة؟ الذاكرة
     الحرة، ونتيجة آخر محاولة نطق. ما يحمّل أي موديل. 503 لو مكتبة ناقصة أو آخر
     نطق فشل أو فشل التحميل المسبق."""
     status = voice_health.voice_status()

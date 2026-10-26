@@ -36,7 +36,7 @@ PYTHON=$(command -v python || command -v python3)
 
 # ── متطلبات بايثون الأساسية ───────────────────────────────────────────────
 # محلياً يكفي requirements.txt لأن التوليد كله بخادم الـLLM المحلي.
-# requirements-gpu.txt (torch/Chatterbox) ثقيلة ومخصصة لـ RunPod؛ ثبّتها
+# requirements-gpu.txt (torch/F5-TTS) ثقيلة ومخصصة لـ RunPod؛ ثبّتها
 # يدوياً فقط لو تريد تجرّب ميزات الصوت محلياً. نثبّت فقط لو الحزم ناقصة فعلاً.
 "${PYTHON}" -c "import fastapi, uvicorn, httpx, pipecat" 2>/dev/null || {
     echo "==> Installing base requirements (requirements.txt)..."
