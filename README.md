@@ -5,7 +5,7 @@ OpenAI متوافقة، استخراج طلب من نص/صوت/صورة، مكا
 التوصيل. لا يخزّن بيانات أعمال — البيانات عند باك اند السستم، وتنفيذ الأدوات عند العميل.
 
 يشتغل محلياً، وعلى RunPod بصورة `ubuntu:22.04` خام: `start.sh` يبني كل شي من
-الصفر بأول إقلاع (Python/pip، vLLM nightly بدعم Qwen3.5 مع torch المتوافق،
+الصفر بأول إقلاع (Python/pip، vLLM 0.28.0 مع torch 2.13.0 (إصدارات مثبّتة في requirements-vllm.txt)،
 ffmpeg/libsndfile1، Whisper للنسخ وChatterbox للنطق).
 
 ## الميزات

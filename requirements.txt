@@ -1,6 +1,5 @@
-# ملاحظة: لا نثبّت torch/vllm هنا — start.sh يثبّتهم تلقائياً (نسخة vLLM
-# nightly بدعم Qwen3.5، تجيب معها torch المتوافق) عند أول إقلاع على Ubuntu
-# 22.04 خام (انظر docs/deploy/runpod.md). httpx أدناه هو قناة الاتصال بخادم vLLM
+# ملاحظة: torch/vllm مثبَّتان بـ requirements-vllm.txt، وstart.sh يثبّتهم
+# مع هذا الملف بنفس أمر pip (انظر docs/deploy/runpod.md). httpx أدناه هو قناة الاتصال بخادم vLLM
 # (app/core/engine.py).
 #
 # كل الإصدارات أدناه مثبَّتة (==) وليست حداً أدنى (>=) عمداً — إقلاع
@@ -9,7 +8,8 @@
 # تكسر الإنتاج بلا أي تغيير بالكود (نفس الدرس اللي تعلمناه من أزمة
 # transformers بـ requirements-gpu.txt، انظر تعليقها). لترقية عمدية: بدّل
 # الرقم هنا بعد اختبار محلي، لا تفتح السقف لـ >=.
-fastapi==0.141.1
+# 0.136.x لأن كل إصدارات vLLM المستقرة تشترط fastapi<0.137.0 (انظر requirements-vllm.txt).
+fastapi==0.136.3
 uvicorn[standard]==0.52.3
 python-multipart==0.0.32
 pydantic==2.13.4

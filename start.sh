@@ -56,23 +56,21 @@ _install_vllm() (
     # compatible instead of silently replacing them with incompatible releases.
     # Reuse satisfied packages, including large CUDA wheels. A failed import is
     # not evidence that the entire environment needs reinstalling.
-    python3 -m pip install --no-cache-dir --progress-bar off -c "${constraints}" "vllm" torch torchvision --pre \
-        -r requirements.txt -r requirements-gpu.txt \
-        --extra-index-url https://wheels.vllm.ai/nightly/cu129 \
-        --extra-index-url https://download.pytorch.org/whl/cu129
+    # vLLM/torch come from PyPI at the exact versions in requirements-vllm.txt.
+    # The nightly index changed on every rebuild; PyPI releases do not.
+    python3 -m pip install --no-cache-dir --progress-bar off -c "${constraints}" \
+        -r requirements-vllm.txt -r requirements.txt -r requirements-gpu.txt
 )
 
 _ensure_python_dependencies() {
     _boot_stage "Checking installed Python requirements (offline)"
-    if python3 scripts/check_requirements.py requirements.txt requirements-gpu.txt \
-        --require vllm --require torch --require torchvision; then
+    if python3 scripts/check_requirements.py requirements-vllm.txt requirements.txt requirements-gpu.txt; then
         echo "==> Python requirements already satisfied — skipping installation"
     else
         _boot_stage "Installing missing or incompatible Python requirements"
         _install_vllm
         # Do not launch a half-installed environment after a resolver warning.
-        python3 scripts/check_requirements.py requirements.txt requirements-gpu.txt \
-            --require vllm --require torch --require torchvision
+        python3 scripts/check_requirements.py requirements-vllm.txt requirements.txt requirements-gpu.txt
     fi
     if python3 scripts/check_requirements.py --no-deps --require chatterbox-tts==0.1.7; then
         echo "==> Chatterbox already installed — skipping installation"
@@ -111,17 +109,6 @@ _prepare_model_cache() {
     echo "==> Model cache: ${HF_HUB_CACHE} — reusing completed files; downloading only missing files"
 }
 
-# torchaudio (تبعية Chatterbox TTS) لازم يطابق إصدار torch حرفياً، وvLLM ما
-# يجيبه. نثبّته بعد أي تثبيت/إعادة تثبيت لـ torch، بلا تبعيات حتى ما يسحب
-# torch ثاني فوق نسخة vLLM.
-_ensure_torchaudio() {
-    local torch_ver
-    torch_ver=$(python3 -c "import torch; print(torch.__version__.split('+')[0])" 2>/dev/null) || return 0
-    python3 -c "import torchaudio, torch; assert torchaudio.__version__.split('+')[0] == torch.__version__.split('+')[0]" 2>/dev/null && return 0
-    echo "==> Installing torchaudio==${torch_ver} to match torch (required by Chatterbox TTS)..."
-    python3 -m pip install --no-cache-dir -q --no-deps "torchaudio==${torch_ver}"         --extra-index-url https://download.pytorch.org/whl/cu129         || echo "⚠️ torchaudio==${torch_ver} install failed — text-to-speech will be unavailable"
-}
-
 # ── تجهيز نظام التشغيل من الصفر (Ubuntu 22.04 خام) ──────────────────────────
 # بدون صورة جاهزة فيها Python/pip أصلاً، لازم نثبّتهم قبل أي أمر pip/python3
 # بهذا السكربت. الإصدارات أدناه مثبَّتة (=) حسب أرشيف Ubuntu 22.04 (jammy)
@@ -148,6 +135,25 @@ if ! command -v python3 >/dev/null 2>&1 || ! python3 -m pip --version >/dev/null
     # تبعية chatterbox-tts) قد تُوزَّع sdist بلا wheel جاهزة فتحتاج مترجم C.
     _apt_install_pinned build-essential 12.9ubuntu3
     _apt_install_pinned git             1:2.34.1-1ubuntu1.17
+fi
+
+# كل إقلاع يبدأ من الصفر: نحذف بيئة بايثون وكل كاش الموديلات، ثم يعيد
+# السكربت تنزيلهم بالإصدارات المثبَّتة (requirements*.txt). هذا يمنع بقايا
+# تنزيل ناقص أو حزم من تشغيلة سابقة من التأثير على التشغيل، ويحرر مساحة
+# الـ Volume قبل التنزيل. FRESH_START=0 bash start.sh يتخطى الحذف.
+_reset_environment() {
+    local path
+    for path in .venv-pipecat "${HF_HOME:-}" /workspace/.cache "${PWD}/.cache" \
+        "${HOME}/.cache/huggingface" "${HOME}/.cache/vllm" "${HOME}/.cache/pip"; do
+        if [ -n "${path}" ] && { [ -e "${path}" ] || [ -L "${path}" ]; }; then
+            echo "==> Removing ${path}"
+            rm -rf -- "${path}"
+        fi
+    done
+}
+if [ "${FRESH_START:-1}" = "1" ]; then
+    _boot_stage "Removing the Python environment and all model caches (fresh start)"
+    _reset_environment
 fi
 
 # Pipecat 1.12 requires Python >=3.11. Never alter /usr/bin/python3.
@@ -335,7 +341,6 @@ _start_vllm() {
 _boot_stage "Checking optional CUDA library and compiler paths"
 _fix_cuda_lib_path
 _fix_cuda_nvcc_path
-_ensure_torchaudio
 _boot_stage "Verifying vLLM imports with CUDA paths configured"
 python3 -c "import vllm.entrypoints.openai.api_server"
 

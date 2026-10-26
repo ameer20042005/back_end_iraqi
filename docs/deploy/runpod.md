@@ -1,6 +1,6 @@
 # خطوات الرفع على RunPod
 
-هذا الملف دليل تفصيلي خطوة بخطوة لرفع `back_end_iraqi` على RunPod عبر **Pod مباشر بصورة Ubuntu 22.04 خام** (الطريقة الوحيدة المعتمدة — لا حاجة لبناء أي صورة Docker مخصصة ولا حتى صورة vLLM جاهزة: `start.sh` يثبّت كل شي لازم من الصفر بأول إقلاع — Python/pip، vLLM nightly بدعم Qwen3.5 مع torch المتوافق، ffmpeg/libsndfile1 — انظر [start.sh](../../start.sh)). للتوثيق المرجعي لنقاط الـ API نفسها انظر [docs/api/](../api/overview.md)، وللوحة اختبار تفاعلية بالمتصفح انظر قسم [لوحة اختبار API](#لوحة-اختبار-api-test-console) بالأسفل.
+هذا الملف دليل تفصيلي خطوة بخطوة لرفع `back_end_iraqi` على RunPod عبر **Pod مباشر بصورة Ubuntu 22.04 خام** (الطريقة الوحيدة المعتمدة — لا حاجة لبناء أي صورة Docker مخصصة ولا حتى صورة vLLM جاهزة: `start.sh` يثبّت كل شي لازم من الصفر بأول إقلاع — Python/pip، vLLM 0.28.0 مع torch 2.13.0 (إصدارات مثبّتة في requirements-vllm.txt)، ffmpeg/libsndfile1 — انظر [start.sh](../../start.sh)). للتوثيق المرجعي لنقاط الـ API نفسها انظر [docs/api/](../api/overview.md)، وللوحة اختبار تفاعلية بالمتصفح انظر قسم [لوحة اختبار API](#لوحة-اختبار-api-test-console) بالأسفل.
 
 ---
 
@@ -52,7 +52,7 @@ tmux new-session -d -s api -c /workspace/app 'HF_HUB_ENABLE_HF_TRANSFER=0 bash s
 tail -f /tmp/api.log
 ```
 
-أول تشغيل ياخذ **دقائق أطول من المعتاد** (صورة Ubuntu خام: تثبيت Python/pip + vLLM nightly + torch أولاً، ثم تحميل الموديل ~24GB). اخرج من المراقبة بـ `Ctrl+C` — يوقف `tail` بس، ما يمس السيرفر.
+أول تشغيل ياخذ **دقائق أطول من المعتاد** (صورة Ubuntu خام: تثبيت Python/pip + vLLM 0.28.0 + torch 2.13.0 أولاً، ثم تحميل الموديل ~24GB). اخرج من المراقبة بـ `Ctrl+C` — يوقف `tail` بس، ما يمس السيرفر.
 
 ### 6) تأكد إنه جاهز
 
@@ -135,7 +135,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test
 ### الخطوة 1 — إنشاء الـ Pod
 
 1. من لوحة RunPod، اضغط **Deploy** → **GPU Pod**.
-2. قالب بصورة **`ubuntu:22.04`** خام (بدون Python ولا CUDA ولا PyTorch مسبقاً) — `start.sh` يبني كل شي لازم من الصفر بأول إقلاع: Python/pip، أدوات بناء، ffmpeg/libsndfile1، ثم vLLM nightly بدعم Qwen3.5 مع torch المتوافق (يلزم إصدار vLLM يدعم Qwen3.5). أي قالب ثاني فيه بعض هذي المكونات مسبقاً (صورة vLLM الرسمية، قالب PyTorch) يشتغل بنفس الموثوقية — كل خطوة تتخطى نفسها لو لقت الأداة موجودة أصلاً.
+2. قالب بصورة **`ubuntu:22.04`** خام (بدون Python ولا CUDA ولا PyTorch مسبقاً) — `start.sh` يبني كل شي لازم من الصفر بأول إقلاع: Python/pip، أدوات بناء، ffmpeg/libsndfile1، ثم vLLM 0.28.0 مع torch 2.13.0 (إصدارات مثبّتة في requirements-vllm.txt) (يلزم إصدار vLLM يدعم Qwen3.5). أي قالب ثاني فيه بعض هذي المكونات مسبقاً (صورة vLLM الرسمية، قالب PyTorch) يشتغل بنفس الموثوقية — كل خطوة تتخطى نفسها لو لقت الأداة موجودة أصلاً.
 3. اختر GPU مناسب (انظر التوصية أعلاه).
 4. تحت **Edit Template** (أو أثناء الإنشاء):
    - أضف `8000` إلى حقل **Expose HTTP Ports**.
@@ -187,7 +187,7 @@ ValueError: Fast download using 'hf_transfer' is enabled ... but 'hf_transfer' p
 
 #### متابعة الإقلاع
 
-**أول تشغيل ياخذ وقت أطول** (تجهيز نظام التشغيل: Python/pip + vLLM nightly + torch على Ubuntu الخام، ثم تحميل الموديل المدموج ~24GB من Hugging Face):
+**أول تشغيل ياخذ وقت أطول** (تجهيز نظام التشغيل: Python/pip + vLLM 0.28.0 + torch 2.13.0 على Ubuntu الخام، ثم تحميل الموديل المدموج ~24GB من Hugging Face):
 
 ```bash
 tail -f /tmp/api.log          # لوج FastAPI + خطوات start.sh
@@ -314,7 +314,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test   (على RunPod)
 | `git pull` يفشل بـ `no such ref was fetched` | الـ Pod على فرع محذوف من الريموت | `git fetch origin && git checkout main && git reset --hard origin/main` |
 | `bash start.sh` يطلع Nginx/SSH/Jupyter و«Pod is ready to use» | شغّلت سكربت إقلاع RunPod مو سكربت المشروع (كنت بمسار غلط) | `cd /workspace/app` أولاً، بعدين `bash start.sh` |
 | خطأ 401 عند تنزيل الموديل رغم أنه عام | قالب الـ Pod ضابط `HF_TOKEN` قديم/ملغى، فيُرسَل مع الطلب ويرفضه الـ Hub | فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ `start.sh`، أو احذف المتغير من إعدادات الـ Pod |
-| `/gpu` يرجع `vllm_ready: false` باستمرار | خادم vLLM لسا يحمّل الموديل (أوزان Qwen أول مرة)، أو لسا بمرحلة تثبيت vLLM/torch nightly على Ubuntu الخام (أول إقلاع فقط)، أو فشل إقلاعه | راقب لوج الـ Pod (`tail -f /tmp/api.log`)؛ تأكد أن نسخة vLLM المثبَّتة تدعم Qwen3.5 (المثبّت هنا nightly) |
+| `/gpu` يرجع `vllm_ready: false` باستمرار | خادم vLLM لسا يحمّل الموديل (أوزان Qwen أول مرة)، أو لسا بمرحلة تثبيت vLLM/torch على Ubuntu الخام (أول إقلاع فقط)، أو فشل إقلاعه | راقب لوج الـ Pod (`tail -f /tmp/api.log`)؛ تأكد أن نسخة vLLM المثبَّتة تدعم Qwen3.5 (المثبّت هنا 0.28.0) |
 | نفاد ذاكرة GPU (CUDA OOM) | GPU المختار صغير جداً، أو `gpu_memory_utilization`/`max_model_len` مرتفعة جداً | اختر GPU أكبر (40GB+)، أو قلّل القيم في `app/config.py` |
 | الصفحة `/test` ما تتصل بالسيرفر (CORS) | نادراً — الـ CORS مفتوح للجميع افتراضياً بـ `app/main.py` | تأكد إن رابط السيرفر بحقل "رابط السيرفر" صحيح ويتضمن `https://` |
 | أول طلب بطيء جداً | طبيعي — تحميل الموديل والمحوّل أول مرة | انتظر اكتمال التحميل (راقب اللوج)؛ الطلبات اللاحقة أسرع بكثير |

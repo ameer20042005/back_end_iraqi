@@ -59,7 +59,7 @@
 
 كل شي يتنزّل وحده عند أول إقلاع، بدون أي أمر يدوي:
 
-- **المكتبات**: `start.sh` يبني كل شي من الصفر على Ubuntu 22.04 خام بأول إقلاع — Python/pip وأدوات بناء، متطلبات FastAPI (`requirements.txt`/`requirements-gpu.txt`، بإصدارات مثبَّتة بالضبط)، `ffmpeg`/`libsndfile1`، وأخيراً vLLM nightly بدعم Gemma 4 (يجيب معه torch المتوافق تلقائياً).
+- **المكتبات**: `start.sh` يبني كل شي من الصفر على Ubuntu 22.04 خام بأول إقلاع — Python/pip وأدوات بناء، متطلبات FastAPI (`requirements.txt`/`requirements-gpu.txt`، بإصدارات مثبَّتة بالضبط)، `ffmpeg`/`libsndfile1`، وأخيراً vLLM وtorch بإصدارات مثبّتة في `requirements-vllm.txt`. كل إقلاع يحذف `.venv-pipecat` وكاش الموديلات ويعيد تنزيلهما (`FRESH_START=0` يتخطى الحذف).
 - **الموديل المدموج** (`MODEL_NAME`): ينزّله خادم vLLM من Hugging Face Hub أول إقلاع ([start.sh](../start.sh))، ويُخزَّن بذاكرة التخزين المؤقت (`~/.cache/huggingface` أو `HF_HOME`) فيُعاد استخدامه بالتشغيلات اللاحقة على نفس الـ pod/volume بدون إعادة تنزيل.
 - **موديلات الصوت**: اختيار الموديلات العربية صار مركزياً في `app/config.py` عبر
   `stt_model()` و`tts_model()`. ينزّل `transformers.pipeline` موديل

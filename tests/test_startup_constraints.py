@@ -26,7 +26,7 @@ def test_vllm_install_preserves_pins_and_cleans_up_constraints(tmp_path, pip_sta
     start = source.index("_install_vllm() (")
     end = source.index("\n)\n", start) + 3
     helper = source[start:end]
-    for filename in ("requirements.txt", "requirements-gpu.txt"):
+    for filename in ("requirements-vllm.txt", "requirements.txt", "requirements-gpu.txt"):
         shutil.copyfile(ROOT / filename, tmp_path / filename)
 
     # Replace only the expensive pip invocation; execute the real shell helper.
@@ -68,14 +68,20 @@ _install_vllm
         (req.name, str(req.specifier), req.marker) for req in original
     ]
     args = (tmp_path / "pip-args.txt").read_text().splitlines()
-    assert "vllm" in args
     assert "--no-cache-dir" in args
+    assert "--pre" not in args
+    assert not any(arg.startswith("--extra-index-url") for arg in args)
     assert "--force-reinstall" not in args
     assert "-U" not in args and "--upgrade" not in args
     # Constraints do not activate Pipecat's transitive requirements. Both app
     # requirement sets must participate in the same resolution as vLLM.
     requested_files = [args[i + 1] for i, arg in enumerate(args) if arg == "-r"]
-    assert requested_files == ["requirements.txt", "requirements-gpu.txt"]
+    assert requested_files == ["requirements-vllm.txt", "requirements.txt", "requirements-gpu.txt"]
+    # vLLM and torch must be exact pins so every fresh rebuild is identical.
+    pinned = {req.name: req for req in requirements(
+        (ROOT / "requirements-vllm.txt").read_text(encoding="utf-8"))}
+    for name in ("vllm", "torch", "torchvision", "torchaudio"):
+        assert str(pinned[name].specifier).startswith("=="), name
 
     if pip_status == 0:
         # Let the real pip resolver validate the constraints, fully offline.
