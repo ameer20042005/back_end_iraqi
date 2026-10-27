@@ -108,7 +108,7 @@ def test_call_instructions_are_generic_and_use_operator_goal():
 
 def test_call_instructions_without_agent_name_introduce_customer_service():
     text = build_call_instructions(AgentCallMetadata(company_name="شركة س", goal="g"))
-    assert "وياك خدمة العملاء من شركة س" in text
+    assert "معك خدمة العملاء في شركة س" in text
 
 
 def test_english_language_switches_the_opening():
@@ -173,7 +173,7 @@ def test_save_outcome_stores_once_and_forwards(monkeypatch, outcomes_dir):
 def test_backend_failure_keeps_local_outcome(monkeypatch, outcomes_dir):
     monkeypatch.setattr(gateway, "call_outcome_submitter", RecordingSubmitter(fail=True))
     reply = asyncio.run(_agent().save_outcome(_context(), "الزبون يريد يتواصل وياه مندوب", None, True))
-    assert "انحفظت" in reply
+    assert "حُفظت" in reply
     assert outcomes.get_outcome("call-ORD-1042-abcd1234").follow_up_needed is True
 
 

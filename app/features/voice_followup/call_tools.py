@@ -72,7 +72,7 @@ async def store_outcome(
     except Exception as exc:
         logger.exception("فشل حفظ نتيجة المكالمة %s", room)
         raise CallToolError(
-            "ما انحفظت النتيجة بسبب خلل بالنظام. اعتذر وگول إن الفريق راح يتابع، ثم أنهِ المكالمة."
+            "لم تُحفظ النتيجة بسبب خلل في النظام. اعتذر وقل إن الفريق سيتابع معه، ثم أنهِ المكالمة."
         ) from exc
     try:
         async with asyncio.timeout(settings.call_outcome_submit_timeout_seconds):
@@ -177,7 +177,7 @@ async def run_tool(ctx: CallToolContext, name: str, arguments: Any) -> str:
         return str(exc)
     except Exception:
         logger.exception("فشل تنفيذ الأداة %s بالمكالمة %s", name, ctx.room)
-        return "صار خلل بالنظام. اعتذر وگول إن الفريق راح يتابع."
+        return "حدث خلل في النظام. اعتذر وقل إن الفريق سيتابع معه."
 
 
 async def _save_outcome(ctx: CallToolContext, args: Dict[str, Any]) -> str:
@@ -188,12 +188,12 @@ async def _save_outcome(ctx: CallToolContext, args: Dict[str, Any]) -> str:
         args.get("follow_up_needed", False), ctx.customer_transcript(),
     )
     ctx.saved = True
-    return "انحفظت النتيجة. النظام سيشكر الزبون وينهي المكالمة تلقائياً."
+    return "حُفظت النتيجة. النظام سيشكر الزبون وينهي المكالمة تلقائياً."
 
 
 async def _end_call(ctx: CallToolContext, args: Dict[str, Any]) -> str:
     ctx.end_requested = True
-    return "المكالمة راح تنتهي بعد جملتك الأخيرة."
+    return "ستنتهي المكالمة بعد جملتك الأخيرة."
 
 
 register(CallTool(
@@ -250,8 +250,8 @@ SEARCH_PRODUCTS = "search_products"
 DATA_TOOLS = (GET_MY_ORDERS, GET_ORDER_STATUS, SEARCH_PRODUCTS)
 
 _MAX_ORDERS = 5
-NOT_FOUND_ORDER = "ماكو طلب بهذا الرقم لهذا الزبون. گوله بأدب وما تخمّن."
-_UNAVAILABLE = "ما أگدر أوصل لبيانات المتجر هسه. گول للزبون إن الفريق راح يتابع وياه."
+NOT_FOUND_ORDER = "لا يوجد طلب بهذا الرقم لهذا الزبون. أخبره بأدب ولا تخمّن."
+_UNAVAILABLE = "لا يمكن الوصول إلى بيانات المتجر الآن. قل للزبون إن الفريق سيتابع معه."
 
 
 def _json(data: Any) -> str:
@@ -261,14 +261,14 @@ def _json(data: Any) -> str:
 async def _get_my_orders(ctx: CallToolContext, args: Dict[str, Any]) -> str:
     phone = ctx.meta.phone
     if not catalog.phone_digits(phone):
-        return "رقم الزبون غير معروف بهذه المكالمة، فما أگدر أجيب طلباته. گول إن الفريق راح يتابع."
+        return "رقم الزبون غير معروف في هذه المكالمة، فلا يمكن جلب طلباته. قل إن الفريق سيتابع معه."
     try:
         orders = await catalog.get_customer_orders(phone)
     except catalog.CatalogError as exc:
         logger.warning("get_my_orders فشل بالمكالمة %s: %s", ctx.room, exc)
         raise CallToolError(_UNAVAILABLE) from exc
     if not orders:
-        return "ماكو طلبات مسجّلة لهذا الزبون."
+        return "لا توجد طلبات مسجّلة لهذا الزبون."
     return _json({"count": len(orders), "orders": [catalog.trim_order(o) for o in orders[:_MAX_ORDERS]]})
 
 
@@ -299,7 +299,7 @@ async def _search_products(ctx: CallToolContext, args: Dict[str, Any]) -> str:
         logger.warning("search_products فشل بالمكالمة %s: %s", ctx.room, exc)
         raise CallToolError(_UNAVAILABLE) from exc
     if not products:
-        return "ماكو منتج مطابق بالمتجر. گول للزبون وما تخترع منتجات."
+        return "لا يوجد منتج مطابق في المتجر. أخبر الزبون ولا تخترع منتجات."
     return _json({"count": len(products), "products": products})
 
 

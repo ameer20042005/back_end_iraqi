@@ -541,7 +541,7 @@ def test_tool_registry_contract(tmp_path, monkeypatch):
     assert "غير موجودة" in run("drop_tables", {})
     assert "JSON" in run("save_outcome", "{bad")
     assert "فارغ" in run("save_outcome", {"summary": "  "})
-    assert "انحفظت" in run("save_outcome", {"summary": "تمام", "answers": [{"question": "q"}, "x"]})
+    assert "حُفظت" in run("save_outcome", {"summary": "تمام", "answers": [{"question": "q"}, "x"]})
     assert ctx.saved and ctx.outcome.answers == []
     assert "مسبقاً" in run("save_outcome", {"summary": "مرة ثانية"})
     run("end_call", {})

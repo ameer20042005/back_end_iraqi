@@ -29,6 +29,8 @@ class CallRequest(BaseModel):
 
     company_name: _text(1, 120)
     agent_name: Optional[_text(max_length=60)] = None
+    # اسم مسار استعلام محفوظ بالتطبيق؛ التطبيق يملأ منه goal وquestions، والخادم يتجاهله.
+    flow: Optional[_text(max_length=60)] = None
     goal: _text(1, 1000)
     questions: List[_text(1, 300)] = Field(default_factory=list, max_length=10)
     context: Optional[_text(max_length=2000)] = None
