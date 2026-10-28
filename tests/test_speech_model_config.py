@@ -20,13 +20,14 @@ def wav(seconds):
 
 
 def test_single_model_audio_and_tts_memory_defaults(monkeypatch):
-    for name in ("LLM_MODEL", "TTS_POOL_SIZE", "KV_CACHE_MEMORY_GB", "VLLM_MAX_NUM_SEQS"):
+    for name in ("LLM_MODEL", "TTS_POOL_SIZE", "KV_CACHE_MEMORY_GB", "VLLM_MAX_NUM_SEQS", "STT_MODEL",
+                 "TTS_MODEL_AR", "TTS_CKPT_AR", "TTS_REF_AUDIO_AR"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings()
-    assert settings.tts_model().repository == "ameer4wisam/Habibi-TTS-IRQ"
-    assert settings.tts_model().reference_audio == "reference/IRQ.wav"
+    assert settings.tts_model().repository == "SWivid/Habibi-TTS"
+    assert settings.tts_model().reference_audio == "reference/MSA.wav"
     assert settings.model_name == "Qwen/Qwen3.5-9B"
-    assert settings.stt_model == "ayoubkirouane/whisper-small-ar"
+    assert settings.stt_model == "openai/whisper-large-v3"
     assert settings.tts_pool_size == 1 and settings.kv_cache_memory_gb == 4 and settings.max_num_seqs == 16
 
 

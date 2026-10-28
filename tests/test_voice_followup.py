@@ -397,7 +397,7 @@ def _fake_pool(monkeypatch, size):
     return tts
 
 
-def test_iraqi_voice_loads_once_and_uses_local_reference_with_its_text(monkeypatch):
+def test_voice_loads_once_and_uses_local_reference_with_its_text(monkeypatch):
     tts = _fake_pool(monkeypatch, size=1)
     for _ in range(3):
         audio, sr = tts.synthesize_array("هلا بيك")
@@ -406,9 +406,16 @@ def test_iraqi_voice_loads_once_and_uses_local_reference_with_its_text(monkeypat
     assert inst.files == (tts.settings.tts_ckpt_ar, tts.settings.tts_vocab_ar)
     assert inst.vocoder == "float32-vocoder"
     ref = inst.generated[0]
-    assert ref["ref_file"].endswith("IRQ.wav") and Path(ref["ref_file"]).is_file()
-    assert ref["ref_text"] == tts.settings.tts_ref_text_ar and ref["gen_text"] == "هلا بيك"
+    assert ref["ref_file"].endswith("MSA.wav") and Path(ref["ref_file"]).is_file()
+    assert ref["ref_text"] == tts.normalize_text(tts.settings.tts_ref_text_ar, None) and ref["gen_text"] == "هلا بيك"
     assert sr == 24000 and audio.dtype == "float32"
+
+
+def test_tts_text_maps_arabic_punctuation_and_drops_unknown_marks():
+    from app.features.voice_followup import tts
+
+    vocab = frozenset(" ,.?مرحباهلوصك")
+    assert tts.normalize_text("مرحباً، هل وصلك؟", vocab) == "مرحبا, هل وصلك?"
 
 
 def test_pool_grows_to_size_then_waits_for_a_free_instance(monkeypatch):

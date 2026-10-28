@@ -59,6 +59,7 @@ class CallAudioStats:
         self.stt_error_type: Optional[str] = None
         self.user_transcripts = 0
         self.interrupts = 0
+        self.ignored_short = 0
         self.protocol_errors = 0
 
     # ── التسجيل ─────────────────────────────────────────────────────────────
@@ -163,6 +164,7 @@ class CallAudioStats:
             "stt_error_type": self.stt_error_type,
             "user_transcripts": self.user_transcripts,
             "interrupts": self.interrupts,
+            "ignored_short": self.ignored_short,
             "protocol_errors": self.protocol_errors,
             "diagnosis": self.diagnosis(),
         }

@@ -186,14 +186,18 @@ class Settings:
     district_reranker_log_path: Path = field(default_factory=lambda: Path(os.getenv(
         "DISTRICT_RERANKER_LOG_PATH", str(Path(__file__).resolve().parent / "features" / "district_correction" / "data" / "reranker_shadow.jsonl"))))
 
-    # تحويل نص لصوت باللهجة العراقية (app/features/voice_followup/tts.py) —
-    # صوت الـ agent بالمكالمات الحية. موديل ameer4wisam/Habibi-TTS-IRQ، نسخة
-    # عراقية من F5-TTS (voice cloning من مقطع مرجعي مع نصه الحرفي).
-    tts_model_ar: str = "ameer4wisam/Habibi-TTS-IRQ"
-    tts_ckpt_ar: str = "Specialized/IRQ/model_100000.safetensors"
-    tts_vocab_ar: str = "Specialized/IRQ/vocab.txt"
-    tts_ref_audio_ar: str = "reference/IRQ.wav"
-    tts_ref_text_ar: str = "اا ما نقدر ناخذ وقت أكثر، ااا لأنه شروط كلش يحتاجلها وقت."
+    # تحويل نص لصوت (app/features/voice_followup/tts.py) — صوت الـ agent
+    # بالمكالمات الحية. موديل الفصحى المتخصص من SWivid/Habibi-TTS (F5-TTS،
+    # 200 ألف خطوة، Apache 2.0) مع مقطع مرجعي فصيح واضح بلا تأتأة؛ voice
+    # cloning من المقطع ونصه الحرفي. للرجوع للعراقي: TTS_*_AR بالبيئة
+    # (ameer4wisam/Habibi-TTS-IRQ، Specialized/IRQ/...، reference/IRQ.wav).
+    tts_model_ar: str = field(default_factory=lambda: os.getenv("TTS_MODEL_AR") or "SWivid/Habibi-TTS")
+    tts_ckpt_ar: str = field(default_factory=lambda: os.getenv("TTS_CKPT_AR") or "Specialized/MSA/model_200000.safetensors")
+    tts_vocab_ar: str = field(default_factory=lambda: os.getenv("TTS_VOCAB_AR") or "Specialized/MSA/vocab.txt")
+    tts_ref_audio_ar: str = field(default_factory=lambda: os.getenv("TTS_REF_AUDIO_AR") or "reference/MSA.wav")
+    tts_ref_text_ar: str = field(default_factory=lambda: os.getenv("TTS_REF_TEXT_AR") or (
+        "كان اللعيب حاضرًا في العديد من الأنشطة والفعاليات المرتبطة بكأس العالم، "
+        "مما سمح للجماهير بالتفاعل معه والتقاط الصور التذكارية."))
     # عدد نسخ النطق بالـ worker: كل نسخة تنطق لمكالمة وحدة بالمرة، فالنسخ
     # الأكثر = مكالمات متزامنة تنتظر أقل، مقابل VRAM إضافي لكل نسخة.
     # تُحمَّل عند الحاجة.
@@ -206,7 +210,9 @@ class Settings:
     voice_stream_max_calls: int = field(default_factory=lambda: max(1, int(
         os.getenv("VOICE_STREAM_MAX_CALLS") or os.getenv("VOICE_MAX_CALLS") or "10")))
     # Shared Whisper instance for live calls and uploaded voice notes.
-    stt_model: str = "ayoubkirouane/whisper-small-ar"
+    # whisper-large-v3 الكامل (1.55 مليار معامل): أدق نموذج Whisper للعربية
+    # واللهجات. لزمن أقل على GPU ضعيف: STT_MODEL=openai/whisper-large-v3-turbo.
+    stt_model: str = field(default_factory=lambda: os.getenv("STT_MODEL") or "openai/whisper-large-v3")
     stt_device: str = field(default_factory=lambda: os.getenv("STT_DEVICE") or "auto")
     stt_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("STT_TIMEOUT_SECONDS") or "30"))
     call_outcome_submit_timeout_seconds: float = 2.0
@@ -222,7 +228,10 @@ class Settings:
         default_factory=lambda: float(os.getenv("VOICE_STREAM_ENERGY_DBFS") or "-40"))
     # أقل كلام متواصل يُعتبر بداية دور (ويقاطع الـ agent)، والسكوت اللي ينهي الدور.
     voice_stream_min_speech_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_MIN_SPEECH_MS") or "250"))
-    voice_stream_end_silence_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_END_SILENCE_MS") or "400"))
+    voice_stream_end_silence_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_END_SILENCE_MS") or "700"))
+    # كلام الزبون أثناء نطق الـ agent يقاطعه فقط إذا استمر هذه المدة؛ الأقصر
+    # («اي»، «ممم»، صدى، ضوضاء) يُهمل حتى ما يتقطع كلام الـ agent.
+    voice_stream_barge_in_ms: int = field(default_factory=lambda: int(os.getenv("VOICE_STREAM_BARGE_IN_MS") or "600"))
     # مقطع أطول من هذا ينقطع ويُنسخ حتى لو الزبون بعده يحچي.
     voice_stream_max_segment_seconds: float = field(
         default_factory=lambda: float(os.getenv("VOICE_STREAM_MAX_SEGMENT_SECONDS") or "15"))

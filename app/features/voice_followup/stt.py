@@ -7,6 +7,7 @@ the dialogue model, and health inspection never downloads or loads weights.
 import asyncio
 import importlib.util
 import logging
+import re
 import threading
 import time
 
@@ -22,6 +23,24 @@ _model = None
 _processor = None
 _device = None
 _last_transcription = None
+
+# عبارات يهلوسها Whisper على الصمت أو الضوضاء (من ترجمات الفيديو التي تدرّب عليها).
+_HALLUCINATIONS = re.compile(
+    r"ترجمة\s*نانسي\s*قنقر|ترجمة\s*نانسي|اشتركوا?\s*(في|ب)\s*القناة|لا\s*تنسوا?\s*الاشتراك"
+    r"|شكرا\s*(لكم\s*)?(على\s*ال|لل)مشاهدة|\[موسيقى\]|subscribe|amara\.org", re.IGNORECASE)
+# كلمة أو عبارة (حتى 3 كلمات) تتكرر 3 مرات فأكثر ورا بعض = حلقة تكرار من Whisper.
+_REPEAT = re.compile(r"(?<!\S)(\S+(?:\s+\S+){0,2}?)(?:\s+\1){2,}(?!\S)")
+# أقل من هذا (RMS) يعتبر صمتاً لا يستحق النسخ.
+_MIN_RMS = 0.003
+
+
+def clean_transcript(text: str) -> str:
+    """يحذف هلوسات Whisper المعروفة ويختصر حلقات التكرار."""
+    if _HALLUCINATIONS.search(text):
+        text = _HALLUCINATIONS.sub(" ", text)
+    text = _REPEAT.sub(r"\1", text)
+    text = re.sub(r"\s+", " ", text).strip(" .،,")
+    return text
 
 
 def _load():
@@ -60,6 +79,8 @@ def transcribe_array(samples: np.ndarray, sample_rate: int = vad.SAMPLE_RATE) ->
             or not 0 < samples.size <= MAX_AUDIO_SECONDS * sample_rate
             or not np.isfinite(samples).all()):
         raise ValueError("Whisper requires 0–30 seconds of finite mono 16kHz audio")
+    if float(np.sqrt(np.mean(samples ** 2))) < _MIN_RMS:
+        return ""
     with _lock:
         try:
             _load()
@@ -81,7 +102,7 @@ def transcribe_array(samples: np.ndarray, sample_rate: int = vad.SAMPLE_RATE) ->
             # Filter IDs explicitly so language/task markers never reach Qwen.
             special_ids = set(_processor.tokenizer.all_special_ids)
             decoded_ids = [[int(token) for token in tokens[0].tolist() if int(token) not in special_ids]]
-            text = _processor.batch_decode(decoded_ids, skip_special_tokens=True)[0].strip()
+            text = clean_transcript(_processor.batch_decode(decoded_ids, skip_special_tokens=True)[0])
             _last_transcription = {"ok": True, "error_type": None,
                                    "elapsed_ms": int((time.monotonic() - started) * 1000)}
             return text

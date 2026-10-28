@@ -1,8 +1,8 @@
 # المكالمات الصوتية — Pipecat فقط
 
 تطبيق Rust يتصل عبر `/voice_followup/stream`، ويجري اتصال واتساب من جلسة المستخدم.
-الصوت PCM s16le mono 16kHz؛ ينسخه ayoubkirouane/whisper-small-ar، ثم يرسَل النص إلى Qwen/Qwen3.5-9B للحوار والأدوات.
-Pipecat يدير التوليد وتجميع العبارات والنطق والتشغيل بالتوازي. F5-TTS العراقي (`ameer4wisam/Habibi-TTS-IRQ`) يحوّل الرد النصي إلى صوت.
+الصوت PCM s16le mono 16kHz؛ ينسخه openai/whisper-large-v3، ثم يرسَل النص إلى Qwen/Qwen3.5-9B للحوار والأدوات.
+Pipecat يدير التوليد وتجميع العبارات والنطق والتشغيل بالتوازي. F5-TTS الفصحى (`SWivid/Habibi-TTS`، `Specialized/MSA`) يحوّل الرد النصي إلى صوت.
 لا غرف RTC ولا SIP ولا عامل مستقل؛ عملية FastAPI واحدة (`--workers 1`).
 
 التشغيل وميزانية GPU ونتائج المراجعة: [بنية Whisper وQwen وPipecat](../pipecat-native-audio.md).
@@ -228,4 +228,4 @@ Whisper هو مسار النسخ الوحيد، بنسخة مشتركة للمك
 ## ملاحظات تشغيل
 
 - النموذج هو نفس خادم vLLM (`LLM_BASE_URL`) بلا تفكير، لأن زمن الرد بالمكالمة حساس.
-- الصوت المرجعي لـ F5-TTS: `app/features/voice_followup/reference/IRQ.wav` ونصّه الحرفي بـ `tts_ref_text_ar` في `app/config.py`.
+- الصوت المرجعي لـ F5-TTS: `app/features/voice_followup/reference/MSA.wav` ونصّه الحرفي بـ `tts_ref_text_ar` في `app/config.py`.

@@ -241,3 +241,28 @@ def test_endpointer_counts_windows():
     ep.push(vad.pcm16_to_float(SPEECH + SILENCE))
     assert ep.windows == (len(SPEECH) + len(SILENCE)) // 2 // 320
     assert ep.speech_windows == len(SPEECH) // 2 // 320 and ep.starts == 1
+
+
+def test_short_backchannel_during_agent_playback_does_not_cut_the_agent(env):
+    async def long_tts(text):
+        return np.full(24000 * 4, 0.1, dtype=np.float32), 24000
+
+    stt_calls = []
+
+    async def stt(samples, rate):
+        stt_calls.append(samples.size)
+        return "اي"
+
+    env(ScriptedLLM([{"text": "هلا بيك، وياك سارة من متجر النور."}], [{"text": "تفضل."}]), stt=stt)
+    stream.deps.tts = long_tts
+    short = vad.float_to_pcm16(np.full(int(0.15 * 16000), 0.5, dtype=np.float32))
+    with connect(TestClient(main.app)) as ws:
+        accept_and_wait_for_agent(ws)
+        ws.send_bytes(short)
+        ws.send_bytes(SILENCE)
+        ws.send_json({"type": "ping"})
+        events, _ = collect_until(ws, is_type("pong"))
+        assert {"type": "interrupt"} not in events
+        hang_up(ws)
+    assert stt_calls == []
+    assert voice_health.last_call()["interrupts"] == 0

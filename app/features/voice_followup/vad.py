@@ -52,6 +52,18 @@ def trim_tts_padding(samples: np.ndarray, sample_rate: int) -> np.ndarray:
     return samples[start:end]
 
 
+def fade_edges(samples: np.ndarray, sample_rate: int, ms: float = 8.0) -> np.ndarray:
+    """تلاشٍ قصير ببداية ونهاية كل جملة حتى ما تطلع طقطقة بين الجمل المتتالية."""
+    n = min(samples.size // 2, int(sample_rate * ms / 1000))
+    if n <= 1:
+        return samples
+    out = samples.copy()
+    ramp = np.linspace(0.0, 1.0, n, dtype=np.float32)
+    out[:n] *= ramp
+    out[-n:] *= ramp[::-1]
+    return out
+
+
 def resample(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
     """تحويل معدل العينات بنسبة كسرية (up/down) مع فلتر تمرير منخفض (windowed
     sinc) قبل التنعيم حتى ما يصير aliasing — بديل numpy عن scipy.resample_poly."""
@@ -228,6 +240,8 @@ class Endpointer:
         self._segment: List[np.ndarray] = []
         self._speech_run = 0
         self._silence_run = 0
+        self._voiced = 0
+        self._win_ms = win_ms
         self.in_speech = False
         # عدّادات تراكمية للإحصاءات (ما تتصفّر مع reset).
         self.windows = 0
@@ -237,8 +251,13 @@ class Endpointer:
     def reset(self) -> None:
         self._preroll.clear()
         self._segment = []
-        self._speech_run = self._silence_run = 0
+        self._speech_run = self._silence_run = self._voiced = 0
         self.in_speech = False
+
+    @property
+    def speech_ms(self) -> float:
+        """مدة الكلام الفعلي (بلا السكوت) بالمقطع الحالي."""
+        return self._voiced * self._win_ms if self.in_speech else 0.0
 
     def push(self, samples: np.ndarray) -> List[Event]:
         events: List[Event] = []
@@ -263,10 +282,12 @@ class Endpointer:
                 self._segment = list(self._preroll)
                 self._preroll.clear()
                 self._silence_run = 0
+                self._voiced = self._speech_run
                 self.starts += 1
                 return ("start", None)
             return None
         self._segment.append(frame)
+        self._voiced += bool(speech)
         self._silence_run = 0 if speech else self._silence_run + 1
         if self._silence_run >= self._end_silence or len(self._segment) >= self._max_windows:
             segment = np.concatenate(self._segment)

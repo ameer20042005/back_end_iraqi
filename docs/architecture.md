@@ -66,4 +66,4 @@
   التحويل العربي تلقائياً أول استخدام (أول طلب أبطأ بسبب التنزيل، بعدها من
   الكاش)، ويُحمَّل على الـ GPU بنصف الدقة إن توفّر مع تقطيع تلقائي كل 30 ثانية.
 
-**لا حاجة لتوكن Hugging Face:** كل المستودعات المستعملة (`google/gemma-4-E4B-it`، `ameer4wisam/Habibi-TTS-IRQ` وWhisper) عامة وغير gated، فتُنزَّل بلا مصادقة. لو بيئة الـ Pod فيها `HF_TOKEN` قديم يسبب خطأ 401، فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ [start.sh](../start.sh).
+**لا حاجة لتوكن Hugging Face:** كل المستودعات المستعملة (`google/gemma-4-E4B-it`، `SWivid/Habibi-TTS` وWhisper) عامة وغير gated، فتُنزَّل بلا مصادقة. لو بيئة الـ Pod فيها `HF_TOKEN` قديم يسبب خطأ 401، فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ [start.sh](../start.sh).

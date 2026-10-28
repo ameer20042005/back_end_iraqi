@@ -293,6 +293,7 @@ class StreamCall:
         self._response_errors = 0
         self._turn_origin: Optional[float] = None
         self._turn_phrases = set()
+        self._barge_pending = False
 
     # ── الإرسال ─────────────────────────────────────────────────────────────
 
@@ -459,8 +460,19 @@ class StreamCall:
         for kind, segment in self.endpointer.push(samples):
             self._last_activity = time.monotonic()
             if kind == "start":
-                await self._barge_in()
+                # أثناء نطق الـ agent نؤجل المقاطعة حتى يثبت أنه كلام مقصود.
+                if self._agent_speaking():
+                    self._barge_pending = True
+                else:
+                    await self._barge_in()
             else:
+                if self._barge_pending:
+                    self._barge_pending = False
+                    if self._agent_speaking(margin=1.0):
+                        # كلمة قصيرة أو صدى أو ضوضاء والـ agent ما زال يتكلم:
+                        # نتجاهلها بدل قطع كلامه وإعادة الدور.
+                        self.stats.ignored_short += 1
+                        continue
                 self.stats.on_segment(segment.size)
                 self._turn_origin = time.monotonic()
                 try:
@@ -471,6 +483,14 @@ class StreamCall:
                                       "message": "الخادم لا يستطيع معالجة الصوت بالسرعة المطلوبة"})
                     await self._server_end("audio_backpressure")
                     return
+        if (self._barge_pending and self.endpointer.in_speech
+                and self.endpointer.speech_ms >= settings.voice_stream_barge_in_ms):
+            self._barge_pending = False
+            await self._barge_in()
+
+    def _agent_speaking(self, margin: float = 0.0) -> bool:
+        """صوت الـ agent ما زال يُشغَّل عند الزبون (لأكثر من margin ثانية)."""
+        return self._playback_until - time.monotonic() > margin
 
     async def _watchdog(self) -> None:
         while True:
@@ -696,7 +716,7 @@ class StreamCall:
             return
         self._tts_failures = 0
         audio, rate = result
-        audio = vad.trim_tts_padding(np.asarray(audio, dtype=np.float32), rate)
+        audio = vad.fade_edges(vad.trim_tts_padding(np.asarray(audio, dtype=np.float32), rate), rate)
         pcm = vad.float_to_pcm16(vad.resample(audio, rate, vad.SAMPLE_RATE))
         if not pcm:
             raise TtsUnavailable("empty_tts_audio")

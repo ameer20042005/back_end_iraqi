@@ -43,13 +43,39 @@ logger = logging.getLogger(__name__)
 _SPEED = 0.85
 # target_rms: مستوى تطبيع الصوت — الافتراضي 0.1 خافت نسبياً بمكالمة هاتفية.
 _TARGET_RMS = 0.18
-# nfe_step: خطوات التوليد (diffusion) — الافتراضي 32؛ 48 أوضح نطقاً مقابل وقت أطول.
-_NFE_STEP = 48
+# nfe_step: خطوات التوليد (diffusion). 32 (الافتراضي) أسرع بالثلث من 48 بفرق
+# وضوح بسيط؛ بطء التوليد هو سبب الفجوات بين الجمل بالمكالمة.
+_NFE_STEP = 32
 
 
-def _reference() -> Tuple[str, str]:
+# بدائل الرموز العربية بالرموز التي يعرفها الموديل (مفردات MSA بلا «،؟؛»).
+_CHAR_MAP = {"،": ",", "؟": "?", "؛": ";", "٫": ".", "…": ".", "«": "", "»": "", "ـ": ""}
+
+
+def _read_vocab(path: str) -> Optional[frozenset]:
+    """حروف مفردات الموديل؛ الحرف خارجها يقرؤه الموديل كمسافة."""
+    try:
+        return frozenset(Path(path).read_text(encoding="utf-8").split(chr(10)))
+    except OSError:
+        return None
+
+
+def normalize_text(text: str, vocab: Optional[frozenset]) -> str:
+    """يحوّل الرموز العربية لمقابلها ويحذف كل حرف ما يعرفه الموديل (تنوين،
+    شدة، رموز) بدل أن ينطقه الموديل كسكتة أو صوت مشوّه."""
+    out = []
+    for ch in text:
+        ch = _CHAR_MAP.get(ch, ch)
+        if vocab is None or ch in vocab or ch == "":
+            out.append(ch)
+        elif ch.isspace():
+            out.append(" ")
+    return " ".join("".join(out).split())
+
+
+def _reference(vocab: Optional[frozenset]) -> Tuple[str, str]:
     model = settings.tts_model()
-    return str(Path(__file__).resolve().parent / model.reference_audio), model.reference_text
+    return str(Path(__file__).resolve().parent / model.reference_audio), normalize_text(model.reference_text, vocab)
 
 
 class _VoicePool:
@@ -80,6 +106,7 @@ class _VoicePool:
         # float16: "mat1 and mat2 must have the same dtype". نثبّته float32.
         if hasattr(inst, "vocoder"):
             inst.vocoder = inst.vocoder.float()
+        inst._text_vocab = _read_vocab(vocab_file)
         return inst
 
     def acquire(self):
@@ -166,11 +193,12 @@ def synthesize_array(text: str) -> Optional[Tuple["object", int]]:
         pool = _get_pool()
         inst = pool.acquire()
         try:
-            ref_file, ref_text = _reference()
+            vocab = getattr(inst, "_text_vocab", None)
+            ref_file, ref_text = _reference(vocab)
             wav, sample_rate, _spec = inst.infer(
                 ref_file=ref_file,
                 ref_text=ref_text,
-                gen_text=text,
+                gen_text=normalize_text(text, vocab),
                 speed=_SPEED,
                 target_rms=_TARGET_RMS,
                 nfe_step=_NFE_STEP,

@@ -40,7 +40,7 @@ class LocalSubmitter:
 
 def main_server():
     config = replace(stream.settings, voice_followup_api_key="test-key-123", voice_stream_vad="energy",
-                     voice_stream_min_speech_ms=100, voice_stream_end_silence_ms=200)
+                     voice_stream_min_speech_ms=100, voice_stream_end_silence_ms=200, voice_stream_barge_in_ms=200)
     stream.settings = vad.settings = config
     stream.deps = stream.StreamDeps(llm=llm, tts=tts, vad=vad.make_classifier, prewarm_opening=True)
     gateway.call_outcome_submitter = LocalSubmitter()

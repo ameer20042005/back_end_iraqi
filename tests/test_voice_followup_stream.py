@@ -93,7 +93,7 @@ class RecordingSubmitter:
 def env(tmp_path, monkeypatch):
     monkeypatch.setattr(outcomes, "settings", replace(outcomes.settings, call_outcomes_dir=tmp_path))
     fast = replace(stream.settings, voice_stream_vad="energy", voice_stream_energy_threshold_dbfs=-30,
-                   voice_stream_min_speech_ms=100, voice_stream_end_silence_ms=200,
+                   voice_stream_min_speech_ms=100, voice_stream_end_silence_ms=200, voice_stream_barge_in_ms=200,
                    voice_stream_idle_timeout_seconds=60, voice_stream_max_calls=5,
                    voice_stream_first_phrase_chars=200)
     monkeypatch.setattr(stream, "settings", fast)

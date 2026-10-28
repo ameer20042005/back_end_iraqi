@@ -335,4 +335,4 @@ assert len(t) > 100000
 "
 ```
 
-للتأكد من الصوت: افتح `/health/voice` وتحقق من `stt.model: ayoubkirouane/whisper-small-ar` ومن `stt.loaded` و`tts.loaded` بعد التحميل المسبق. `STT_DEVICE=cpu` يتيح نقل Whisper إلى CPU عند الحاجة، لكن زمنه يحتاج قياساً على جهازك. التفاصيل في [بنية الصوت](../pipecat-native-audio.md).
+للتأكد من الصوت: افتح `/health/voice` وتحقق من `stt.model: openai/whisper-large-v3` ومن `stt.loaded` و`tts.loaded` بعد التحميل المسبق. `STT_DEVICE=cpu` يتيح نقل Whisper إلى CPU عند الحاجة، لكن زمنه يحتاج قياساً على جهازك. التفاصيل في [بنية الصوت](../pipecat-native-audio.md).

@@ -74,7 +74,7 @@ def test_whisper_loads_once_serializes_inference_and_uses_arabic(whisper):
         return await asyncio.gather(*(stt.transcribe(np.ones(16000, dtype=np.float32)) for _ in range(3)))
 
     assert asyncio.run(check()) == ["اي وصل الطلب"] * 3
-    assert loads == [("processor", "ayoubkirouane/whisper-small-ar"), ("model", "ayoubkirouane/whisper-small-ar")]
+    assert loads == [("processor", "openai/whisper-large-v3"), ("model", "openai/whisper-large-v3")]
     assert active["peak"] == 1
     assert model.generation_config.forced_decoder_ids is None
     assert all(g["language"] == "ar" and g["task"] == "transcribe" and g["num_beams"] == 1

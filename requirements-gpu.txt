@@ -36,9 +36,8 @@ tokenizers==0.22.2
 # لـ data URI يصير بـ app/core/engine.py والاستدلال البصري عند خادم vLLM.
 Pillow==12.3.0
 
-# تحويل نص عراقي لصوت (app/features/voice_followup/tts.py) — موديل
-# ameer4wisam/Habibi-TTS-IRQ، نسخة عراقية من F5-TTS (voice cloning من مقطع
-# مرجعي ونصه). soundfile يكتب مخرَج الموديل (numpy array) كملف WAV.
+# تحويل نص لصوت (app/features/voice_followup/tts.py) — موديل الفصحى من
+# SWivid/Habibi-TTS (F5-TTS، voice cloning من مقطع مرجعي ونصه). soundfile يكتب مخرَج الموديل (numpy array) كملف WAV.
 f5-tts==1.1.22
 soundfile==0.13.1
 huggingface_hub==1.27.0

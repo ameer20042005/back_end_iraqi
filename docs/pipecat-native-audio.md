@@ -2,7 +2,7 @@
 
 ## مسار المكالمة
 
-`PCM 16kHz → VAD → ayoubkirouane/whisper-small-ar → نص → Qwen/Qwen3.5-9B → Pipecat → F5-TTS (Habibi-TTS-IRQ) → PCM`
+`PCM 16kHz → VAD → openai/whisper-large-v3 → نص → Qwen/Qwen3.5-9B → Pipecat → F5-TTS (Habibi-TTS MSA) → PCM`
 
 Qwen مسؤول عن الحوار والأدوات والصور، وWhisper عن نسخ كلام الزبون. لا يُرسل `input_audio` إلى Qwen، ولا نطلب من نموذج الحوار إعادة نسخ الكلام قبل الإجابة.
 
@@ -50,4 +50,4 @@ Qwen مسؤول عن الحوار والأدوات والصور، وWhisper عن
 
 لم تُقَس سرعة الاستدلال أو جودة فهم اللهجة على GPU فعلي. للتحقق بعد النشر: راقب جاهزية النموذجين، جرّب إجابة تغطي أكثر من سؤال وتصحيحاً ومقاطعة، ثم تأكد من تسلسل `outcome → الوداع → end_call` دون سؤال إضافي.
 
-المراجع: [بطاقة Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B)، [بطاقة Whisper العربي](https://huggingface.co/ayoubkirouane/whisper-small-ar)، [توثيق Whisper](https://huggingface.co/docs/transformers/model_doc/whisper).
+المراجع: [بطاقة Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B)، [بطاقة Whisper العربي](https://huggingface.co/openai/whisper-large-v3)، [توثيق Whisper](https://huggingface.co/docs/transformers/model_doc/whisper).
