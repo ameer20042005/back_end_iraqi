@@ -43,16 +43,18 @@ def trim_tts_padding(samples: np.ndarray, sample_rate: int) -> np.ndarray:
         raise ValueError("TTS requires finite mono audio and a positive sample rate")
     if samples.size == 0:
         return samples
-    threshold = min(0.003, float(np.max(np.abs(samples))) * 0.01)
+    # 0.1% of the peak (-60 dB): soft final letters decay far below 1% and were being
+    # mistaken for silence, which clipped the end of sentences.
+    threshold = min(0.003, float(np.max(np.abs(samples))) * 0.001)
     active = np.flatnonzero(np.abs(samples) > max(threshold, 1e-7))
     if not active.size:
         return samples[:0]
     start = max(0, int(active[0]) - int(sample_rate * 0.04))
-    end = min(samples.size, int(active[-1]) + 1 + int(sample_rate * 0.12))
+    end = min(samples.size, int(active[-1]) + 1 + int(sample_rate * 0.25))
     return samples[start:end]
 
 
-def fade_edges(samples: np.ndarray, sample_rate: int, ms: float = 8.0) -> np.ndarray:
+def fade_edges(samples: np.ndarray, sample_rate: int, ms: float = 4.0) -> np.ndarray:
     """تلاشٍ قصير ببداية ونهاية كل جملة حتى ما تطلع طقطقة بين الجمل المتتالية."""
     n = min(samples.size // 2, int(sample_rate * ms / 1000))
     if n <= 1:

@@ -17,8 +17,8 @@ def test_tts_padding_is_trimmed_without_removing_internal_pauses():
     body = np.concatenate([speech, middle_pause, speech])
     audio = np.concatenate([np.zeros(sr), body, np.zeros(sr)])
     trimmed = vad.trim_tts_padding(audio, sr)
-    assert trimmed.size == body.size + int(sr * 0.16)
-    assert np.array_equal(trimmed[int(sr * 0.04):-int(sr * 0.12)], body)
+    assert trimmed.size == body.size + int(sr * 0.04) + int(sr * 0.25)
+    assert np.array_equal(trimmed[int(sr * 0.04):-int(sr * 0.25)], body)
 
 
 def test_tts_keeps_quiet_consonants_at_the_edges():

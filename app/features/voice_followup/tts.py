@@ -39,8 +39,9 @@ from app.features.voice_followup import voice_health
 
 logger = logging.getLogger(__name__)
 
-# speed: 1.0 هو الافتراضي — 0.85 يبطّئ الإلقاء شوي لصوت أوضح وأهدأ بالمكالمة.
-_SPEED = 0.85
+# speed: 1.0 هو الافتراضي. الصوت المرجعي سريع الإلقاء (~14 حرف/ثانية) والموديل
+# يقلّده، فنبطّئ لـ 0.7؛ التوليد الأطول يقلّل قصّ آخر الجملة أيضاً.
+_SPEED = 0.7
 # target_rms: مستوى تطبيع الصوت — الافتراضي 0.1 خافت نسبياً بمكالمة هاتفية.
 _TARGET_RMS = 0.18
 # nfe_step: خطوات التوليد (diffusion). 32 (الافتراضي) أسرع بالثلث من 48 بفرق
@@ -71,6 +72,11 @@ def normalize_text(text: str, vocab: Optional[frozenset]) -> str:
         elif ch.isspace():
             out.append(" ")
     return " ".join("".join(out).split())
+
+
+def _end_with_stop(text: str) -> str:
+    """نقطة بآخر النص تعطي الموديل إشارة ختام فينطق آخر كلمة كاملة بدل أن يقطعها."""
+    return text if not text or text[-1] in ".?!" else text + "."
 
 
 def _reference(vocab: Optional[frozenset]) -> Tuple[str, str]:
@@ -198,7 +204,7 @@ def synthesize_array(text: str) -> Optional[Tuple["object", int]]:
             wav, sample_rate, _spec = inst.infer(
                 ref_file=ref_file,
                 ref_text=ref_text,
-                gen_text=normalize_text(text, vocab),
+                gen_text=_end_with_stop(normalize_text(text, vocab)),
                 speed=_SPEED,
                 target_rms=_TARGET_RMS,
                 nfe_step=_NFE_STEP,
