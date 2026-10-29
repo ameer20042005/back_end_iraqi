@@ -118,8 +118,10 @@ async def transcribe(samples: np.ndarray, sample_rate: int = vad.SAMPLE_RATE) ->
 
 
 def warmup() -> bool:
+    # يحمّل الموديل مباشرة: النسخ يتخطى الصمت قبل _load() فلا يحمّل شيئاً.
     try:
-        transcribe_array(np.zeros(vad.SAMPLE_RATE // 4, dtype=np.float32))
+        with _lock:
+            _load()
         return True
     except Exception:
         logger.exception("فشل تجهيز Whisper")
