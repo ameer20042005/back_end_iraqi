@@ -60,6 +60,7 @@ class CallAudioStats:
         self.user_transcripts = 0
         self.interrupts = 0
         self.ignored_short = 0
+        self.echo_dropped = 0
         self.protocol_errors = 0
 
     # ── التسجيل ─────────────────────────────────────────────────────────────
@@ -165,6 +166,7 @@ class CallAudioStats:
             "user_transcripts": self.user_transcripts,
             "interrupts": self.interrupts,
             "ignored_short": self.ignored_short,
+            "echo_dropped": self.echo_dropped,
             "protocol_errors": self.protocol_errors,
             "diagnosis": self.diagnosis(),
         }

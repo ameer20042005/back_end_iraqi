@@ -273,6 +273,33 @@ def test_barge_in_interrupts_the_agent(env):
     assert messages[-2] == {"role": "assistant", "content": "هلا بيك، وياك سارة من متجر النور."}
 
 
+def test_agent_echo_is_not_a_customer_turn_and_the_agent_resumes(env):
+    llm = ScriptedLLM("hang", [{"text": "هل وصلك الطلب؟"}])
+    # صوت الـ agent راجع من سماعة الزبون وWhisper نسخه.
+    env(llm, stt=FakeSTT("وياك سارة من متجر النور"))
+    with connect(TestClient(main.app)) as ws:
+        start(ws)
+        ws.send_json({"type": "call_state", "state": "accepted"})
+        collect_until(ws, lambda e: e["type"] == "transcript" and e["role"] == "agent")
+        speak(ws)
+        events, _ = collect_until(ws, lambda e: e.get("text") == "هل وصلك الطلب؟")
+        assert not any(e["type"] == "transcript" and e["role"] == "user" for e in events)
+        hang_up(ws)
+    messages = llm.calls[1][0]
+    assert messages[-1] == {"role": "user", "content": stream.OPENING_PREFIX + stream.RESUME_INSTRUCTION}
+    assert all("متجر النور" not in m["content"] for m in messages if m["role"] == "user"
+               and not m["content"].startswith(stream.OPENING_PREFIX))
+
+
+def test_echo_needs_most_of_the_agent_words():
+    call = stream.StreamCall.__new__(stream.StreamCall)
+    call._recent_agent = stream.deque([stream.text_norm.normalize("هلا بيك، هل وصلك الطلب؟")])
+    assert call._is_echo("هل وصلك الطلب")
+    # جواب يستعمل كلمات السؤال مع كلامه هو = زبون.
+    assert not call._is_echo("اي وصل الطلب امس الصبح")
+    assert not call._is_echo("الطلب")
+
+
 # ── ٤. الأدوات ──────────────────────────────────────────────────────────────
 
 def test_save_outcome_emits_event_and_outcome_is_done(env):

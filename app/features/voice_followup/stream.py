@@ -13,14 +13,17 @@ import logging
 import re
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
+from difflib import SequenceMatcher
+from typing import Any, AsyncIterator, Awaitable, Callable, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 from fastapi import WebSocket
 from pydantic import ValidationError
 
 from app.config import settings
+from app.core import text_norm
 from app.features.voice_followup import call_stats, call_tools, vad, voice_health
 from app.features.voice_followup.calls import agent_metadata, room_name, consume_stream_id
 from app.features.voice_followup.prompts import build_call_instructions, build_opening_instruction
@@ -48,6 +51,17 @@ STATS_LOG_SECONDS = 5.0
 SEND_TIMEOUT_SECONDS = 5.0
 
 OPENING_PREFIX = "(تعليمات داخلية من النظام، مو كلام الزبون) "
+
+# صدى الـ agent: صوته يرجع من سماعة تلفون الزبون ويتحول بـ Whisper لكلام "زبون"،
+# فيرد عليه النموذج ويعيد نفس الجملة. التطبيق يشغّل الصوت متأخراً شوي عن
+# _playback_until (buffer + شبكة)، فالمقطع اللي يبدأ خلال هالذيل يعتبر متداخلاً.
+ECHO_TAIL_SECONDS = 1.5
+# نص المقطع المتداخل اللي يغطي هالنسبة من كلام الـ agent الأخير = صدى، مو زبون.
+ECHO_MIN_WORDS = 3
+ECHO_MIN_COVERAGE = 0.8
+ECHO_RECENT_PHRASES = 4
+RESUME_INSTRUCTION = ("انقطع كلامك بسبب صدى صوتك وليس بسبب الزبون. أكمل من حيث توقفت بجملة قصيرة، "
+                      "ولا تعد ما قلته.")
 
 # فشل النطق هذا العدد من المرات ورا بعض بنفس المكالمة = الزبون بصمت، فننهيها.
 MAX_CONSECUTIVE_TTS_FAILURES = 2
@@ -268,7 +282,8 @@ class StreamCall:
         self.end_reason = ""
         self._stop = asyncio.Event()
         self._send_lock = asyncio.Lock()
-        self._audio_queue: "asyncio.Queue[np.ndarray]" = asyncio.Queue(maxsize=8)
+        # (المقطع، هل بدأ والـ agent مسموع عند الزبون)
+        self._audio_queue: "asyncio.Queue[Tuple[np.ndarray, bool]]" = asyncio.Queue(maxsize=8)
         self._response: Optional[asyncio.Task] = None
         self._turn_audio_sent = False
         self._playback_until = 0.0
@@ -294,6 +309,11 @@ class StreamCall:
         self._turn_origin: Optional[float] = None
         self._turn_phrases = set()
         self._barge_pending = False
+        self._segment_overlap = False
+        # جمل الـ agent الأخيرة (مطبّعة) لكشف الصدى.
+        self._recent_agent: Deque[str] = deque(maxlen=ECHO_RECENT_PHRASES)
+        # المقاطعة الأخيرة قطعت رد الـ agent؛ إذا طلع سببها صدى نكمل الرد.
+        self._resume_pending = False
 
     # ── الإرسال ─────────────────────────────────────────────────────────────
 
@@ -460,8 +480,10 @@ class StreamCall:
         for kind, segment in self.endpointer.push(samples):
             self._last_activity = time.monotonic()
             if kind == "start":
-                # أثناء نطق الـ agent نؤجل المقاطعة حتى يثبت أنه كلام مقصود.
-                if self._agent_speaking():
+                # أثناء نطق الـ agent (أو ذيله عند الزبون) نؤجل المقاطعة حتى يثبت
+                # أنه كلام مقصود، مو صدى.
+                self._segment_overlap = self._agent_audible()
+                if self._segment_overlap:
                     self._barge_pending = True
                 else:
                     await self._barge_in()
@@ -476,7 +498,7 @@ class StreamCall:
                 self.stats.on_segment(segment.size)
                 self._turn_origin = time.monotonic()
                 try:
-                    self._audio_queue.put_nowait(segment)
+                    self._audio_queue.put_nowait((segment, self._segment_overlap))
                 except asyncio.QueueFull:
                     self._response_errors += 1
                     await self._send({"type": "error", "code": "audio_backpressure",
@@ -491,6 +513,19 @@ class StreamCall:
     def _agent_speaking(self, margin: float = 0.0) -> bool:
         """صوت الـ agent ما زال يُشغَّل عند الزبون (لأكثر من margin ثانية)."""
         return self._playback_until - time.monotonic() > margin
+
+    def _agent_audible(self) -> bool:
+        """الزبون ممكن بعده يسمع الـ agent (أو صداه) بعد آخر قطعة انرسلت."""
+        return self._agent_speaking(margin=-ECHO_TAIL_SECONDS)
+
+    def _is_echo(self, transcript: str) -> bool:
+        """نص يعيد كلام الـ agent الأخير بأغلبه = صوته راجع من تلفون الزبون."""
+        heard = text_norm.normalize(transcript)
+        if len(heard.split()) < ECHO_MIN_WORDS or not self._recent_agent:
+            return False
+        said = " ".join(self._recent_agent)
+        blocks = SequenceMatcher(None, heard, said, autojunk=False).get_matching_blocks()
+        return sum(b.size for b in blocks) >= ECHO_MIN_COVERAGE * len(heard)
 
     async def _watchdog(self) -> None:
         while True:
@@ -522,6 +557,8 @@ class StreamCall:
         playing = time.monotonic() < self._playback_until
         if generating and not self._response.cancelling():
             self._response.cancel()
+        if generating or playing:
+            self._resume_pending = True
         if (generating and self._turn_audio_sent) or playing:
             self._playback_until = 0.0
             self.stats.interrupts += 1
@@ -529,10 +566,13 @@ class StreamCall:
 
     async def _audio_worker(self) -> None:
         while True:
-            segment = await self._audio_queue.get()
+            segment, overlap = await self._audio_queue.get()
             if self.ending:
                 continue
-            await self._cancel_response()
+            # مقطع متداخل مع صوت الـ agent ممكن يكون صداه: ما نقطع الرد قبل ما
+            # يثبت النص إنه كلام زبون.
+            if not overlap:
+                await self._cancel_response()
             if self.ending or self._stop.is_set():
                 continue
             revision = self._input_revision
@@ -556,7 +596,18 @@ class StreamCall:
                 self._stt_ms = int((time.monotonic() - started) * 1000)
                 self._last_activity = time.monotonic()
             self._stt_turns += 1
+            if overlap and transcript and self._is_echo(transcript):
+                self.stats.echo_dropped += 1
+                logger.info("voice_echo_dropped trace=%s resume=%s", self.trace_id, self._resume_pending)
+                if (self._resume_pending and revision == self._input_revision and self._audio_queue.empty()
+                        and not self.endpointer.in_speech and not self.ending):
+                    self._resume_pending = False
+                    await self._start_response(resume=True)
+                continue
+            if overlap and transcript:
+                await self._cancel_response()
             if transcript:
+                self._resume_pending = False
                 self._pending_transcript = True
                 self.customer_lines.append(transcript)
                 self.history.append({"role": "user", "content": transcript})
@@ -575,11 +626,11 @@ class StreamCall:
                 old.cancel()
             await asyncio.gather(old, return_exceptions=True)
 
-    async def _start_response(self, opening: bool = False) -> None:
+    async def _start_response(self, opening: bool = False, resume: bool = False) -> None:
         await self._cancel_response()
-        self._response = asyncio.create_task(self._respond(opening))
+        self._response = asyncio.create_task(self._respond(opening, resume))
 
-    async def _respond(self, opening: bool) -> None:
+    async def _respond(self, opening: bool, resume: bool = False) -> None:
         self._turn_audio_sent = False
         self._turn_phrases.clear()
         spoken: List[str] = []
@@ -590,6 +641,8 @@ class StreamCall:
         try:
             if opening:
                 self.history.append({"role": "user", "content": OPENING_PREFIX + build_opening_instruction(self.meta)})
+            elif resume:
+                self.history.append({"role": "user", "content": OPENING_PREFIX + RESUME_INSTRUCTION})
             # Opening cannot save invented answers or end a call before listening.
             tools = [] if opening else call_tools.openai_tools()
             for _ in range(MAX_TOOL_ROUNDS):
@@ -742,6 +795,7 @@ class StreamCall:
                     # Keep the introduction in history even when playback is
                     # interrupted halfway; otherwise the model greets again.
                     spoken.append(text)
+                    self._recent_agent.append(text_norm.normalize(text))
                     recorded = True
                 self._on_audio_sent(piece)
         except asyncio.CancelledError:
