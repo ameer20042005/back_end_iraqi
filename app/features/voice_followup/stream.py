@@ -746,7 +746,7 @@ class StreamCall:
                 self._on_audio_sent(piece)
         except asyncio.CancelledError:
             if recorded:
-                spoken[-1] += " [قوطع الكلام قبل اكتماله؛ قد لا يكون الزبون سمع آخر العبارة]"
+                spoken[-1] += " [قوطع الكلام قبل اكتماله؛ لا تعد ما قلته بنفس الصياغة، تابع من حيث وصلت]"
             raise
         await self._send({"type": "transcript", "role": "agent", "text": text})
 
