@@ -8,6 +8,7 @@ __pycache__/
 app/features/district_correction/data/*.sqlite3
 app/features/district_correction/data/*.jsonl
 app/features/district_correction/data/*.tmp
+app/features/district_correction/data/reranker/
 benchmark-results/
 
 # District model workspace: generated batches, errors and trained models

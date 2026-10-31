@@ -196,7 +196,7 @@ Content-Type: application/json
 
 | المتغير | المعنى |
 |---|---|
-| `DISTRICT_RERANKER_PATH` | مجلد النموذج، مثل `training/models/reranker`؛ فارغ = معطّل والخدمة تعمل بالقواعد والـLLM فقط |
+| `DISTRICT_RERANKER_PATH` | مجلد النموذج؛ الافتراضي `app/features/district_correction/data/reranker` (خارج git، لازم يُرفع للسيرفر يدويًا)؛ فارغ صراحةً = معطّل والخدمة تعمل بالقواعد والـLLM فقط |
 | `DISTRICT_RERANKER_MODE` | `decide` (الافتراضي) أو `shadow` |
 | `DISTRICT_RERANKER_LOG_PATH` | ملف السجل؛ الافتراضي `app/features/district_correction/data/reranker_shadow.jsonl` |
 
