@@ -19,6 +19,19 @@ BASH = (
 )
 
 
+def test_voxtral_tokenizer_can_reach_the_hub():
+    # Without hf-hub, pip never sees mistral-common's floor; an older hub then
+    # fails only at boot, reported as huggingface_hub not being installed.
+    pinned = {}
+    for line in (ROOT / "requirements-gpu.txt").read_text(encoding="utf-8").splitlines():
+        if line.strip() and not line.lstrip().startswith("#"):
+            req = Requirement(line.strip())
+            pinned[req.name] = req
+    assert "hf-hub" in pinned["mistral-common"].extras
+    hub_version = str(pinned["huggingface_hub"].specifier).removeprefix("==")
+    assert Requirement("huggingface_hub>=1.31.0").specifier.contains(hub_version)
+
+
 @pytest.mark.skipif(not BASH or not Path(BASH).is_file(), reason="Bash is required")
 @pytest.mark.parametrize("pip_status", [0, 19])
 def test_vllm_install_preserves_pins_and_cleans_up_constraints(tmp_path, pip_status):
