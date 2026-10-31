@@ -1,6 +1,6 @@
 #!/bin/bash
 # vLLM + FastAPI/Pipecat, one voice process and one lazily loaded TTS instance.
-# Arabic Whisper handles speech; Qwen3.5 handles dialogue. See docs/pipecat-native-audio.md for memory sizing.
+# Arabic Voxtral handles speech; Qwen3.5 handles dialogue. See docs/pipecat-native-audio.md for memory sizing.
 # Ubuntu 22.04's Python 3.10 is upgraded into an isolated managed 3.12 environment.
 set -Ee
 cd "$(dirname "$0")"

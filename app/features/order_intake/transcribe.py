@@ -1,4 +1,4 @@
-"""Decode voice notes and transcribe chunks with the shared Arabic Whisper."""
+"""Decode voice notes and transcribe chunks with the shared Arabic Voxtral."""
 
 import asyncio
 import io
@@ -81,5 +81,5 @@ async def transcribe(audio_bytes: bytes) -> str:
         status = "ok" if transcript else "empty"
         return transcript
     finally:
-        logger.info("audio_transcription_end engine=whisper status=%s chunks=%d elapsed_ms=%d",
+        logger.info("audio_transcription_end engine=voxtral status=%s chunks=%d elapsed_ms=%d",
                     status, chunks, int((time.monotonic() - started) * 1000))

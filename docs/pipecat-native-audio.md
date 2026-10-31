@@ -1,12 +1,12 @@
-# بنية الصوت: Whisper وQwen3.5 وPipecat
+# بنية الصوت: Voxtral وQwen3.5 وPipecat
 
 ## مسار المكالمة
 
-`PCM 16kHz → VAD → openai/whisper-large-v3 → نص → Qwen/Qwen3.5-9B → Pipecat → F5-TTS (Habibi-TTS MSA) → PCM`
+`PCM 16kHz → VAD → mistralai/Voxtral-Mini-4B-Realtime-Arabic → نص → Qwen/Qwen3.5-9B → Pipecat → F5-TTS (Habibi-TTS MSA) → PCM`
 
-Qwen مسؤول عن الحوار والأدوات والصور، وWhisper عن نسخ كلام الزبون. لا يُرسل `input_audio` إلى Qwen، ولا نطلب من نموذج الحوار إعادة نسخ الكلام قبل الإجابة.
+Qwen مسؤول عن الحوار والأدوات والصور، وVoxtral عن نسخ كلام الزبون. لا يُرسل `input_audio` إلى Qwen، ولا نطلب من نموذج الحوار إعادة نسخ الكلام قبل الإجابة.
 
-- `app/features/voice_followup/stt.py`: نسخة Whisper واحدة داخل عملية FastAPI. التحميل والاستدلال محميان بقفل ويعملان خارج حلقة الأحداث؛ CUDA بـ float16 عند توفرها، وCPU بـ float32 خلاف ذلك.
+- `app/features/voice_followup/stt.py`: نسخة Voxtral واحدة داخل عملية FastAPI. التحميل والاستدلال محميان بقفل ويعملان خارج حلقة الأحداث، بدقة BF16 على CUDA وCPU. النموذج متدفق بطبيعته، لكن كل مقطع بعد VAD يُنسخ كاملاً بالوضع غير المتدفق، فبقي مسار المكالمة كما هو.
 - `app/features/order_intake/transcribe.py`: الرسائل المرفوعة تستخدم نفس النسخة، بقطع 28 ثانية مع ثانية تراكب حتى 10 دقائق.
 - `app/features/voice_followup/stream.py`: تاريخ نصي لكل مكالمة، وأحداث نسخ منفصلة للزبون. تُحفظ المقاطع المتتابعة ويبدأ الرد عندما يسكت الزبون.
 - Pipecat يقرأ تدفق Qwen ويجمع العبارات وينطقها ويرسلها بالتوازي. تبقى المقاطعة وإلغاء التوليد وتفريغ صوت العميل متاحة قبل إنهاء المكالمة.
@@ -27,9 +27,10 @@ Qwen مسؤول عن الحوار والأدوات والصور، وWhisper عن
 
 | الإعداد | الافتراضي | الوظيفة |
 |---|---|---|
+| `STT_MODEL` | `mistralai/Voxtral-Mini-4B-Realtime-Arabic` | مستودع نموذج Voxtral Realtime |
 | `STT_DEVICE` | `auto` | اختيار `cpu` أو `cuda` صراحةً عند الحاجة |
-| `STT_TIMEOUT_SECONDS` | `30` | مهلة النسخ، شاملة انتظار نسخة Whisper المشتركة |
-| `VOICE_STREAM_WARMUP` | مفعّل على GPU | تحميل وتجربة Whisper وF5-TTS بعد جاهزية vLLM |
+| `STT_TIMEOUT_SECONDS` | `30` | مهلة النسخ، شاملة انتظار نسخة Voxtral المشتركة |
+| `VOICE_STREAM_WARMUP` | مفعّل على GPU | تحميل وتجربة Voxtral وF5-TTS بعد جاهزية vLLM |
 | `VOICE_STREAM_END_SILENCE_MS` | `400` | نهاية دور الزبون |
 | `VOICE_STREAM_FIRST_PHRASE_CHARS` | `56` | بدء نطق أول عبارة مبكراً |
 | `VOICE_STREAM_LLM_MAX_TOKENS` | `1024` | يتيح اكتمال JSON النتيجة لعدة أسئلة؛ طول الكلام تضبطه تعليمات الحوار |
@@ -40,14 +41,14 @@ Qwen مسؤول عن الحوار والأدوات والصور، وWhisper عن
 
 ## الذاكرة والتحقق
 
-أوزان 9 مليارات معلمة ذات بايتين تحتاج تقريباً 18GB عشرية، قبل ذاكرة الرؤية وKV وCUDA وWhisper وF5-TTS. حجز KV الافتراضي 4GiB ليس حداً لذاكرة الخادم كلها. افحص الذاكرة على جهاز النشر، ولا تعتبر GPU بذاكرة 24GB مضمون الكفاية لهذه البنية.
+أوزان 9 مليارات معلمة ذات بايتين تحتاج تقريباً 18GB عشرية، قبل ذاكرة الرؤية وKV وCUDA وVoxtral وF5-TTS. أوزان Voxtral BF16 تحتاج نحو 8.9GB (مقابل نحو 3.1GB لـ Whisper السابق). مجموع Qwen وKV وVoxtral وحده نحو 31GB، فلا تكفي GPU بذاكرة 24GB لتشغيل الموديلات كلها معاً. حجز KV الافتراضي 4GiB ليس حداً لذاكرة الخادم كلها؛ افحص الذاكرة على جهاز النشر.
 
-`GET /health/voice` لا يحمّل أي نموذج. يعرض `input_mode: whisper` و`stt` و`llm` و`tts` و`warmup` و`gpu` و`last_call`. قبل `ready` تُفحص تبعيات النسخ والنطق، ويُنتظر التحميل المسبق عند تفعيله.
+`GET /health/voice` لا يحمّل أي نموذج. يعرض `input_mode: voxtral` و`stt` و`llm` و`tts` و`warmup` و`gpu` و`last_call`. قبل `ready` تُفحص تبعيات النسخ والنطق، ويُنتظر التحميل المسبق عند تفعيله.
 
 إحصاءات الصوت: `stt_empty` و`stt_errors` و`stt_error_type` و`user_transcripts`. اللوق `voice_turn_end` يتضمن `stt_ms` و`first_token_ms` و`first_audio_ms` و`tts_ms` و`total_ms`؛ المقاييس تبدأ عند نهاية كلام الزبون. الأرقام لا تتضمن النص أو بيانات الاتصال.
 
-الاختبارات تستخدم نماذج وهمية وتتحقق من النسخة المشتركة، ومسار النص، والمقاطعة، والحفظ، والوداع، والإغلاق. فُحص معالج Whisper الحقيقي مع Transformers 5.14.1 دون تنزيل الأوزان، مع تصفية صريحة لمعرّفات الوسوم الخاصة قبل فك النص لأن بيانات المُرمّز القديمة قد تُبقيها رغم `skip_special_tokens`.
+الاختبارات تستخدم نماذج وهمية وتتحقق من النسخة المشتركة، ومسار النص، والمقاطعة، والحفظ، والوداع، والإغلاق. كما فُحص `stt.py` بالأوزان الحقيقية مع Transformers 5.14.1 وmistral-common 1.13.0 على CPU، باستخدام عيّنة النموذج الرسمية (دارجة مغربية مع فرنسية): خرج النص سليماً بلا وسوم خاصة، والضوضاء أرجعت نصاً فارغاً. طول التوليد تحدده مدة الصوت، ولم يظهر رمز EOS في أي مخرجات، لذلك لا يوجد فحص اقتطاع يعتمد عليه.
 
-لم تُقَس سرعة الاستدلال أو جودة فهم اللهجة على GPU فعلي. للتحقق بعد النشر: راقب جاهزية النموذجين، جرّب إجابة تغطي أكثر من سؤال وتصحيحاً ومقاطعة، ثم تأكد من تسلسل `outcome → الوداع → end_call` دون سؤال إضافي.
+زمن CPU المقاس نحو 5.6 ضعف مدة الصوت (25 ثانية صوت = 142 ثانية على 24 خيطاً)، فيتجاوز `STT_TIMEOUT_SECONDS` الافتراضي مع المقاطع الأطول من 5 ثوانٍ تقريباً؛ المكالمات تحتاج GPU عملياً. لم تُقَس سرعة الاستدلال على GPU فعلي، ولا جودة فهم اللهجة العراقية. للتحقق بعد النشر: راقب جاهزية النموذجين، جرّب إجابة تغطي أكثر من سؤال وتصحيحاً ومقاطعة، ثم تأكد من تسلسل `outcome → الوداع → end_call` دون سؤال إضافي.
 
-المراجع: [بطاقة Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B)، [بطاقة Whisper العربي](https://huggingface.co/openai/whisper-large-v3)، [توثيق Whisper](https://huggingface.co/docs/transformers/model_doc/whisper).
+المراجع: [بطاقة Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B)، [بطاقة Voxtral العربي](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-Arabic)، [توثيق Voxtral Realtime](https://huggingface.co/docs/transformers/model_doc/voxtral_realtime).

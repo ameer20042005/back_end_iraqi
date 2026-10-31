@@ -9,7 +9,7 @@
     └─────────────────────┘         └──────────────────────────────┘
 
 يثبّت start.sh نسخة vLLM تدعم Qwen3.5، مع محلّل qwen3_coder للأدوات.
-فهم الصوت مستقل عبر Whisper داخل FastAPI — انظر docs/pipecat-native-audio.md.
+فهم الصوت مستقل عبر Voxtral داخل FastAPI — انظر docs/pipecat-native-audio.md.
 هذا يستبدل آلية transformers.generate() + micro-batching اليدوي السابقة
 بالكامل: vLLM يدير PagedAttention وcontinuous batching داخلياً، فمئات
 الطلبات المتزامنة تتقاسم الـ GPU تلقائياً بدون طوابير يدوية.

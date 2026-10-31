@@ -6,7 +6,7 @@ OpenAI متوافقة، استخراج طلب من نص/صوت/صورة، مكا
 
 يشتغل محلياً، وعلى RunPod بصورة `ubuntu:22.04` خام: `start.sh` يبني كل شي من
 الصفر بأول إقلاع (Python/pip، vLLM 0.28.0 مع torch 2.13.0 (إصدارات مثبّتة في requirements-vllm.txt)،
-ffmpeg/libsndfile1، Whisper للنسخ وF5-TTS العراقي للنطق).
+ffmpeg/libsndfile1، Voxtral للنسخ وF5-TTS العراقي للنطق).
 
 ## الميزات
 
@@ -75,8 +75,8 @@ LLM_MODEL=<model-id> LLM_BASE_URL=http://localhost:11434/v1 bash start_local.sh 
 | `CATALOG_PATH_*` | مسارات `ai_agent` | كل مسار Catalog قابل للتغيير (`CATALOG_PATH_CALL_OUTCOME` فارغ = ما ترسل النتيجة) |
 | `SYSTEM_BACKEND_CALL_OUTCOME_PATH` | `/calls/outcome` | فارغ = ما ترسل نتيجة المكالمة لباك اند السستم |
 | `VOICE_STREAM_*` | انظر التوثيق | الوكيل المحلي عبر WebSocket (`/voice_followup/stream`): السقف، VAD، المهلات |
-| `VOICE_STREAM_AGC` | `1` | تطبيع مستوى صوت الزبون قبل VAD وWhisper (`VOICE_STREAM_AGC_TARGET_DBFS`=-20، `VOICE_STREAM_AGC_MAX_GAIN_DB`=20) |
-| `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1`/`0`: تحميل Whisper وF5-TTS عند إقلاع uvicorn (بعد جاهزية vLLM) بدل أول مكالمة |
+| `VOICE_STREAM_AGC` | `1` | تطبيع مستوى صوت الزبون قبل VAD وVoxtral (`VOICE_STREAM_AGC_TARGET_DBFS`=-20، `VOICE_STREAM_AGC_MAX_GAIN_DB`=20) |
+| `VOICE_STREAM_WARMUP` | غير مضبوط = على GPU بس | `1`/`0`: تحميل Voxtral وF5-TTS عند إقلاع uvicorn (بعد جاهزية vLLM) بدل أول مكالمة |
 | `GPU_MEMORY_UTILIZATION` | `0.85` | حصة vLLM من ذاكرة الكرت؛ الباقي لموديلات الصوت. `start.sh` يحترمه (انظر ميزانية الذاكرة بـ [voice-followup.md](docs/api/voice-followup.md)) |
 | `TTS_POOL_SIZE` | `2` | عدد نسخ F5-TTS؛ على A40 مشترك مع vLLM `1` |
 

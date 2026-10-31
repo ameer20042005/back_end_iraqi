@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Whisper -> Qwen -> Pipecat/F5-TTS over the WhatsApp PCM WebSocket contract.
+"""Voxtral -> Qwen -> Pipecat/F5-TTS over the WhatsApp PCM WebSocket contract.
 
-Whisper transcribes once; Qwen receives text and manages the dialogue and tools.
+Voxtral transcribes once; Qwen receives text and manages the dialogue and tools.
 Pipecat pipelines LLM tokens, phrase aggregation, F5-TTS and paced PCM.
 Only accepted WhatsApp calls receive speech; opening synthesis can run while ringing.
 """
@@ -52,7 +52,7 @@ SEND_TIMEOUT_SECONDS = 5.0
 
 OPENING_PREFIX = "(تعليمات داخلية من النظام، مو كلام الزبون) "
 
-# صدى الـ agent: صوته يرجع من سماعة تلفون الزبون ويتحول بـ Whisper لكلام "زبون"،
+# صدى الـ agent: صوته يرجع من سماعة تلفون الزبون ويتحول بـ Voxtral لكلام "زبون"،
 # فيرد عليه النموذج ويعيد نفس الجملة. التطبيق يشغّل الصوت متأخراً شوي عن
 # _playback_until (buffer + شبكة)، فالمقطع اللي يبدأ خلال هالذيل يعتبر متداخلاً.
 ECHO_TAIL_SECONDS = 1.5
@@ -292,7 +292,7 @@ class StreamCall:
         self._sent_outcome = False
         self._tts_failures = 0
         self._fallback_summary: Optional[str] = None
-        self.input_mode = "whisper"
+        self.input_mode = "voxtral"
         self._transcribing = False
         self._input_revision = 0
         self._stt_failures = 0
@@ -916,7 +916,7 @@ async def serve(ws: WebSocket) -> None:
             await _reject(ws, CLOSE_UNAVAILABLE, "stt_unavailable", "خدمة التعرف على الصوت غير متوفرة على الخادم")
             return
         if voice_health.warmup_enabled() and not stt_status["loaded"]:
-            await _reject(ws, CLOSE_UNAVAILABLE, "voice_warming", "الخادم يجهّز Whisper؛ أعد المحاولة بعد اكتمال التحميل")
+            await _reject(ws, CLOSE_UNAVAILABLE, "voice_warming", "الخادم يجهّز Voxtral؛ أعد المحاولة بعد اكتمال التحميل")
             return
     _active_calls += 1
     try:

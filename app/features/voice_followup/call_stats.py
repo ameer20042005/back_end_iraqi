@@ -8,8 +8,8 @@
     sample_rate_mismatch  معدل الصوت الفعلي بعيد عن sample_rate المعلن
     too_quiet             الصوت واصل بس مستواه واطي جداً وVAD ما لگى كلام
     vad_no_speech         الصوت مسموع (مستوى معقول) بس VAD ما صنّف ولا نافذة كلام
-    stt_error             Whisper يرمي استثناء لكل مقطع
-    stt_empty         مقاطع تروح لـ Whisper وترجع نص فارغ
+    stt_error             Voxtral يرمي استثناء لكل مقطع
+    stt_empty         مقاطع تروح لـ Voxtral وترجع نص فارغ
     no_speech_yet         المكالمة بعدها، ماكو كلام لحد الآن
     ok                    وصل نص من الزبون
 """

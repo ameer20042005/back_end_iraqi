@@ -275,7 +275,7 @@ def test_barge_in_interrupts_the_agent(env):
 
 def test_agent_echo_is_not_a_customer_turn_and_the_agent_resumes(env):
     llm = ScriptedLLM("hang", [{"text": "هل وصلك الطلب؟"}])
-    # صوت الـ agent راجع من سماعة الزبون وWhisper نسخه.
+    # صوت الـ agent راجع من سماعة الزبون وVoxtral نسخه.
     env(llm, stt=FakeSTT("وياك سارة من متجر النور"))
     with connect(TestClient(main.app)) as ws:
         start(ws)

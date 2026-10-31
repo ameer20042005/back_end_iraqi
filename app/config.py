@@ -40,7 +40,7 @@ class TextToSpeechModel:
 
 @dataclass(frozen=True)
 class Settings:
-    # Qwen3.5-9B للنص والصور؛ Whisper مستقل لفهم الصوت.
+    # Qwen3.5-9B للنص والصور؛ Voxtral مستقل لفهم الصوت.
     # يخدم Qwen خادم vLLM منفصل (انظر start.sh) —
     # القيمة هنا تُستخدم باسم الموديل بطلبات /v1/chat/completions ويقرأها
     # start.sh لتمريرها لـ `vllm serve`.
@@ -63,12 +63,12 @@ class Settings:
     llm_request_timeout_seconds: float = field(
         default_factory=lambda: float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS") or "120"))
 
-    # Qwen وWhisper وF5-TTS مستودعات عامة؛ لا تحتاج توكن للتنزيل.
+    # Qwen وVoxtral وF5-TTS مستودعات عامة؛ لا تحتاج توكن للتنزيل.
 
     # vLLM weights, activations and KV are separate allocations. By default
     # reserve 4 GiB for KV, rather than allocating a fraction of the whole GPU.
     # GPU_MEMORY_UTILIZATION applies only when KV_CACHE_MEMORY_GB=0.
-    # The rest is left for Whisper, F5-TTS and CUDA runtime/encoder overhead.
+    # The rest is left for Voxtral, F5-TTS and CUDA runtime/encoder overhead.
     gpu_memory_utilization: float = field(default_factory=_gpu_memory_utilization)
     max_model_len: int = 32768
     max_num_seqs: int = field(default_factory=lambda: max(1, int(os.getenv("VLLM_MAX_NUM_SEQS") or "16")))
@@ -204,15 +204,15 @@ class Settings:
     tts_pool_size: int = field(default_factory=lambda: max(1, int(os.getenv("TTS_POOL_SIZE") or "1")))
     # الوكيل المحلي عبر WebSocket (app/features/voice_followup/stream.py):
     # تطبيق سطح المكتب يتصل بالزبون من رقم الواتساب مالته ويبث صوت المكالمة
-    # لـ WS /voice_followup/stream، والحوار عبر Whisper ثم Qwen ثم F5-TTS.
+    # لـ WS /voice_followup/stream، والحوار عبر Voxtral ثم Qwen ثم F5-TTS.
     # يعيش بعملية uvicorn نفسها عبر Pipecat.
     # أقصى مكالمات WebSocket متزامنة؛ بعدها الاتصال يُرفض بـ busy (4429).
     voice_stream_max_calls: int = field(default_factory=lambda: max(1, int(
         os.getenv("VOICE_STREAM_MAX_CALLS") or os.getenv("VOICE_MAX_CALLS") or "10")))
-    # Shared Whisper instance for live calls and uploaded voice notes.
-    # whisper-large-v3 الكامل (1.55 مليار معامل): أدق نموذج Whisper للعربية
-    # واللهجات. لزمن أقل على GPU ضعيف: STT_MODEL=openai/whisper-large-v3-turbo.
-    stt_model: str = field(default_factory=lambda: os.getenv("STT_MODEL") or "openai/whisper-large-v3")
+    # Shared Voxtral instance for live calls and uploaded voice notes.
+    # Voxtral Mini 4B Realtime Arabic (4.4 مليار معامل BF16، نحو 8.9GB): للفصحى
+    # واللهجات ومنها العراقية، مع خلط اللغات. تقرأه stt.py من مستودعه مباشرة.
+    stt_model: str = field(default_factory=lambda: os.getenv("STT_MODEL") or "mistralai/Voxtral-Mini-4B-Realtime-Arabic")
     stt_device: str = field(default_factory=lambda: os.getenv("STT_DEVICE") or "auto")
     stt_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("STT_TIMEOUT_SECONDS") or "30"))
     call_outcome_submit_timeout_seconds: float = 2.0

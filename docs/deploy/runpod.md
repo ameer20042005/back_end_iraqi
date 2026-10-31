@@ -126,7 +126,7 @@ https://<POD_ID>-8000.proxy.runpod.net/test
 
 ### توصية اختيار GPU
 
-الموديل الافتراضي `Qwen/Qwen3.5-9B` يستخدم نحو 18GB عشرية للأوزان ذات البايتين، إضافة إلى KV (4GiB افتراضياً) وCUDA والرؤية وWhisper وF5-TTS. احسب مجموع هذه الحجوزات قبل اختيار الذاكرة؛ 24GB ليست ضماناً للكفاية. راجع [بنية الصوت وميزانية الذاكرة](../pipecat-native-audio.md).
+الموديل الافتراضي `Qwen/Qwen3.5-9B` يستخدم نحو 18GB عشرية للأوزان ذات البايتين، إضافة إلى KV (4GiB افتراضياً) وVoxtral (نحو 8.9GB) وCUDA والرؤية وF5-TTS. مجموع Qwen وKV وVoxtral وحده نحو 31GB، فلا تكفي 24GB لتشغيل الموديلات كلها على GPU واحد. احسب مجموع هذه الحجوزات قبل اختيار الذاكرة. راجع [بنية الصوت وميزانية الذاكرة](../pipecat-native-audio.md).
 
 ---
 
@@ -335,4 +335,4 @@ assert len(t) > 100000
 "
 ```
 
-للتأكد من الصوت: افتح `/health/voice` وتحقق من `stt.model: openai/whisper-large-v3` ومن `stt.loaded` و`tts.loaded` بعد التحميل المسبق. `STT_DEVICE=cpu` يتيح نقل Whisper إلى CPU عند الحاجة، لكن زمنه يحتاج قياساً على جهازك. التفاصيل في [بنية الصوت](../pipecat-native-audio.md).
+للتأكد من الصوت: افتح `/health/voice` وتحقق من `stt.model: mistralai/Voxtral-Mini-4B-Realtime-Arabic` ومن `stt.loaded` و`tts.loaded` بعد التحميل المسبق. `STT_DEVICE=cpu` ينقل Voxtral إلى CPU، لكنه يستغرق نحو 5.6 ضعف مدة الصوت (قياس على 24 خيطاً)، فلا يناسب المكالمات الحية مع مهلة `STT_TIMEOUT_SECONDS` الافتراضية. التفاصيل في [بنية الصوت](../pipecat-native-audio.md).

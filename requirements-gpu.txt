@@ -7,7 +7,7 @@
 # من app/core/engine.py، ومعها peft (دمج LoRA صار بالنوتبوك حصراً — الموديل
 # المرفوع مدموج جاهز) وbitsandbytes (كانت للتكميم، غير مستخدمة).
 #
-# transformers loads the shared Arabic Whisper ASR alongside F5-TTS/vLLM.
+# transformers loads the shared Arabic Voxtral ASR alongside F5-TTS/vLLM.
 #
 # ⚠️ كل الإصدارات أدناه مثبَّتة (==) بالضبط، لا حدود دنيا/عليا (>=/<) —
 # لا تفتحها مرة ثانية. السبب (عطل حقيقي وقع 2026-07-26): سقف مفتوح خلّى
@@ -31,6 +31,10 @@ transformers==5.14.1
 # المفردات بنفس الشكل. 0.22.2 هو أعلى إصدار يقبله transformers==5.14.1
 # (يشترط tokenizers<=0.23.0,>=0.22.0 ولا يوجد 0.23.0 مستقر على PyPI).
 tokenizers==0.22.2
+
+# معالج Voxtral ومُرمِّزه (app/features/voice_followup/stt.py): tekken.json
+# والحشو الصوتي من mistral-common. vllm 0.28.0 يشترط منه >=1.11.6.
+mistral-common[audio]==1.13.0
 
 # فك ترميز الصورة المرفوعة (app/features/order_intake/vision.py) — التحويل
 # لـ data URI يصير بـ app/core/engine.py والاستدلال البصري عند خادم vLLM.

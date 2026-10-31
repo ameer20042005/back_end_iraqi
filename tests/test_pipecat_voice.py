@@ -286,7 +286,7 @@ def test_real_dependencies_are_checked_before_rust_is_told_to_dial(monkeypatch, 
 
 
 @pytest.mark.parametrize("installed,code", [(False, "stt_unavailable"), (True, "voice_warming")])
-def test_whisper_is_checked_before_the_customer_is_dialed(monkeypatch, installed, code):
+def test_voxtral_is_checked_before_the_customer_is_dialed(monkeypatch, installed, code):
     from app.features.voice_followup import stt, tts, voice_health
     monkeypatch.setattr(stream, "deps", None)
     monkeypatch.setattr(main.llm_engine, "_ready", True)

@@ -62,8 +62,8 @@
 - **المكتبات**: `start.sh` يبني كل شي من الصفر على Ubuntu 22.04 خام بأول إقلاع — Python/pip وأدوات بناء، متطلبات FastAPI (`requirements.txt`/`requirements-gpu.txt`، بإصدارات مثبَّتة بالضبط)، `ffmpeg`/`libsndfile1`، وأخيراً vLLM وtorch بإصدارات مثبّتة في `requirements-vllm.txt`. كل إقلاع يحذف `.venv-pipecat` وكاش الموديلات ويعيد تنزيلهما (`FRESH_START=0` يتخطى الحذف).
 - **الموديل المدموج** (`MODEL_NAME`): ينزّله خادم vLLM من Hugging Face Hub أول إقلاع ([start.sh](../start.sh))، ويُخزَّن بذاكرة التخزين المؤقت (`~/.cache/huggingface` أو `HF_HOME`) فيُعاد استخدامه بالتشغيلات اللاحقة على نفس الـ pod/volume بدون إعادة تنزيل.
 - **موديلات الصوت**: اختيار الموديلات العربية صار مركزياً في `app/config.py` عبر
-  `stt_model()` و`tts_model()`. ينزّل `transformers.pipeline` موديل
-  التحويل العربي تلقائياً أول استخدام (أول طلب أبطأ بسبب التنزيل، بعدها من
-  الكاش)، ويُحمَّل على الـ GPU بنصف الدقة إن توفّر مع تقطيع تلقائي كل 30 ثانية.
+  `stt_model` و`tts_model()`. تنزّل `transformers` موديل التحويل العربي
+  (Voxtral) تلقائياً أول استخدام (أول طلب أبطأ بسبب التنزيل، بعدها من الكاش)،
+  ويُحمَّل بدقة BF16، والرسائل المرفوعة تُقطَّع إلى مقاطع 28 ثانية.
 
-**لا حاجة لتوكن Hugging Face:** كل المستودعات المستعملة (`google/gemma-4-E4B-it`، `SWivid/Habibi-TTS` وWhisper) عامة وغير gated، فتُنزَّل بلا مصادقة. لو بيئة الـ Pod فيها `HF_TOKEN` قديم يسبب خطأ 401، فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ [start.sh](../start.sh).
+**لا حاجة لتوكن Hugging Face:** كل المستودعات المستعملة (`google/gemma-4-E4B-it`، `SWivid/Habibi-TTS` و`mistralai/Voxtral-Mini-4B-Realtime-Arabic`) عامة وغير gated، فتُنزَّل بلا مصادقة. لو بيئة الـ Pod فيها `HF_TOKEN` قديم يسبب خطأ 401، فعّل كتلة `unset HF_TOKEN ...` المعلّقة بـ [start.sh](../start.sh).

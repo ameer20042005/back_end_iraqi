@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""صحة موديلات الصوت (Whisper + F5-TTS) بعملية uvicorn: تصنيف أسباب الفشل،
+"""صحة موديلات الصوت (Voxtral + F5-TTS) بعملية uvicorn: تصنيف أسباب الفشل،
 ذاكرة الـ GPU، حالة التحميل المسبق، وملخّص GET /health/voice.
 
 **ما يحمّل أي موديل:** `voice_status()` تقرأ الحالة بس. التحميل الوحيد هنا
@@ -115,13 +115,13 @@ _warmup = {"state": "pending", "tts": None, "stt": None, "seconds": None}
 
 
 def warmup_voice_models() -> dict:
-    """يجهّز Whisper وF5-TTS قبل أول مكالمة، ويسجّل الفشل بوضوح."""
+    """يجهّز Voxtral وF5-TTS قبل أول مكالمة، ويسجّل الفشل بوضوح."""
     from app.features.voice_followup import tts, stt
 
     with _warmup_lock:
         _warmup.update(state="running", tts=None, stt=None, seconds=None)
         started = time.monotonic()
-        mode = "whisper"
+        mode = "voxtral"
         stt_ok = stt.warmup()
         tts_ok = tts.warmup()
         _warmup.update(state="done" if tts_ok and stt_ok else "failed", tts=tts_ok, stt=stt_ok,
@@ -129,7 +129,7 @@ def warmup_voice_models() -> dict:
         if tts_ok and stt_ok:
             logger.info("✅ موديلات صوت المكالمات جاهزة (%.1f ثانية)", _warmup["seconds"])
         else:
-            logger.error("🛑 فشل التحميل المسبق لموديلات صوت المكالمات: tts=%s whisper=%s %s — "
+            logger.error("🛑 فشل التحميل المسبق لموديلات صوت المكالمات: tts=%s voxtral=%s %s — "
                          "التفاصيل بـ GET /health/voice", tts_ok, stt_ok, gpu_memory())
         return {**_warmup, "input_mode": mode}
 
@@ -160,7 +160,7 @@ def voice_status() -> dict:
 
     tts_status, warm = tts.status(), warmup_state()
     stt_status = stt.status()
-    mode = "whisper"
+    mode = "voxtral"
     last = tts_status.get("last_synthesis") or {}
     from app.core.engine import llm_engine
 

@@ -117,7 +117,7 @@ X-API-Key: <مفتاح الخدمة المستهدفة>
 ```
 
 ### `GET /health/voice`
-حالة موديلات صوت المكالمات (F5-TTS + Whisper) بعملية uvicorn — بلا تحميل أي موديل.
+حالة موديلات صوت المكالمات (F5-TTS + Voxtral) بعملية uvicorn — بلا تحميل أي موديل.
 التفاصيل والحقول: [voice-followup.md](voice-followup.md#فحص-صحة-الصوت--get-healthvoice).
 
 ### `GET /gpu`

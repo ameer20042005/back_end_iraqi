@@ -27,11 +27,11 @@ def test_single_model_audio_and_tts_memory_defaults(monkeypatch):
     assert settings.tts_model().repository == "SWivid/Habibi-TTS"
     assert settings.tts_model().reference_audio == "reference/MSA.wav"
     assert settings.model_name == "Qwen/Qwen3.5-9B"
-    assert settings.stt_model == "openai/whisper-large-v3"
+    assert settings.stt_model == "mistralai/Voxtral-Mini-4B-Realtime-Arabic"
     assert settings.tts_pool_size == 1 and settings.kv_cache_memory_gb == 4 and settings.max_num_seqs == 16
 
 
-def test_voice_notes_share_whisper_and_keep_all_long_recording_chunks(monkeypatch):
+def test_voice_notes_share_voxtral_and_keep_all_long_recording_chunks(monkeypatch):
     seen = []
 
     async def transcription(samples, sample_rate):
@@ -58,7 +58,7 @@ def test_voice_note_invalid_audio_and_truncation_fail_explicitly(monkeypatch):
         asyncio.run(module.decode_audio(wav(601)))
 
 
-def test_whisper_transcription_errors_propagate(monkeypatch):
+def test_voxtral_transcription_errors_propagate(monkeypatch):
     async def broken(*args, **kwargs):
         raise RuntimeError("model_unavailable")
 

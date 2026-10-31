@@ -22,7 +22,7 @@ from app.features.voice_followup import tts, stt, voice_health
 @pytest.fixture(autouse=True)
 def native_model_ready(monkeypatch):
     monkeypatch.setattr(main.llm_engine, "_ready", True)
-    monkeypatch.setattr(stt, "status", lambda: {"engine": "whisper", "model": config.settings.stt_model,
+    monkeypatch.setattr(stt, "status", lambda: {"engine": "voxtral", "model": config.settings.stt_model,
                                                "installed": True, "loaded": False, "last_transcription": None})
     monkeypatch.setattr(stt, "warmup", lambda: True)
 
